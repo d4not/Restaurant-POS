@@ -11,6 +11,11 @@ import { storageRouter } from './modules/storages/routes.js';
 import { supplyRouter } from './modules/supplies/routes.js';
 import { purchasePackagingRouter } from './modules/purchase-packagings/routes.js';
 import { purchaseRouter } from './modules/purchases/routes.js';
+import { transferRouter } from './modules/transfers/routes.js';
+import { inventoryCheckRouter } from './modules/inventory-checks/routes.js';
+import { writeOffRouter } from './modules/write-offs/routes.js';
+import { stockMovementRouter } from './modules/stock-movements/routes.js';
+import { deductionRuleRouter } from './modules/deduction-rules/routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -42,6 +47,11 @@ export function createApp(): Express {
   app.use('/api/v1/supplies', supplyRouter);
   app.use('/api/v1/packagings', purchasePackagingRouter);
   app.use('/api/v1/purchases', purchaseRouter);
+  app.use('/api/v1/transfers', transferRouter);
+  app.use('/api/v1/inventory-checks', inventoryCheckRouter);
+  app.use('/api/v1/write-offs', writeOffRouter);
+  app.use('/api/v1/stock-movements', stockMovementRouter);
+  app.use('/api/v1/deduction-rules', deductionRuleRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

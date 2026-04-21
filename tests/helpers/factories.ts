@@ -68,3 +68,41 @@ export async function makePackaging(overrides: {
     },
   });
 }
+
+// Seed stock without going through a purchase — useful for tests that assert
+// behavior of transfers, write-offs, and inventory adjustments in isolation.
+export async function seedStock(overrides: {
+  supply_id: string;
+  storage_id: string;
+  quantity: number;
+  min_stock?: number;
+  average_cost?: number;
+}) {
+  await prisma.storageStock.upsert({
+    where: {
+      supply_id_storage_id: {
+        supply_id: overrides.supply_id,
+        storage_id: overrides.storage_id,
+      },
+    },
+    create: {
+      supply_id: overrides.supply_id,
+      storage_id: overrides.storage_id,
+      quantity: overrides.quantity,
+      min_stock: overrides.min_stock ?? null,
+    },
+    update: {
+      quantity: overrides.quantity,
+      min_stock: overrides.min_stock ?? null,
+    },
+  });
+  if (overrides.average_cost !== undefined) {
+    await prisma.supply.update({
+      where: { id: overrides.supply_id },
+      data: {
+        average_cost: overrides.average_cost,
+        last_cost: overrides.average_cost,
+      },
+    });
+  }
+}
