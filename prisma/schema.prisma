@@ -577,11 +577,16 @@ model ProductModifierGroup {
 }
 
 model Recipe {
-  id         String   @id @default(uuid()) @db.Uuid
-  product_id String?  @unique @db.Uuid
-  variant_id String?  @unique @db.Uuid
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id             String   @id @default(uuid()) @db.Uuid
+  product_id     String?  @unique @db.Uuid
+  variant_id     String?  @unique @db.Uuid
+  // Preparation recipes produce `yield_quantity` of `yield_unit` — required
+  // only when the recipe belongs to a PREPARATION product so that other
+  // recipes referencing it can compute cost per unit of yield.
+  yield_quantity Decimal? @db.Decimal(14, 4)
+  yield_unit     String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
   product Product?        @relation("ProductRecipe", fields: [product_id], references: [id], onDelete: Cascade)
   variant ProductVariant? @relation("VariantRecipe", fields: [variant_id], references: [id], onDelete: Cascade)

@@ -1,0 +1,373 @@
+import { ContentUnit, Prisma, ProductType } from '@prisma/client';
+import { prisma } from '../../lib/prisma.js';
+import { Decimal } from '../../lib/decimal.js';
+import { BadRequestError } from '../../lib/errors.js';
+
+type PrismaLike = Prisma.TransactionClient | typeof prisma;
+
+// --- Unit normalization -----------------------------------------------------
+
+const UNIT_ALIASES: Record<string, ContentUnit | 'PIECE'> = {
+  ml: ContentUnit.ML,
+  milliliter: ContentUnit.ML,
+  milliliters: ContentUnit.ML,
+  l: ContentUnit.L,
+  liter: ContentUnit.L,
+  liters: ContentUnit.L,
+  g: ContentUnit.G,
+  gram: ContentUnit.G,
+  grams: ContentUnit.G,
+  kg: ContentUnit.KG,
+  kilogram: ContentUnit.KG,
+  kilograms: ContentUnit.KG,
+  oz: ContentUnit.OZ,
+  ounce: ContentUnit.OZ,
+  ounces: ContentUnit.OZ,
+  'fl oz': ContentUnit.FL_OZ,
+  fl_oz: ContentUnit.FL_OZ,
+  floz: ContentUnit.FL_OZ,
+  'fluid ounce': ContentUnit.FL_OZ,
+  'fluid ounces': ContentUnit.FL_OZ,
+  piece: 'PIECE',
+  pieces: 'PIECE',
+  pc: 'PIECE',
+  pcs: 'PIECE',
+  unit: 'PIECE',
+  units: 'PIECE',
+};
+
+function normalizeUnit(raw: string): ContentUnit | 'PIECE' {
+  const key = raw.trim().toLowerCase();
+  const normalized = UNIT_ALIASES[key];
+  if (!normalized) {
+    throw new BadRequestError(`Unrecognized recipe unit: "${raw}"`);
+  }
+  return normalized;
+}
+
+// Family membership and conversion rates *to the canonical family unit*.
+// Volume canonical = ML, Weight canonical = G.
+const VOLUME_TO_ML: Partial<Record<ContentUnit, Decimal>> = {
+  [ContentUnit.ML]: new Decimal(1),
+  [ContentUnit.L]: new Decimal(1000),
+  [ContentUnit.FL_OZ]: new Decimal('29.5735'),
+};
+
+const WEIGHT_TO_G: Partial<Record<ContentUnit, Decimal>> = {
+  [ContentUnit.G]: new Decimal(1),
+  [ContentUnit.KG]: new Decimal(1000),
+  [ContentUnit.OZ]: new Decimal('28.3495'),
+};
+
+function familyOf(unit: ContentUnit): 'volume' | 'weight' {
+  if (VOLUME_TO_ML[unit] !== undefined) return 'volume';
+  if (WEIGHT_TO_G[unit] !== undefined) return 'weight';
+  throw new BadRequestError(`Unknown unit family: ${unit}`);
+}
+
+/**
+ * Convert `quantity` from unit `from` to unit `to`. Units must belong to the
+ * same measurement family (volume or weight). Cross-family (e.g. ml → g)
+ * would require density and is rejected.
+ */
+export function convertQuantity(
+  quantity: Decimal | string | number,
+  from: ContentUnit,
+  to: ContentUnit,
+): Decimal {
+  const qty = new Decimal(quantity);
+  if (from === to) return qty;
+  const fromFamily = familyOf(from);
+  const toFamily = familyOf(to);
+  if (fromFamily !== toFamily) {
+    throw new BadRequestError(
+      `Cannot convert ${from} to ${to} — different measurement families`,
+    );
+  }
+  const table = fromFamily === 'volume' ? VOLUME_TO_ML : WEIGHT_TO_G;
+  const canonicalQty = qty.mul(table[from]!);
+  return canonicalQty.div(table[to]!);
+}
+
+// --- Cost computation --------------------------------------------------------
+
+type RecipeItemRow = {
+  supply_id: string | null;
+  preparation_id: string | null;
+  quantity: Prisma.Decimal;
+  unit: string;
+  waste_pct: Prisma.Decimal;
+};
+
+type RecipeRow = {
+  id: string;
+  product_id: string | null;
+  variant_id: string | null;
+  yield_quantity: Prisma.Decimal | null;
+  yield_unit: string | null;
+  items: RecipeItemRow[];
+};
+
+/**
+ * Cost of a single raw-supply line: convert the recipe quantity into the
+ * supply's base unit, inflate by waste, then multiply by the supply's WAC.
+ *
+ *   base_qty    = quantity_in_content_unit / content_per_unit    (if measurable)
+ *   base_qty    = quantity                                        (if piece-type)
+ *   adjusted_qty = base_qty / (1 - waste_pct/100)
+ *   line_cost    = adjusted_qty * average_cost
+ */
+export function computeSupplyItemCost(
+  quantity: Decimal | string | number,
+  recipeUnit: string,
+  wastePct: Decimal | string | number,
+  supply: {
+    content_per_unit: Prisma.Decimal | null;
+    content_unit: ContentUnit | null;
+    average_cost: Prisma.Decimal;
+  },
+): Decimal {
+  const qty = new Decimal(quantity);
+  let baseQty: Decimal;
+
+  const normalized = normalizeUnit(recipeUnit);
+
+  if (supply.content_per_unit && supply.content_unit) {
+    if (normalized === 'PIECE') {
+      throw new BadRequestError(
+        'Recipe unit "piece" is incompatible with a measurable supply',
+      );
+    }
+    const qtyInContentUnit = convertQuantity(qty, normalized, supply.content_unit);
+    baseQty = qtyInContentUnit.div(new Decimal(supply.content_per_unit));
+  } else {
+    if (normalized !== 'PIECE') {
+      throw new BadRequestError(
+        'Supply has no content_per_unit; recipe must use a piece/unit quantity',
+      );
+    }
+    baseQty = qty;
+  }
+
+  const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
+  if (wasteFactor.lte(0)) {
+    throw new BadRequestError('waste_pct must be less than 100');
+  }
+  const adjusted = baseQty.div(wasteFactor);
+  return adjusted.mul(new Decimal(supply.average_cost));
+}
+
+/**
+ * Cost for a line that references a sub-recipe (preparation).
+ *
+ *   line_cost = (quantity_in_yield_unit / yield_quantity) * preparation_total_cost
+ *
+ * `preparationRecipeCost` is the total cost of the preparation's recipe (the
+ * caller computes it recursively). Waste on the line still applies on top.
+ */
+export function computePreparationItemCost(
+  quantity: Decimal | string | number,
+  recipeUnit: string,
+  wastePct: Decimal | string | number,
+  preparation: {
+    yield_quantity: Prisma.Decimal | null;
+    yield_unit: string | null;
+  },
+  preparationRecipeCost: Decimal,
+): Decimal {
+  if (!preparation.yield_quantity || !preparation.yield_unit) {
+    throw new BadRequestError(
+      'Preparation recipe is missing yield_quantity / yield_unit — set them before using it as an ingredient',
+    );
+  }
+  const normalizedRecipe = normalizeUnit(recipeUnit);
+  const normalizedYield = normalizeUnit(preparation.yield_unit);
+  if (normalizedRecipe === 'PIECE' || normalizedYield === 'PIECE') {
+    if (normalizedRecipe !== normalizedYield) {
+      throw new BadRequestError(
+        `Cannot convert ${recipeUnit} to preparation yield unit ${preparation.yield_unit}`,
+      );
+    }
+    const qty = new Decimal(quantity);
+    const yieldQty = new Decimal(preparation.yield_quantity);
+    const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
+    if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
+    return qty.div(yieldQty).mul(preparationRecipeCost).div(wasteFactor);
+  }
+
+  const qtyInYieldUnit = convertQuantity(
+    new Decimal(quantity),
+    normalizedRecipe,
+    normalizedYield,
+  );
+  const yieldQty = new Decimal(preparation.yield_quantity);
+  const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
+  if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
+  return qtyInYieldUnit.div(yieldQty).mul(preparationRecipeCost).div(wasteFactor);
+}
+
+/**
+ * Walk a recipe and sum line costs. Follows preparation references recursively;
+ * `visited` detects cycles (A uses B uses A) and throws before overflowing.
+ * Returns the total recipe cost in the same unit as Supply.average_cost
+ * (centavos).
+ */
+export async function computeRecipeCost(
+  client: PrismaLike,
+  recipeId: string,
+  visited: Set<string> = new Set(),
+): Promise<Decimal> {
+  if (visited.has(recipeId)) {
+    throw new BadRequestError('Recipe cycle detected via preparation references');
+  }
+  visited.add(recipeId);
+
+  const recipe = (await client.recipe.findUnique({
+    where: { id: recipeId },
+    include: { items: true },
+  })) as RecipeRow | null;
+  if (!recipe) throw new BadRequestError(`Recipe ${recipeId} not found`);
+
+  let total = new Decimal(0);
+
+  for (const item of recipe.items) {
+    if (item.supply_id) {
+      const supply = await client.supply.findUnique({
+        where: { id: item.supply_id },
+        select: { content_per_unit: true, content_unit: true, average_cost: true },
+      });
+      if (!supply) {
+        throw new BadRequestError(`Recipe item references unknown supply ${item.supply_id}`);
+      }
+      total = total.add(
+        computeSupplyItemCost(item.quantity, item.unit, item.waste_pct, supply),
+      );
+      continue;
+    }
+
+    if (item.preparation_id) {
+      const prepProduct = await client.product.findUnique({
+        where: { id: item.preparation_id },
+        select: { id: true, type: true, recipe: true },
+      });
+      if (!prepProduct || prepProduct.type !== ProductType.PREPARATION) {
+        throw new BadRequestError(
+          `Recipe item references a non-preparation product ${item.preparation_id}`,
+        );
+      }
+      if (!prepProduct.recipe) {
+        throw new BadRequestError(
+          `Preparation ${item.preparation_id} has no recipe defined`,
+        );
+      }
+      const prepRecipeRow = await client.recipe.findUnique({
+        where: { id: prepProduct.recipe.id },
+        select: { id: true, yield_quantity: true, yield_unit: true },
+      });
+      if (!prepRecipeRow) {
+        throw new BadRequestError(
+          `Preparation ${item.preparation_id} recipe not found`,
+        );
+      }
+
+      const prepCost = await computeRecipeCost(client, prepRecipeRow.id, visited);
+      total = total.add(
+        computePreparationItemCost(
+          item.quantity,
+          item.unit,
+          item.waste_pct,
+          prepRecipeRow,
+          prepCost,
+        ),
+      );
+      continue;
+    }
+
+    // Unreachable — the schema validation guarantees exactly one of
+    // supply_id/preparation_id is set. Surface it loudly if the invariant
+    // ever breaks rather than silently returning a wrong cost.
+    throw new BadRequestError(
+      `Recipe item ${String(item.supply_id)} has neither supply_id nor preparation_id`,
+    );
+  }
+
+  return total;
+}
+
+/**
+ * After a recipe changes, persist the recomputed cost onto the owning
+ * Product or ProductVariant row plus the derived food_cost_pct and markup.
+ * Idempotent — safe to call on recipe create, edit, or preparation updates.
+ */
+export async function applyRecipeCost(
+  client: PrismaLike,
+  recipeId: string,
+): Promise<Decimal> {
+  const cost = await computeRecipeCost(client, recipeId);
+  const recipe = await client.recipe.findUnique({
+    where: { id: recipeId },
+    select: { product_id: true, variant_id: true },
+  });
+  if (!recipe) throw new BadRequestError(`Recipe ${recipeId} not found`);
+
+  if (recipe.variant_id) {
+    const variant = await client.productVariant.findUnique({
+      where: { id: recipe.variant_id },
+      select: { sell_price: true },
+    });
+    if (!variant) throw new BadRequestError('Variant missing for recipe');
+    const sellPrice = new Decimal(variant.sell_price);
+    const foodCostPct = sellPrice.isZero() ? new Decimal(0) : cost.div(sellPrice).mul(100);
+    await client.productVariant.update({
+      where: { id: recipe.variant_id },
+      data: { recipe_cost: cost, food_cost_pct: foodCostPct },
+    });
+  } else if (recipe.product_id) {
+    const product = await client.product.findUnique({
+      where: { id: recipe.product_id },
+      select: { sell_price: true },
+    });
+    if (!product) throw new BadRequestError('Product missing for recipe');
+    const sellPrice = product.sell_price ? new Decimal(product.sell_price) : null;
+    const foodCostPct =
+      sellPrice && !sellPrice.isZero() ? cost.div(sellPrice).mul(100) : new Decimal(0);
+    const markup = cost.isZero() || !sellPrice ? new Decimal(0) : sellPrice.div(cost);
+    await client.product.update({
+      where: { id: recipe.product_id },
+      data: { recipe_cost: cost, food_cost_pct: foodCostPct, markup },
+    });
+  }
+
+  return cost;
+}
+
+/**
+ * When a preparation's recipe changes, every recipe that references that
+ * preparation needs its cached cost refreshed. This walks one level of
+ * dependents and applies costs; the caller is responsible for calling this
+ * after preparation edits.
+ */
+export async function cascadeRecipeCostFromPreparation(
+  client: PrismaLike,
+  preparationProductId: string,
+  visited: Set<string> = new Set(),
+): Promise<void> {
+  const dependents = await client.recipeItem.findMany({
+    where: { preparation_id: preparationProductId },
+    select: { recipe_id: true },
+    distinct: ['recipe_id'],
+  });
+  for (const dep of dependents) {
+    if (visited.has(dep.recipe_id)) continue;
+    visited.add(dep.recipe_id);
+    await applyRecipeCost(client, dep.recipe_id);
+    // If the dependent recipe belongs to another preparation, cascade further.
+    const parentRecipe = await client.recipe.findUnique({
+      where: { id: dep.recipe_id },
+      select: { product: { select: { id: true, type: true } } },
+    });
+    if (parentRecipe?.product?.type === ProductType.PREPARATION) {
+      await cascadeRecipeCostFromPreparation(client, parentRecipe.product.id, visited);
+    }
+  }
+}
