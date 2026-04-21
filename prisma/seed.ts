@@ -16,6 +16,7 @@ import {
   createVariantRecipe,
 } from '../src/modules/recipes/service.js';
 import { deductSaleFromInventory } from '../src/modules/sales/service.js';
+import { hashPassword } from '../src/modules/auth/service.js';
 
 // Tables wiped at the start — mirrors tests/setup.ts so re-seeding doesn't
 // leave stale rows from a previous run behind.
@@ -64,9 +65,10 @@ async function main(): Promise<void> {
   const admin = await prisma.user.create({
     data: {
       name: 'Café Admin',
-      email: 'admin@cafe.local',
+      email: 'admin@pos.local',
       pin: '1234',
-      password_hash: 'seed-not-a-real-hash',
+      // Dev-only credentials — admin@pos.local / admin123. Rotate in prod.
+      password_hash: await hashPassword('admin123'),
       role: 'ADMIN',
     },
   });

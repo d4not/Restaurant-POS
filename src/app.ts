@@ -24,6 +24,7 @@ import { alertRouter } from './modules/alerts/routes.js';
 import { reportRouter } from './modules/reports/routes.js';
 import { cashRegisterRouter } from './modules/cash-registers/routes.js';
 import { orderRouter } from './modules/orders/routes.js';
+import { authRouter } from './modules/auth/routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -49,6 +50,7 @@ export function createApp(): Express {
     res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });
   });
 
+  app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/supply-categories', supplyCategoryRouter);
   app.use('/api/v1/suppliers', supplierRouter);
   app.use('/api/v1/storages', storageRouter);

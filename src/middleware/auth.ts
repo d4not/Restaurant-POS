@@ -17,7 +17,9 @@ declare global {
   }
 }
 
-// Placeholder JWT middleware. Full auth (login, refresh, PIN) lands in Phase 6.
+// Bearer-token guard: verifies the JWT issued by POST /auth/login and
+// attaches { userId, role } to the request. Refresh tokens and PIN login
+// land in a later phase.
 export const requireAuth: RequestHandler = (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
