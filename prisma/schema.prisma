@@ -419,6 +419,11 @@ model StockMovement {
   @@index([type])
   @@index([reference_type, reference_id])
   @@index([created_at])
+  // Compound indexes for the window-scoped report queries in reports/service.ts
+  // (variance + supply-movement) which always filter by supply_id or
+  // storage_id plus a created_at range.
+  @@index([supply_id, created_at])
+  @@index([storage_id, created_at])
   @@map("stock_movements")
 }
 

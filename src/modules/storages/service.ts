@@ -45,19 +45,34 @@ export async function deleteStorage(id: string) {
 
 export async function listStorageStocks(storageId: string, query: StorageStockQuery) {
   await getStorage(storageId);
-  // Prisma cannot express "quantity <= min_stock" directly in findMany, so when
-  // the caller asks for low-stock rows we filter in app code (the set is small
-  // per storage and we still respect the cursor).
+
+  // `low_only` needs a column-vs-column comparison (`quantity <= min_stock`)
+  // that Prisma's findMany where clause can't express. Filtering in app code
+  // *after* pagination would return partial pages, so instead we resolve the
+  // matching ids via raw SQL and hand those off to Prisma.
+  let idFilter: Prisma.StorageStockWhereInput = {};
+  if (query.low_only) {
+    const lowRows = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM storage_stocks
+      WHERE storage_id = ${storageId}::uuid
+        AND min_stock IS NOT NULL
+        AND quantity <= min_stock
+    `;
+    idFilter = { id: { in: lowRows.map((r) => r.id) } };
+    if (lowRows.length === 0) {
+      // Avoid querying for `id IN ()` which Prisma treats as always-match on
+      // some drivers; short-circuit with an empty page.
+      return { items: [], nextCursor: null };
+    }
+  }
+
   const rows = await prisma.storageStock.findMany({
-    where: { storage_id: storageId },
+    where: { storage_id: storageId, ...idFilter },
     include: { supply: { select: { id: true, name: true, base_unit: true, active: true } } },
     orderBy: { id: 'asc' },
     ...buildCursorArgs(query),
   });
-  const filtered = query.low_only
-    ? rows.filter((r) => r.min_stock !== null && r.quantity.lessThanOrEqualTo(r.min_stock))
-    : rows;
-  return toPageResult(filtered, query.limit);
+  return toPageResult(rows, query.limit);
 }
 
 export async function updateStorageStock(

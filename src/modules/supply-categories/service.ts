@@ -36,10 +36,15 @@ export async function updateSupplyCategory(id: string, input: UpdateSupplyCatego
 }
 
 export async function deleteSupplyCategory(id: string) {
-  await getSupplyCategory(id);
-  const supplyCount = await prisma.supply.count({ where: { category_id: id, deleted_at: null } });
-  if (supplyCount > 0) {
-    throw new ConflictError('Cannot delete category with active supplies');
-  }
-  await prisma.supplyCategory.delete({ where: { id } });
+  // Run the existence check, occupancy count, and delete in one transaction so
+  // a concurrent Supply insert cannot sneak in between the count and delete.
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.supplyCategory.findUnique({ where: { id }, select: { id: true } });
+    if (!row) throw new NotFoundError('SupplyCategory');
+    const supplyCount = await tx.supply.count({ where: { category_id: id, deleted_at: null } });
+    if (supplyCount > 0) {
+      throw new ConflictError('Cannot delete category with active supplies');
+    }
+    await tx.supplyCategory.delete({ where: { id } });
+  });
 }

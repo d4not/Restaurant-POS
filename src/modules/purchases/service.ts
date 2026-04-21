@@ -42,8 +42,8 @@ async function resolveItemValues(
   client: PrismaLike,
   supplyId: string,
   packagingId: string | null | undefined,
-  packageQuantity: number,
-  pricePerPackage: number,
+  packageQuantity: Decimal | string | number,
+  pricePerPackage: Decimal | string | number,
 ): Promise<{ baseQty: Decimal; unitCost: Decimal; lineTotal: Decimal }> {
   const supply = await client.supply.findFirst({
     where: { id: supplyId, deleted_at: null },
@@ -65,6 +65,9 @@ async function resolveItemValues(
   }
   const pkgQty = new Decimal(packageQuantity);
   const price = new Decimal(pricePerPackage);
+  if (unitsPerPackage.lte(0)) {
+    throw new BadRequestError('packaging units_per_package must be positive');
+  }
   return {
     baseQty: pkgQty.mul(unitsPerPackage),
     unitCost: price.div(unitsPerPackage),
@@ -240,10 +243,10 @@ export async function updatePurchaseItem(
     const supplyId = input.supply_id ?? existing.supply_id;
     const packagingId =
       input.packaging_id !== undefined ? input.packaging_id : existing.packaging_id;
-    const packageQuantity =
-      input.package_quantity ?? new Decimal(existing.package_quantity).toNumber();
-    const pricePerPackage =
-      input.price_per_package ?? new Decimal(existing.price_per_package).toNumber();
+    const packageQuantity: Decimal | number =
+      input.package_quantity ?? new Decimal(existing.package_quantity);
+    const pricePerPackage: Decimal | number =
+      input.price_per_package ?? new Decimal(existing.price_per_package);
 
     const { baseQty, unitCost } = await resolveItemValues(
       tx,

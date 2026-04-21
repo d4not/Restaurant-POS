@@ -83,16 +83,21 @@ export async function updateProductCategory(id: string, input: UpdateProductCate
 }
 
 export async function deleteProductCategory(id: string) {
-  await getProductCategory(id);
-  const [childCount, productCount] = await Promise.all([
-    prisma.productCategory.count({ where: { parent_id: id } }),
-    prisma.product.count({ where: { category_id: id, deleted_at: null } }),
-  ]);
-  if (childCount > 0) {
-    throw new ConflictError('Cannot delete category with subcategories');
-  }
-  if (productCount > 0) {
-    throw new ConflictError('Cannot delete category with active products');
-  }
-  await prisma.productCategory.delete({ where: { id } });
+  // Child/product counts and the delete must share a transaction to prevent a
+  // concurrent insert from attaching to a category that's about to disappear.
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.productCategory.findUnique({ where: { id }, select: { id: true } });
+    if (!row) throw new NotFoundError('ProductCategory');
+    const [childCount, productCount] = await Promise.all([
+      tx.productCategory.count({ where: { parent_id: id } }),
+      tx.product.count({ where: { category_id: id, deleted_at: null } }),
+    ]);
+    if (childCount > 0) {
+      throw new ConflictError('Cannot delete category with subcategories');
+    }
+    if (productCount > 0) {
+      throw new ConflictError('Cannot delete category with active products');
+    }
+    await tx.productCategory.delete({ where: { id } });
+  });
 }

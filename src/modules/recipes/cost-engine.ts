@@ -130,14 +130,26 @@ export function convertRecipeQuantityToBase(
   const normalized = normalizeUnit(recipeUnit);
   let baseQty: Decimal;
 
-  if (supply.content_per_unit && supply.content_unit) {
+  // Use explicit null check rather than truthiness: a legacy Supply row with
+  // content_per_unit = 0 would be falsy and silently fall through to the
+  // piece-mode branch. Here we surface it as an error up-front instead.
+  const contentPerUnit =
+    supply.content_per_unit != null ? new Decimal(supply.content_per_unit) : null;
+  const hasMeasurable = contentPerUnit !== null && supply.content_unit !== null;
+
+  if (hasMeasurable) {
+    if (contentPerUnit!.lte(0)) {
+      throw new BadRequestError(
+        'Supply.content_per_unit must be positive — fix the supply before costing recipes',
+      );
+    }
     if (normalized === 'PIECE') {
       throw new BadRequestError(
         'Recipe unit "piece" is incompatible with a measurable supply',
       );
     }
-    const qtyInContentUnit = convertQuantity(qty, normalized, supply.content_unit);
-    baseQty = qtyInContentUnit.div(new Decimal(supply.content_per_unit));
+    const qtyInContentUnit = convertQuantity(qty, normalized, supply.content_unit!);
+    baseQty = qtyInContentUnit.div(contentPerUnit!);
   } else {
     if (normalized !== 'PIECE') {
       throw new BadRequestError(
@@ -189,10 +201,14 @@ export function computePreparationFactor(
     yield_unit: string | null;
   },
 ): Decimal {
-  if (!preparation.yield_quantity || !preparation.yield_unit) {
+  if (preparation.yield_quantity == null || preparation.yield_unit == null) {
     throw new BadRequestError(
       'Preparation recipe is missing yield_quantity / yield_unit — set them before using it as an ingredient',
     );
+  }
+  const yieldQty = new Decimal(preparation.yield_quantity);
+  if (yieldQty.lte(0)) {
+    throw new BadRequestError('Preparation yield_quantity must be positive');
   }
   const normalizedRecipe = normalizeUnit(recipeUnit);
   const normalizedYield = normalizeUnit(preparation.yield_unit);
@@ -207,7 +223,6 @@ export function computePreparationFactor(
   } else {
     qtyInYield = convertQuantity(new Decimal(quantity), normalizedRecipe, normalizedYield);
   }
-  const yieldQty = new Decimal(preparation.yield_quantity);
   const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
   if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
   return qtyInYield.div(yieldQty).div(wasteFactor);

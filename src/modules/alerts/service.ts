@@ -16,24 +16,26 @@ export interface LowStockAlert {
 }
 
 // StorageStock rows where the configured min_stock has been breached.
-// We filter `min_stock != null` and `quantity <= min_stock` in SQL so a café
-// with thousands of stock rows doesn't pay for a full table scan.
+// The `min_stock IS NOT NULL` and the soft-delete filter run in SQL. Prisma
+// can't express `quantity <= min_stock` (column-vs-column) in the where clause,
+// so that comparison stays in app code — the candidate set is already narrowed
+// to stocks with a threshold and with a non-deleted supply.
 export async function listLowStock(query: LowStockQuery): Promise<LowStockAlert[]> {
   const where: Prisma.StorageStockWhereInput = {
     min_stock: { not: null },
+    supply: { deleted_at: null },
     ...(query.storage_id ? { storage_id: query.storage_id } : {}),
   };
   const rows = await prisma.storageStock.findMany({
     where,
     include: {
-      supply: { select: { id: true, name: true, base_unit: true, average_cost: true, deleted_at: true } },
+      supply: { select: { id: true, name: true, base_unit: true, average_cost: true } },
       storage: { select: { id: true, name: true } },
     },
     orderBy: [{ storage_id: 'asc' }, { supply_id: 'asc' }],
   });
 
   return rows
-    .filter((r) => !r.supply.deleted_at)
     .filter((r) => r.min_stock !== null && new Decimal(r.quantity).lte(new Decimal(r.min_stock)))
     .map((r) => {
       const qty = new Decimal(r.quantity);

@@ -55,7 +55,7 @@ async function loadVariantForRecipe(client: Tx, variantId: string) {
 
 async function validateRecipeItem(
   client: Tx,
-  ownerType: ProductType,
+  owner: { type: ProductType; productId?: string | null },
   input: { supply_id?: string | null; preparation_id?: string | null },
 ): Promise<void> {
   if (input.supply_id) {
@@ -67,6 +67,16 @@ async function validateRecipeItem(
     return;
   }
   if (input.preparation_id) {
+    // Guard the trivial self-reference on write (P1's recipe references P1).
+    // Deeper cycles (A→B→A) are caught by computeRecipeCost's visited set at
+    // cost time, but catching this one up-front gives a clearer error.
+    if (
+      owner.type === ProductType.PREPARATION &&
+      owner.productId &&
+      owner.productId === input.preparation_id
+    ) {
+      throw new BadRequestError('A preparation cannot reference itself as an ingredient');
+    }
     const prep = await client.product.findUnique({
       where: { id: input.preparation_id },
       select: { id: true, type: true, deleted_at: true },
@@ -77,22 +87,17 @@ async function validateRecipeItem(
     if (prep.type !== ProductType.PREPARATION) {
       throw new BadRequestError('preparation_id must reference a product of type PREPARATION');
     }
-    // A preparation cannot reference itself directly.
-    if (ownerType === ProductType.PREPARATION) {
-      // Let computeRecipeCost's cycle guard handle deeper cycles at cost time;
-      // here we just guard the trivial self-reference on write.
-    }
   }
 }
 
 async function insertItems(
   client: Tx,
   recipeId: string,
-  ownerType: ProductType,
+  owner: { type: ProductType; productId?: string | null },
   items: CreateRecipeItemInput[],
 ): Promise<void> {
   for (const item of items) {
-    await validateRecipeItem(client, ownerType, item);
+    await validateRecipeItem(client, owner, item);
     await client.recipeItem.create({
       data: {
         recipe_id: recipeId,
@@ -132,7 +137,7 @@ export async function createProductRecipe(productId: string, input: CreateRecipe
       },
     });
     if (input.items?.length) {
-      await insertItems(tx, recipe.id, product.type, input.items);
+      await insertItems(tx, recipe.id, { type: product.type, productId: productId }, input.items);
     }
     await applyRecipeCost(tx, recipe.id);
     return tx.recipe.findUniqueOrThrow({ where: { id: recipe.id }, include: recipeInclude });
@@ -147,7 +152,9 @@ export async function createVariantRecipe(variantId: string, input: CreateRecipe
     // Variant recipes belong to a DISH so yield fields are not applicable.
     const recipe = await tx.recipe.create({ data: { variant_id: variantId } });
     if (input.items?.length) {
-      await insertItems(tx, recipe.id, ProductType.DISH, input.items);
+      // Variant recipes always belong to a DISH. No productId since the owning
+      // product isn't a preparation — self-reference guard is N/A here.
+      await insertItems(tx, recipe.id, { type: ProductType.DISH }, input.items);
     }
     await applyRecipeCost(tx, recipe.id);
     return tx.recipe.findUniqueOrThrow({ where: { id: recipe.id }, include: recipeInclude });
@@ -189,7 +196,12 @@ export async function updateRecipe(recipeId: string, input: UpdateRecipeInput) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.recipe.findUnique({
       where: { id: recipeId },
-      select: { id: true, product: { select: { type: true } } },
+      select: {
+        id: true,
+        yield_quantity: true,
+        yield_unit: true,
+        product: { select: { type: true } },
+      },
     });
     if (!existing) throw new NotFoundError('Recipe');
 
@@ -201,6 +213,22 @@ export async function updateRecipe(recipeId: string, input: UpdateRecipeInput) {
     if (input.yield_unit !== undefined) {
       data.yield_unit = input.yield_unit;
     }
+
+    // PREPARATION recipes are consumed by other recipes, which need both yield
+    // fields to compute the scaling factor. Reject updates that would leave a
+    // preparation with either field cleared.
+    if (existing.product?.type === ProductType.PREPARATION) {
+      const nextYieldQty =
+        input.yield_quantity !== undefined ? input.yield_quantity : existing.yield_quantity;
+      const nextYieldUnit =
+        input.yield_unit !== undefined ? input.yield_unit : existing.yield_unit;
+      if (nextYieldQty == null || nextYieldUnit == null) {
+        throw new BadRequestError(
+          'PREPARATION recipes require both yield_quantity and yield_unit',
+        );
+      }
+    }
+
     await tx.recipe.update({ where: { id: recipeId }, data });
     await applyRecipeCost(tx, recipeId);
     if (existing.product?.type === ProductType.PREPARATION && existing.product) {
@@ -256,16 +284,26 @@ export async function deleteRecipe(recipeId: string) {
 // Recipe items
 // ----------------------------------------------------------------------------
 
-async function ownerTypeForRecipe(client: Tx, recipeId: string): Promise<ProductType> {
+async function ownerForRecipe(
+  client: Tx,
+  recipeId: string,
+): Promise<{ type: ProductType; productId: string | null }> {
   const recipe = await client.recipe.findUnique({
     where: { id: recipeId },
     select: {
+      product_id: true,
       product: { select: { type: true } },
       variant: { select: { product: { select: { type: true } } } },
     },
   });
   if (!recipe) throw new NotFoundError('Recipe');
-  return recipe.product?.type ?? recipe.variant!.product.type;
+  // product_id is only set for product-owned recipes (DISH or PREPARATION);
+  // variant-owned recipes have product_id=null and the owning product type is
+  // reached through `variant.product`.
+  return {
+    type: recipe.product?.type ?? recipe.variant!.product.type,
+    productId: recipe.product_id,
+  };
 }
 
 async function cascadeIfPreparation(client: Tx, recipeId: string): Promise<void> {
@@ -282,8 +320,8 @@ export async function addRecipeItem(recipeId: string, input: CreateRecipeItemInp
   return prisma.$transaction(async (tx) => {
     const exists = await tx.recipe.findUnique({ where: { id: recipeId }, select: { id: true } });
     if (!exists) throw new NotFoundError('Recipe');
-    const ownerType = await ownerTypeForRecipe(tx, recipeId);
-    await validateRecipeItem(tx, ownerType, input);
+    const owner = await ownerForRecipe(tx, recipeId);
+    await validateRecipeItem(tx, owner, input);
     const item = await tx.recipeItem.create({
       data: {
         recipe_id: recipeId,
@@ -320,8 +358,8 @@ export async function updateRecipeItem(
         'Recipe item must reference exactly one of supply_id or preparation_id',
       );
     }
-    const ownerType = await ownerTypeForRecipe(tx, recipeId);
-    await validateRecipeItem(tx, ownerType, {
+    const owner = await ownerForRecipe(tx, recipeId);
+    await validateRecipeItem(tx, owner, {
       supply_id: nextSupply,
       preparation_id: nextPrep,
     });
