@@ -5,7 +5,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
  * Default-open the groups that contain the first few routes so the navigation
  * matches the mockup's resting state. Users can collapse them individually.
  */
-const DEFAULT_OPEN_GROUPS = ['reportes', 'inventario', 'menu', 'personal', 'sistema'];
+const DEFAULT_OPEN_GROUPS = ['reports', 'inventory', 'menu', 'staff', 'system'];
 
 interface UiState {
   openGroups: string[];

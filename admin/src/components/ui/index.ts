@@ -4,3 +4,6 @@ export { Badge } from './Badge';
 export type { BadgeTone } from './Badge';
 export { KPICard } from './KPICard';
 export { EmptyState } from './EmptyState';
+export { Modal } from './Modal';
+export { Table } from './Table';
+export type { TableColumn, SortState, SortDir } from './Table';

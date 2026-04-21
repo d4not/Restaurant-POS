@@ -4,24 +4,24 @@ export function DashboardPage() {
   return (
     <>
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <KPICard label="Ventas hoy"       value="—" sub="Esperando datos" accent />
-        <KPICard label="Órdenes hoy"      value="—" sub="Esperando datos" />
-        <KPICard label="Ticket promedio"  value="—" sub="Esperando datos" />
-        <KPICard label="Insumos bajo stock" value="—" sub="Esperando datos" />
+        <KPICard label="Sales today"         value="—" sub="Awaiting data" accent />
+        <KPICard label="Orders today"        value="—" sub="Awaiting data" />
+        <KPICard label="Average ticket"      value="—" sub="Awaiting data" />
+        <KPICard label="Low stock supplies"  value="—" sub="Awaiting data" />
       </div>
 
       <div className="section-grid-3">
-        <Card title="Ventas últimos 7 días">
-          <EmptyState icon="📈" message="Gráfica pendiente" sub="Se conectará en la Fase 5 del frontend." />
+        <Card title="Sales last 7 days">
+          <EmptyState icon="📈" message="Chart pending" sub="Will be wired up in frontend Phase 5." />
         </Card>
-        <Card title="Alertas de stock">
-          <EmptyState icon="🔔" message="Sin alertas" sub="Todo en orden — por ahora." />
+        <Card title="Stock alerts">
+          <EmptyState icon="🔔" message="No alerts" sub="All good — for now." />
         </Card>
       </div>
 
       <div className="mt-16">
-        <Card title="Órdenes recientes">
-          <EmptyState icon="🧾" message="Sin órdenes aún" sub="Las últimas 10 órdenes aparecerán aquí." />
+        <Card title="Recent orders">
+          <EmptyState icon="🧾" message="No orders yet" sub="The last 10 orders will appear here." />
         </Card>
       </div>
     </>

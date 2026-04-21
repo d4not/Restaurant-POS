@@ -14,7 +14,7 @@ export function Topbar() {
       </div>
       <div className="topbar-actions">
         <div className="date-badge">{formatTopbarDate()}</div>
-        <button type="button" className="notif-btn" title="Notificaciones" aria-label="Notificaciones">
+        <button type="button" className="notif-btn" title="Notifications" aria-label="Notifications">
           🔔
         </button>
       </div>

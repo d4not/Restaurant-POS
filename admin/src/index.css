@@ -348,6 +348,23 @@ h3 { font-size: 15px; font-weight: 600; }
 .table-row.odd  { background: #f3ede3; }
 .table-row.odd:hover, .table-row.even:hover { background: #fef8ef; }
 
+.table-sort-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-align: left;
+}
+.table-sort-btn:hover { color: #e5c071; }
+.table-sort-btn .sort-arrow { font-size: 9px; min-width: 10px; }
+
 /* ── BADGES ─────────────────────────────────────────────── */
 .badge {
   display: inline-flex;

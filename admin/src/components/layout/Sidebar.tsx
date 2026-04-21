@@ -11,14 +11,14 @@ export function Sidebar() {
   const openGroups = useUiStore((s) => s.openGroups);
   const toggleGroup = useUiStore((s) => s.toggleGroup);
 
-  const userName = user?.name ?? 'Administrador';
+  const userName = user?.name ?? 'Administrator';
   const userRole = user?.role ?? 'ADMIN';
 
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
         <div className="name">Restaurant POS</div>
-        <div className="sub">PANEL DE ADMINISTRACIÓN</div>
+        <div className="sub">ADMIN PANEL</div>
       </div>
 
       <nav className="nav">
@@ -79,14 +79,14 @@ export function Sidebar() {
         <div className="avatar">{initials(userName)}</div>
         <div className="user-info">
           <div className="user-name">{userName}</div>
-          <div className="user-role">{roleLabel(userRole)} · Turno AM</div>
+          <div className="user-role">{roleLabel(userRole)} · AM Shift</div>
         </div>
         <button
           type="button"
           className="logout-btn"
           onClick={logout}
-          title="Cerrar sesión"
-          aria-label="Cerrar sesión"
+          title="Sign out"
+          aria-label="Sign out"
         >
           ⇥
         </button>
@@ -97,9 +97,9 @@ export function Sidebar() {
 
 function roleLabel(role: string): string {
   switch (role) {
-    case 'ADMIN':   return 'Administrador';
-    case 'MANAGER': return 'Gerente';
-    case 'CASHIER': return 'Cajero';
+    case 'ADMIN':   return 'Administrator';
+    case 'MANAGER': return 'Manager';
+    case 'CASHIER': return 'Cashier';
     case 'BARISTA': return 'Barista';
     default:        return role;
   }

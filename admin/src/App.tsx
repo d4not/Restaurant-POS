@@ -5,6 +5,10 @@ import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { Placeholder } from './pages/Placeholder';
+import { SuppliesPage } from './pages/inventory/SuppliesPage';
+import { SupplyDetail } from './pages/inventory/SupplyDetail';
+import { SuppliersPage } from './pages/inventory/SuppliersPage';
+import { MovementsPage } from './pages/inventory/MovementsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,40 +43,39 @@ export default function App() {
             {/* Reports */}
             <Route path="reports">
               <Route index element={<Navigate to="sales" replace />} />
-              <Route path="sales"          element={<Placeholder title="Ventas" description="Reporte de ventas por rango de fechas." />} />
-              <Route path="orders"         element={<Placeholder title="Órdenes" description="Reporte de órdenes por período." />} />
-              <Route path="products-sold"  element={<Placeholder title="Productos vendidos" description="Ranking de productos vendidos." />} />
-              <Route path="expenses"       element={<Placeholder title="Gastos e ingresos" description="Estado de resultados del mes." />} />
+              <Route path="sales"          element={<Placeholder title="Sales" description="Sales report by date range." />} />
+              <Route path="orders"         element={<Placeholder title="Orders" description="Orders report by time period." />} />
+              <Route path="products-sold"  element={<Placeholder title="Products Sold" description="Top-selling products ranking." />} />
+              <Route path="expenses"       element={<Placeholder title="Expenses & Income" description="Monthly income statement." />} />
             </Route>
 
             {/* Inventory */}
             <Route path="inventory">
               <Route index element={<Navigate to="supplies" replace />} />
-              <Route path="supplies"   element={<Placeholder title="Insumos" description="Catálogo de insumos con stock por almacén." />} />
-              <Route path="supplies/:id" element={<Placeholder title="Detalle de insumo" />} />
-              <Route path="movements"  element={<Placeholder title="Movimientos de stock" />} />
-              <Route path="suppliers"  element={<Placeholder title="Proveedores" />} />
-              <Route path="suppliers/:id" element={<Placeholder title="Detalle de proveedor" />} />
+              <Route path="supplies"      element={<SuppliesPage />} />
+              <Route path="supplies/:id"  element={<SupplyDetail />} />
+              <Route path="movements"     element={<MovementsPage />} />
+              <Route path="suppliers"     element={<SuppliersPage />} />
             </Route>
 
             {/* Menu */}
             <Route path="menu">
               <Route index element={<Navigate to="products" replace />} />
-              <Route path="products"     element={<Placeholder title="Productos" description="Catálogo de productos, variantes y recetas." />} />
-              <Route path="products/:id" element={<Placeholder title="Detalle de producto" />} />
-              <Route path="categories"   element={<Placeholder title="Categorías" description="Árbol de categorías de productos." />} />
+              <Route path="products"     element={<Placeholder title="Products" description="Products, variants and recipes catalog." />} />
+              <Route path="products/:id" element={<Placeholder title="Product Detail" />} />
+              <Route path="categories"   element={<Placeholder title="Categories" description="Product categories tree." />} />
             </Route>
 
             {/* Staff */}
             <Route path="staff">
               <Route index element={<Navigate to="employees" replace />} />
-              <Route path="employees"      element={<Placeholder title="Empleados" />} />
-              <Route path="cash-registers" element={<Placeholder title="Caja / Turnos" description="Estado del turno actual e historial." />} />
-              <Route path="cash-registers/:id" element={<Placeholder title="Detalle de turno" />} />
+              <Route path="employees"      element={<Placeholder title="Employees" />} />
+              <Route path="cash-registers" element={<Placeholder title="Cash Registers" description="Current shift status and history." />} />
+              <Route path="cash-registers/:id" element={<Placeholder title="Shift Detail" />} />
             </Route>
 
             {/* Settings */}
-            <Route path="settings" element={<Placeholder title="Configuración" description="Ajustes del sistema." />} />
+            <Route path="settings" element={<Placeholder title="Settings" description="System settings." />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

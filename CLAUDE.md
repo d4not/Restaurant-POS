@@ -79,8 +79,6 @@
 - `admin/src/utils/` — formatCurrency, formatDate, etc.
 
 ### Code Rules
-- Currency display: use Intl.NumberFormat('es-MX') with centavos / 100
-- Dates: use date-fns with Spanish locale
 - All API calls through TanStack Query (useQuery/useMutation)
 - Invalidate related queries on mutations
 - Loading and error states on every data-fetching component

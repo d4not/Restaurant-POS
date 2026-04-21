@@ -1,12 +1,12 @@
 import { format as formatFn, parseISO } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale';
 
-const currency = new Intl.NumberFormat('es-MX', {
+const currency = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'MXN',
 });
 
-const number = new Intl.NumberFormat('es-MX', {
+const number = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
@@ -20,7 +20,7 @@ export function formatMoney(centavos: number | string): string {
 export function formatNumber(value: number | string, fractionDigits = 2): string {
   const n = typeof value === 'string' ? Number(value) : value;
   if (!Number.isFinite(n)) return '—';
-  return new Intl.NumberFormat('es-MX', {
+  return new Intl.NumberFormat('en-US', {
     maximumFractionDigits: fractionDigits,
   }).format(n);
 }
@@ -37,20 +37,20 @@ function asDate(input: DateInput): Date {
   return typeof input === 'string' ? parseISO(input) : input;
 }
 
-export function formatDate(input: DateInput, pattern = 'd MMM yyyy'): string {
-  return formatFn(asDate(input), pattern, { locale: es });
+export function formatDate(input: DateInput, pattern = 'MMM d, yyyy'): string {
+  return formatFn(asDate(input), pattern, { locale: enUS });
 }
 
 export function formatDateShort(input: DateInput): string {
-  return formatFn(asDate(input), 'd MMM', { locale: es });
+  return formatFn(asDate(input), 'MMM d', { locale: enUS });
 }
 
 export function formatDateTime(input: DateInput): string {
-  return formatFn(asDate(input), "d MMM yyyy · HH:mm", { locale: es });
+  return formatFn(asDate(input), "MMM d, yyyy · HH:mm", { locale: enUS });
 }
 
 export function formatTopbarDate(date = new Date()): string {
-  return formatFn(date, 'eee, d MMM yyyy', { locale: es }).replace(/^./, (c) => c.toLowerCase());
+  return formatFn(date, 'eee, MMM d, yyyy', { locale: enUS });
 }
 
 export function initials(name: string): string {

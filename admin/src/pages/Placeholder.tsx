@@ -15,7 +15,7 @@ export function Placeholder({ title, description }: PlaceholderProps) {
       <EmptyState
         icon="🚧"
         message={<span style={{ fontFamily: "'Playfair Display', serif", fontSize: 18 }}>{title}</span>}
-        sub={description ?? 'Sección en construcción — se habilitará en una fase posterior.'}
+        sub={description ?? 'Section under construction — coming in a later phase.'}
       />
     </Card>
   );
