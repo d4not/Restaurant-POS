@@ -35,10 +35,9 @@ export const NAV: NavEntry[] = [
     label: 'Reports',
     icon: '📊',
     items: [
-      { id: 'sales',          label: 'Sales',           path: '/reports/sales' },
-      { id: 'orders-report',  label: 'Orders',          path: '/reports/orders' },
-      { id: 'products-sold',  label: 'Products Sold',   path: '/reports/products-sold' },
-      { id: 'expenses',       label: 'Expenses & Income', path: '/reports/expenses' },
+      { id: 'sales',          label: 'Sales',              path: '/reports/sales' },
+      { id: 'product-costs',  label: 'Product costs',      path: '/reports/product-costs' },
+      { id: 'expenses',       label: 'Expenses & Income',  path: '/reports/expenses' },
     ],
   },
   {

@@ -107,20 +107,41 @@ enum PaymentMethod {
   TRANSFER
 }
 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  DAY_OFF
+  LATE
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  name          String
-  email         String   @unique
-  pin           String
-  password_hash String
-  role          UserRole
-  active        Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String
+  email             String   @unique
+  pin               String
+  password_hash     String
+  role              UserRole
+  active            Boolean  @default(true)
+  // Phase 8 — payroll fields. weekly_salary is nullable so users without
+  // payroll (e.g. owners, API clients) coexist with employees.
+  weekly_salary     Decimal? @db.Decimal(14, 0)
+  hire_date         DateTime?
+  position          String?
+  phone             String?
+  emergency_contact String?
+  notes             String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   purchases         Purchase[]
   transfers         Transfer[]
@@ -129,6 +150,10 @@ model User {
   cash_registers    CashRegister[]
   cash_movements    CashMovement[]
   orders            Order[]
+  attendance        Attendance[]        @relation("AttendanceEmployee")
+  attendance_logs   Attendance[]        @relation("AttendanceRecorder")
+  payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
+  payroll_approvals PayrollPeriod[]     @relation("PayrollApprover")
 
   @@index([email])
   @@map("users")
@@ -808,4 +833,61 @@ model Payment {
   @@index([order_id])
   @@index([method])
   @@map("payments")
+}
+
+// ============================================================================
+// Phase 8 — Employees & Payroll
+// ============================================================================
+
+model Attendance {
+  id          String           @id @default(uuid()) @db.Uuid
+  user_id     String           @db.Uuid
+  date        DateTime         @db.Date
+  status      AttendanceStatus
+  reason      String?
+  // is_paid only meaningful for ABSENT; for PRESENT/LATE/DAY_OFF it's
+  // informational. Kept as a column so the payroll calculation can treat
+  // any row uniformly without branching on status.
+  is_paid     Boolean          @default(true)
+  notes       String?
+  recorded_by String           @db.Uuid
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
+
+  user     User @relation("AttendanceEmployee", fields: [user_id], references: [id])
+  recorder User @relation("AttendanceRecorder", fields: [recorded_by], references: [id])
+
+  @@unique([user_id, date])
+  @@index([date])
+  @@index([status])
+  @@map("attendance")
+}
+
+model PayrollPeriod {
+  id              String        @id @default(uuid()) @db.Uuid
+  user_id         String        @db.Uuid
+  week_start      DateTime      @db.Date
+  week_end        DateTime      @db.Date
+  days_expected   Int           @default(6)
+  days_worked     Int           @default(0)
+  days_absent     Int           @default(0)
+  paid_absences   Int           @default(0)
+  unpaid_absences Int           @default(0)
+  gross_pay       Decimal       @default(0) @db.Decimal(14, 0)
+  deductions      Decimal       @default(0) @db.Decimal(14, 0)
+  bonuses         Decimal       @default(0) @db.Decimal(14, 0)
+  net_pay         Decimal       @default(0) @db.Decimal(14, 0)
+  status          PayrollStatus @default(DRAFT)
+  notes           String?
+  approved_by     String?       @db.Uuid
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  user     User  @relation("PayrollEmployee", fields: [user_id], references: [id])
+  approver User? @relation("PayrollApprover", fields: [approved_by], references: [id])
+
+  @@unique([user_id, week_start])
+  @@index([status])
+  @@index([week_start])
+  @@map("payroll_periods")
 }

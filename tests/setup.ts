@@ -38,6 +38,8 @@ const TRUNCATE_TABLES = [
   'order_items',
   'order_item_modifiers',
   'payments',
+  'attendance',
+  'payroll_periods',
 ];
 
 beforeEach(async () => {

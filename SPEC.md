@@ -670,6 +670,101 @@ POST   /api/v1/orders/:id/payments          — add payment (method, amount, ref
 
 ---
 
+## Phase 8: Employees & Payroll
+
+### Core concept
+Employees have a fixed weekly salary. The system tracks attendance (present, absent, day off) and whether absences are paid or unpaid. At the end of each week, a payroll summary shows days worked, gross pay, deductions for unpaid absences, and net pay.
+
+### 8.1 Extend User entity
+Add these fields to the existing User model:
+```
+weekly_salary     Decimal? (in centavos — null for users without payroll)
+hire_date         DateTime?
+position          String? (e.g., "Barista", "Cashier", "Manager")
+phone             String?
+emergency_contact String?
+notes             String?
+```
+
+### 8.2 Entity: Attendance
+```
+id              UUID PK
+user_id         UUID FK → User
+date            Date (just the date, no time)
+status          Enum: PRESENT, ABSENT, DAY_OFF, LATE
+reason          String? (e.g., "Sick", "Personal", "No-show", "Holiday")
+is_paid         Boolean default true (paid absence or unpaid)
+notes           String?
+recorded_by     UUID FK → User (who logged this record)
+created_at      DateTime
+updated_at      DateTime
+@@unique([user_id, date])  — one record per employee per day
+```
+
+### 8.3 Entity: PayrollPeriod
+```
+id              UUID PK
+user_id         UUID FK → User
+week_start      Date (Monday)
+week_end        Date (Sunday)
+days_expected   Int default 6 (how many days this employee should work)
+days_worked     Int (CALCULATED: count of PRESENT + LATE in the period)
+days_absent     Int (CALCULATED: count of ABSENT)
+paid_absences   Int (CALCULATED: count of ABSENT where is_paid = true)
+unpaid_absences Int (CALCULATED: count of ABSENT where is_paid = false)
+gross_pay       Decimal (in centavos — weekly_salary)
+deductions      Decimal (in centavos — (unpaid_absences / days_expected) * weekly_salary)
+bonuses         Decimal default 0 (in centavos — manual additions)
+net_pay         Decimal (CALCULATED: gross_pay - deductions + bonuses)
+status          Enum: DRAFT, APPROVED, PAID
+notes           String?
+approved_by     UUID? FK → User
+created_at      DateTime
+updated_at      DateTime
+@@unique([user_id, week_start])
+```
+
+### 8.4 Payroll calculation
+```
+daily_rate = weekly_salary / days_expected
+deductions = unpaid_absences * daily_rate
+net_pay = weekly_salary - deductions + bonuses
+```
+
+### 8.5 API endpoints
+```
+# Employees (extends users)
+GET    /api/v1/employees                      — list users with payroll fields
+GET    /api/v1/employees/:id                  — employee detail
+POST   /api/v1/employees                      — create employee (user + payroll fields)
+PATCH  /api/v1/employees/:id                  — update employee info
+DELETE /api/v1/employees/:id                  — deactivate (soft)
+
+# Attendance
+GET    /api/v1/attendance                     — list (filter by user, date range, status)
+POST   /api/v1/attendance                     — log attendance (user_id, date, status, reason?, is_paid?)
+PATCH  /api/v1/attendance/:id                 — update record
+DELETE /api/v1/attendance/:id                 — remove record
+
+# Payroll
+GET    /api/v1/payroll                        — list payroll periods (filter by user, date range, status)
+POST   /api/v1/payroll/generate               — generate payroll for a given week (week_start) for all active employees
+GET    /api/v1/payroll/:id                    — payroll detail with attendance breakdown
+PATCH  /api/v1/payroll/:id                    — update bonuses, notes, approve/pay
+```
+
+### 8.6 Generate payroll flow
+1. Receive week_start date (must be a Monday)
+2. For each active employee with weekly_salary:
+   a. Count attendance records in [week_start, week_end]
+   b. Calculate days_worked, paid/unpaid absences
+   c. Calculate deductions and net_pay
+   d. Create PayrollPeriod with status=DRAFT
+3. Manager reviews, adjusts bonuses, then approves
+4. Once approved, can mark as PAID
+
+---
+
 ## Implementation Notes
 
 ### Monetary values

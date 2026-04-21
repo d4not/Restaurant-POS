@@ -8,7 +8,7 @@
  * Run with: `npx prisma db seed` (wired via package.json#prisma.seed).
  */
 import { randomUUID } from 'node:crypto';
-import { ProductType } from '@prisma/client';
+import { Prisma, ProductType } from '@prisma/client';
 import { prisma } from '../src/lib/prisma.js';
 import { confirmPurchase } from '../src/modules/purchases/service.js';
 import {
@@ -47,6 +47,8 @@ const TRUNCATE_TABLES = [
   'deduction_rules',
   'storages',
   'taxes',
+  'payroll_periods',
+  'attendance',
   'users',
 ];
 
@@ -781,6 +783,131 @@ async function main(): Promise<void> {
     },
   });
 
+  // --------------------------------------------------------------------------
+  // Phase 8 — Employees, attendance, and payroll seed.
+  //
+  // Three salaried employees plus a full week of attendance so the payroll
+  // generate endpoint has realistic data to summarize. Week runs Mon→Sun
+  // relative to today's date, picking the most recent Monday as week_start.
+  // --------------------------------------------------------------------------
+  const baristaHash = await hashPassword('barista123');
+  const [sofia, carlos, lucia] = await Promise.all([
+    prisma.user.create({
+      data: {
+        name: 'Sofía Hernández',
+        email: 'sofia@pos.local',
+        pin: '2001',
+        password_hash: baristaHash,
+        role: 'BARISTA',
+        weekly_salary: 600000,
+        hire_date: new Date('2025-06-15T00:00:00Z'),
+        position: 'Barista',
+        phone: '+52 81 2000 1001',
+      },
+    }),
+    prisma.user.create({
+      data: {
+        name: 'Carlos Mendoza',
+        email: 'carlos@pos.local',
+        pin: '2002',
+        password_hash: baristaHash,
+        role: 'CASHIER',
+        weekly_salary: 550000,
+        hire_date: new Date('2025-09-01T00:00:00Z'),
+        position: 'Cajero',
+        phone: '+52 81 2000 1002',
+      },
+    }),
+    prisma.user.create({
+      data: {
+        name: 'Lucía Ramírez',
+        email: 'lucia@pos.local',
+        pin: '2003',
+        password_hash: baristaHash,
+        role: 'MANAGER',
+        weekly_salary: 900000,
+        hire_date: new Date('2024-11-10T00:00:00Z'),
+        position: 'Gerente',
+        phone: '+52 81 2000 1003',
+      },
+    }),
+  ]);
+
+  // Pick the Monday on/before today as week_start for attendance seed.
+  const today = new Date();
+  const utcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const dayOfWeek = utcMidnight.getUTCDay(); // Sun=0, Mon=1, ...
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  const weekStart = new Date(utcMidnight);
+  weekStart.setUTCDate(weekStart.getUTCDate() - daysSinceMonday);
+
+  function dayOf(offset: number): Date {
+    const d = new Date(weekStart);
+    d.setUTCDate(d.getUTCDate() + offset);
+    return d;
+  }
+
+  const attendanceRecords: Prisma.AttendanceCreateManyInput[] = [];
+  // Sofía: perfect week Mon–Sat, day off Sunday.
+  for (let i = 0; i < 6; i++) {
+    attendanceRecords.push({
+      user_id: sofia.id,
+      date: dayOf(i),
+      status: 'PRESENT',
+      recorded_by: admin.id,
+    });
+  }
+  attendanceRecords.push({
+    user_id: sofia.id,
+    date: dayOf(6),
+    status: 'DAY_OFF',
+    recorded_by: admin.id,
+  });
+
+  // Carlos: one unpaid no-show (Wed), one late day (Fri), worked the rest.
+  const carlosStatuses: Array<{ offset: number; status: 'PRESENT' | 'LATE' | 'ABSENT' | 'DAY_OFF'; is_paid?: boolean; reason?: string }> = [
+    { offset: 0, status: 'PRESENT' },
+    { offset: 1, status: 'PRESENT' },
+    { offset: 2, status: 'ABSENT', is_paid: false, reason: 'No-show' },
+    { offset: 3, status: 'PRESENT' },
+    { offset: 4, status: 'LATE', reason: 'Traffic' },
+    { offset: 5, status: 'PRESENT' },
+    { offset: 6, status: 'DAY_OFF' },
+  ];
+  for (const r of carlosStatuses) {
+    attendanceRecords.push({
+      user_id: carlos.id,
+      date: dayOf(r.offset),
+      status: r.status,
+      is_paid: r.is_paid ?? true,
+      reason: r.reason,
+      recorded_by: admin.id,
+    });
+  }
+
+  // Lucía: sick day paid (Tue), otherwise present.
+  const luciaStatuses: Array<{ offset: number; status: 'PRESENT' | 'LATE' | 'ABSENT' | 'DAY_OFF'; is_paid?: boolean; reason?: string }> = [
+    { offset: 0, status: 'PRESENT' },
+    { offset: 1, status: 'ABSENT', is_paid: true, reason: 'Sick' },
+    { offset: 2, status: 'PRESENT' },
+    { offset: 3, status: 'PRESENT' },
+    { offset: 4, status: 'PRESENT' },
+    { offset: 5, status: 'PRESENT' },
+    { offset: 6, status: 'DAY_OFF' },
+  ];
+  for (const r of luciaStatuses) {
+    attendanceRecords.push({
+      user_id: lucia.id,
+      date: dayOf(r.offset),
+      status: r.status,
+      is_paid: r.is_paid ?? true,
+      reason: r.reason,
+      recorded_by: admin.id,
+    });
+  }
+
+  await prisma.attendance.createMany({ data: attendanceRecords });
+
   console.log('Seed complete.');
   console.log(`  Supplier: ${supplier.name}`);
   console.log(`  Storages: ${bodega.name}, ${barra.name}`);
@@ -788,6 +915,8 @@ async function main(): Promise<void> {
   console.log('  Preparations: Simple Syrup, Mocha Sauce');
   console.log('  Purchases: 2 confirmed (Bodega + Barra) — WAC and stock populated');
   console.log('  Sales: 4 sample orders — SALE movements written for variance reports');
+  console.log(`  Employees: ${sofia.name}, ${carlos.name}, ${lucia.name}`);
+  console.log(`  Attendance: ${attendanceRecords.length} records for week of ${weekStart.toISOString().slice(0, 10)}`);
 }
 
 main()

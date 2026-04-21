@@ -15,6 +15,9 @@ import { CategoriesPage } from './pages/menu/CategoriesPage';
 import { OrdersPage } from './pages/orders/OrdersPage';
 import { CashRegistersPage } from './pages/staff/CashRegistersPage';
 import { ShiftDetail } from './pages/staff/ShiftDetail';
+import { SalesReport } from './pages/reports/SalesReport';
+import { ExpensesReport } from './pages/reports/ExpensesReport';
+import { ProductCostsReport } from './pages/reports/ProductCostsReport';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,10 +52,9 @@ export default function App() {
             {/* Reports */}
             <Route path="reports">
               <Route index element={<Navigate to="sales" replace />} />
-              <Route path="sales"          element={<Placeholder title="Sales" description="Sales report by date range." />} />
-              <Route path="orders"         element={<Placeholder title="Orders" description="Orders report by time period." />} />
-              <Route path="products-sold"  element={<Placeholder title="Products Sold" description="Top-selling products ranking." />} />
-              <Route path="expenses"       element={<Placeholder title="Expenses & Income" description="Monthly income statement." />} />
+              <Route path="sales"         element={<SalesReport />} />
+              <Route path="product-costs" element={<ProductCostsReport />} />
+              <Route path="expenses"      element={<ExpensesReport />} />
             </Route>
 
             {/* Inventory */}
