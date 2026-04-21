@@ -5,6 +5,12 @@ import rateLimit from 'express-rate-limit';
 import { pinoHttp } from 'pino-http';
 import { logger } from './lib/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
+import { supplyCategoryRouter } from './modules/supply-categories/routes.js';
+import { supplierRouter } from './modules/suppliers/routes.js';
+import { storageRouter } from './modules/storages/routes.js';
+import { supplyRouter } from './modules/supplies/routes.js';
+import { purchasePackagingRouter } from './modules/purchase-packagings/routes.js';
+import { purchaseRouter } from './modules/purchases/routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -30,10 +36,12 @@ export function createApp(): Express {
     res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });
   });
 
-  // Module routers will be mounted here as phases are implemented:
-  //   app.use('/api/v1/supplies', suppliesRouter);
-  //   app.use('/api/v1/products', productsRouter);
-  //   ...
+  app.use('/api/v1/supply-categories', supplyCategoryRouter);
+  app.use('/api/v1/suppliers', supplierRouter);
+  app.use('/api/v1/storages', storageRouter);
+  app.use('/api/v1/supplies', supplyRouter);
+  app.use('/api/v1/packagings', purchasePackagingRouter);
+  app.use('/api/v1/purchases', purchaseRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
