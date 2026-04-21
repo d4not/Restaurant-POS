@@ -42,6 +42,13 @@ export const NAV: NavEntry[] = [
     ],
   },
   {
+    kind: 'single',
+    id: 'orders',
+    label: 'Orders',
+    icon: '🧾',
+    path: '/orders',
+  },
+  {
     kind: 'group',
     id: 'inventory',
     label: 'Inventory',

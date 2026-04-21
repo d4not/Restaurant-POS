@@ -12,6 +12,9 @@ import { MovementsPage } from './pages/inventory/MovementsPage';
 import { ProductsPage } from './pages/menu/ProductsPage';
 import { ProductDetail } from './pages/menu/ProductDetail';
 import { CategoriesPage } from './pages/menu/CategoriesPage';
+import { OrdersPage } from './pages/orders/OrdersPage';
+import { CashRegistersPage } from './pages/staff/CashRegistersPage';
+import { ShiftDetail } from './pages/staff/ShiftDetail';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,12 +72,15 @@ export default function App() {
               <Route path="categories"   element={<CategoriesPage />} />
             </Route>
 
+            {/* Orders */}
+            <Route path="orders" element={<OrdersPage />} />
+
             {/* Staff */}
             <Route path="staff">
               <Route index element={<Navigate to="employees" replace />} />
-              <Route path="employees"      element={<Placeholder title="Employees" />} />
-              <Route path="cash-registers" element={<Placeholder title="Cash Registers" description="Current shift status and history." />} />
-              <Route path="cash-registers/:id" element={<Placeholder title="Shift Detail" />} />
+              <Route path="employees"          element={<Placeholder title="Employees" />} />
+              <Route path="cash-registers"     element={<CashRegistersPage />} />
+              <Route path="cash-registers/:id" element={<ShiftDetail />} />
             </Route>
 
             {/* Settings */}

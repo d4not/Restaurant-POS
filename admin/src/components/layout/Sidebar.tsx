@@ -2,6 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { NAV } from '../../routes/config';
 import { useAuthStore } from '../../store/auth';
 import { useUiStore } from '../../store/ui';
+import { useCurrentUserRegister } from '../../hooks/useRegisters';
 import { initials } from '../../utils/format';
 
 export function Sidebar() {
@@ -10,9 +11,11 @@ export function Sidebar() {
   const logout = useAuthStore((s) => s.logout);
   const openGroups = useUiStore((s) => s.openGroups);
   const toggleGroup = useUiStore((s) => s.toggleGroup);
+  const currentShiftQ = useCurrentUserRegister(user?.id);
 
   const userName = user?.name ?? 'Administrator';
   const userRole = user?.role ?? 'ADMIN';
+  const shiftLabel = currentShiftQ.data ? 'Shift active' : 'No open shift';
 
   return (
     <aside className="sidebar">
@@ -79,7 +82,7 @@ export function Sidebar() {
         <div className="avatar">{initials(userName)}</div>
         <div className="user-info">
           <div className="user-name">{userName}</div>
-          <div className="user-role">{roleLabel(userRole)} · AM Shift</div>
+          <div className="user-role">{roleLabel(userRole)} · {shiftLabel}</div>
         </div>
         <button
           type="button"

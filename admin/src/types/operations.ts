@@ -1,0 +1,157 @@
+/**
+ * Types for the operational side — cash registers, cash movements, orders,
+ * order items, payments — mirroring the Prisma models returned by the
+ * /registers and /orders endpoints.
+ *
+ * Decimal fields come over the wire as strings (Prisma serialization).
+ */
+
+export type CashRegisterStatus = 'OPEN' | 'CLOSED';
+export type CashMovementType = 'CASH_IN' | 'CASH_OUT';
+
+export type OrderStatus = 'OPEN' | 'PAID' | 'CANCELLED';
+export const ORDER_STATUSES: OrderStatus[] = ['OPEN', 'PAID', 'CANCELLED'];
+
+export type OrderType = 'DINE_IN' | 'TAKEOUT';
+export const ORDER_TYPES: OrderType[] = ['DINE_IN', 'TAKEOUT'];
+
+export type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER';
+export const PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'CARD', 'TRANSFER'];
+
+export function orderTypeLabel(t: OrderType): string {
+  switch (t) {
+    case 'DINE_IN': return 'Dine-in';
+    case 'TAKEOUT': return 'Takeout';
+  }
+}
+
+export function orderStatusLabel(s: OrderStatus): string {
+  switch (s) {
+    case 'OPEN':      return 'Open';
+    case 'PAID':      return 'Paid';
+    case 'CANCELLED': return 'Cancelled';
+  }
+}
+
+export function paymentMethodLabel(m: PaymentMethod): string {
+  switch (m) {
+    case 'CASH':     return 'Cash';
+    case 'CARD':     return 'Card';
+    case 'TRANSFER': return 'Transfer';
+  }
+}
+
+export function cashMovementTypeLabel(t: CashMovementType): string {
+  return t === 'CASH_IN' ? 'Cash in' : 'Cash out';
+}
+
+/* ── Cash movements ─────────────────────────────────────── */
+
+export interface CashMovement {
+  id: string;
+  register_id: string;
+  type: CashMovementType;
+  amount: string;
+  reason: string;
+  user_id: string;
+  created_at: string;
+}
+
+/* ── Cash register / shift ─────────────────────────────── */
+
+export interface CashRegister {
+  id: string;
+  user_id: string;
+  opened_at: string;
+  closed_at: string | null;
+  opening_amount: string;
+  expected_amount: string;
+  actual_amount: string | null;
+  difference: string | null;
+  status: CashRegisterStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  user?: { id: string; name: string };
+  cash_movements?: CashMovement[];
+}
+
+export interface OpenRegisterInput {
+  opening_amount: number;
+  notes?: string;
+}
+
+export interface CloseRegisterInput {
+  actual_amount: number;
+  notes?: string;
+}
+
+export interface CreateCashMovementInput {
+  type: CashMovementType;
+  amount: number;
+  reason: string;
+}
+
+/* ── Orders ─────────────────────────────────────────────── */
+
+export interface OrderItemModifier {
+  id: string;
+  order_item_id: string;
+  modifier_id: string;
+  name: string;
+  extra_price: string;
+}
+
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  product_id: string;
+  variant_id: string | null;
+  quantity: number;
+  unit_price: string;
+  modifiers_price: string;
+  line_total: string;
+  notes: string | null;
+  created_at: string;
+  product?: {
+    id: string;
+    name: string;
+    type: 'PRODUCT' | 'DISH' | 'PREPARATION';
+    tax_id: string | null;
+    station_id: string | null;
+  };
+  variant?: { id: string; name: string } | null;
+  modifiers?: OrderItemModifier[];
+}
+
+export interface Payment {
+  id: string;
+  order_id: string;
+  method: PaymentMethod;
+  amount: string;
+  change_amount: string;
+  reference: string | null;
+  created_at: string;
+}
+
+export interface Order {
+  id: string;
+  register_id: string;
+  order_number: number;
+  status: OrderStatus;
+  order_type: OrderType;
+  subtotal: string;
+  tax_amount: string;
+  discount_amount: string;
+  discount_reason: string | null;
+  total: string;
+  notes: string | null;
+  user_id: string;
+  order_date: string;
+  created_at: string;
+  updated_at: string;
+  register?: { id: string; status: CashRegisterStatus; user_id: string };
+  user?: { id: string; name: string };
+  items?: OrderItem[];
+  payments?: Payment[];
+}
