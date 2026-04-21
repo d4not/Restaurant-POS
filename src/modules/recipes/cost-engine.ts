@@ -36,7 +36,7 @@ const UNIT_ALIASES: Record<string, ContentUnit | 'PIECE'> = {
   units: 'PIECE',
 };
 
-function normalizeUnit(raw: string): ContentUnit | 'PIECE' {
+export function normalizeUnit(raw: string): ContentUnit | 'PIECE' {
   const key = raw.trim().toLowerCase();
   const normalized = UNIT_ALIASES[key];
   if (!normalized) {
@@ -109,28 +109,26 @@ type RecipeRow = {
 };
 
 /**
- * Cost of a single raw-supply line: convert the recipe quantity into the
- * supply's base unit, inflate by waste, then multiply by the supply's WAC.
+ * Convert a recipe-line quantity (e.g. "200 ml") into the supply's base unit
+ * (e.g. bottles), inflating by waste. Shared between cost computation and the
+ * sale-deduction engine.
  *
  *   base_qty    = quantity_in_content_unit / content_per_unit    (if measurable)
  *   base_qty    = quantity                                        (if piece-type)
  *   adjusted_qty = base_qty / (1 - waste_pct/100)
- *   line_cost    = adjusted_qty * average_cost
  */
-export function computeSupplyItemCost(
+export function convertRecipeQuantityToBase(
   quantity: Decimal | string | number,
   recipeUnit: string,
   wastePct: Decimal | string | number,
   supply: {
     content_per_unit: Prisma.Decimal | null;
     content_unit: ContentUnit | null;
-    average_cost: Prisma.Decimal;
   },
 ): Decimal {
   const qty = new Decimal(quantity);
-  let baseQty: Decimal;
-
   const normalized = normalizeUnit(recipeUnit);
+  let baseQty: Decimal;
 
   if (supply.content_per_unit && supply.content_unit) {
     if (normalized === 'PIECE') {
@@ -153,14 +151,72 @@ export function computeSupplyItemCost(
   if (wasteFactor.lte(0)) {
     throw new BadRequestError('waste_pct must be less than 100');
   }
-  const adjusted = baseQty.div(wasteFactor);
+  return baseQty.div(wasteFactor);
+}
+
+/**
+ * Cost of a single raw-supply line: convert the recipe quantity into the
+ * supply's base unit, inflate by waste, then multiply by the supply's WAC.
+ *
+ *   line_cost = convertRecipeQuantityToBase(...) * average_cost
+ */
+export function computeSupplyItemCost(
+  quantity: Decimal | string | number,
+  recipeUnit: string,
+  wastePct: Decimal | string | number,
+  supply: {
+    content_per_unit: Prisma.Decimal | null;
+    content_unit: ContentUnit | null;
+    average_cost: Prisma.Decimal;
+  },
+): Decimal {
+  const adjusted = convertRecipeQuantityToBase(quantity, recipeUnit, wastePct, supply);
   return adjusted.mul(new Decimal(supply.average_cost));
+}
+
+/**
+ * How much of a preparation's recipe to consume given a request like
+ * "30 ml of simple syrup" against a recipe that yields "150 ml". The factor
+ * scales every ingredient in the preparation's recipe (waste on the calling
+ * line is applied on top).
+ */
+export function computePreparationFactor(
+  quantity: Decimal | string | number,
+  recipeUnit: string,
+  wastePct: Decimal | string | number,
+  preparation: {
+    yield_quantity: Prisma.Decimal | null;
+    yield_unit: string | null;
+  },
+): Decimal {
+  if (!preparation.yield_quantity || !preparation.yield_unit) {
+    throw new BadRequestError(
+      'Preparation recipe is missing yield_quantity / yield_unit — set them before using it as an ingredient',
+    );
+  }
+  const normalizedRecipe = normalizeUnit(recipeUnit);
+  const normalizedYield = normalizeUnit(preparation.yield_unit);
+  let qtyInYield: Decimal;
+  if (normalizedRecipe === 'PIECE' || normalizedYield === 'PIECE') {
+    if (normalizedRecipe !== normalizedYield) {
+      throw new BadRequestError(
+        `Cannot convert ${recipeUnit} to preparation yield unit ${preparation.yield_unit}`,
+      );
+    }
+    qtyInYield = new Decimal(quantity);
+  } else {
+    qtyInYield = convertQuantity(new Decimal(quantity), normalizedRecipe, normalizedYield);
+  }
+  const yieldQty = new Decimal(preparation.yield_quantity);
+  const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
+  if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
+  return qtyInYield.div(yieldQty).div(wasteFactor);
 }
 
 /**
  * Cost for a line that references a sub-recipe (preparation).
  *
- *   line_cost = (quantity_in_yield_unit / yield_quantity) * preparation_total_cost
+ *   line_cost = computePreparationFactor(...) * preparation_total_cost
  *
  * `preparationRecipeCost` is the total cost of the preparation's recipe (the
  * caller computes it recursively). Waste on the line still applies on top.
@@ -175,35 +231,8 @@ export function computePreparationItemCost(
   },
   preparationRecipeCost: Decimal,
 ): Decimal {
-  if (!preparation.yield_quantity || !preparation.yield_unit) {
-    throw new BadRequestError(
-      'Preparation recipe is missing yield_quantity / yield_unit — set them before using it as an ingredient',
-    );
-  }
-  const normalizedRecipe = normalizeUnit(recipeUnit);
-  const normalizedYield = normalizeUnit(preparation.yield_unit);
-  if (normalizedRecipe === 'PIECE' || normalizedYield === 'PIECE') {
-    if (normalizedRecipe !== normalizedYield) {
-      throw new BadRequestError(
-        `Cannot convert ${recipeUnit} to preparation yield unit ${preparation.yield_unit}`,
-      );
-    }
-    const qty = new Decimal(quantity);
-    const yieldQty = new Decimal(preparation.yield_quantity);
-    const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
-    if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
-    return qty.div(yieldQty).mul(preparationRecipeCost).div(wasteFactor);
-  }
-
-  const qtyInYieldUnit = convertQuantity(
-    new Decimal(quantity),
-    normalizedRecipe,
-    normalizedYield,
-  );
-  const yieldQty = new Decimal(preparation.yield_quantity);
-  const wasteFactor = new Decimal(1).sub(new Decimal(wastePct).div(100));
-  if (wasteFactor.lte(0)) throw new BadRequestError('waste_pct must be less than 100');
-  return qtyInYieldUnit.div(yieldQty).mul(preparationRecipeCost).div(wasteFactor);
+  const factor = computePreparationFactor(quantity, recipeUnit, wastePct, preparation);
+  return factor.mul(preparationRecipeCost);
 }
 
 /**
