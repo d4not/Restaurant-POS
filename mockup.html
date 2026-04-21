@@ -1,0 +1,346 @@
+<!DOCTYPE html><html lang="es"><head>
+
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restaurant POS — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&amp;family=DM+Sans:wght@300;400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { overflow: hidden; }
+  #content { transition: opacity 0.15s; }
+  #content.loading { opacity: 0.4; pointer-events: none; }
+</style>
+</head>
+<body style="cursor: crosshair; background-color: rgb(245, 240, 232);" data-cc-id="cc-1">
+<div class="app">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="name">Restaurant POS</div>
+      <div class="sub">PANEL DE ADMINISTRACIÓN</div>
+    </div>
+
+    <nav class="nav" id="nav"><div class="nav-single"><span>◈</span>Dashboard</div><div class="nav-group-header open"><span class="label">📊 Reportes</span><span class="arrow">▶</span></div><div class="nav-item">Ventas</div><div class="nav-item">Órdenes</div><div class="nav-item">Productos vendidos</div><div class="nav-item active">Gastos e ingresos</div><hr class="nav-divider"><div class="nav-group-header open"><span class="label">📦 Inventario</span><span class="arrow">▶</span></div><div class="nav-item">Insumos</div><div class="nav-item">Movimientos</div><div class="nav-item">Proveedores</div><hr class="nav-divider"><div class="nav-group-header open"><span class="label">🍽 Menú</span><span class="arrow">▶</span></div><div class="nav-item">Productos</div><div class="nav-item">Categorías</div><hr class="nav-divider"><div class="nav-group-header open"><span class="label">👥 Personal</span><span class="arrow">▶</span></div><div class="nav-item">Empleados</div><div class="nav-item">Caja / Turnos</div><hr class="nav-divider"><div class="nav-group-header open"><span class="label">⚙ Sistema</span><span class="arrow">▶</span></div><div class="nav-item">Configuración</div><hr class="nav-divider"></nav>
+
+    <div class="sidebar-user">
+      <div class="avatar">A</div>
+      <div>
+        <div class="user-name">Administrador</div>
+        <div class="user-role">Turno AM · Activo</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+    <div class="topbar">
+      <div class="page-title">
+        <div class="breadcrumb" id="breadcrumb" style="" data-cc-id="cc-3">Reportes /</div>
+        <h1 id="page-title">Gastos e ingresos</h1>
+      </div>
+      <div class="topbar-actions">
+        <div class="date-badge" id="date-badge">mar, 21 de abr de 2026</div>
+        <div class="notif-btn" title="Notificaciones">🔔</div>
+      </div>
+    </div>
+    <div class="content" id="content" data-cc-id="cc-2">
+<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="kpi accent"><div class="kpi-label">Ingresos del mes</div><div class="kpi-value">$112,800</div><div class="kpi-sub">vs meta $140,000</div></div>
+  <div class="kpi"><div class="kpi-label">Gastos del mes</div><div class="kpi-value">$68,400</div><div class="kpi-sub">insumos + nómina + renta</div></div>
+  <div class="kpi"><div class="kpi-label">Utilidad neta</div><div class="kpi-value" style="color:var(--green)">$44,400</div><div class="kpi-sub">margen 39%</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">
+  <div class="chart-wrap">
+    <div class="chart-title">Ingresos vs Gastos — últimos 6 meses</div>
+    <div style="display:flex;align-items:flex-end;gap:10px;height:130px;margin-bottom:8px" id="rev-exp"><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:78%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:50%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:28%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Nov</div>
+  </div><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:85%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:52%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:33%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Dic</div>
+  </div><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:70%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:45%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:25%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Ene</div>
+  </div><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:90%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:58%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:32%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Feb</div>
+  </div><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:82%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:52%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:30%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Mar</div>
+  </div><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:100%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:61%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:39%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">Abr</div>
+  </div></div>
+    <div style="display:flex;gap:16px;font-size:11px">
+      <span style="color:var(--gold)">■ Ingresos</span>
+      <span style="color:var(--text3)">■ Gastos</span>
+      <span style="color:var(--green)">■ Utilidad</span>
+    </div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-title">Desglose de gastos</div>
+    <div id="expense-breakdown" class="mini-bars"><div class="mini-bar-row">
+    <div class="mini-label">Insumos</div>
+    <div class="mini-track"><div class="mini-fill" style="width:45%"></div></div>
+    <div class="mini-val">45%</div>
+  </div><div class="mini-bar-row">
+    <div class="mini-label">Nómina</div>
+    <div class="mini-track"><div class="mini-fill" style="width:38%"></div></div>
+    <div class="mini-val">38%</div>
+  </div><div class="mini-bar-row">
+    <div class="mini-label">Renta</div>
+    <div class="mini-track"><div class="mini-fill" style="width:10%"></div></div>
+    <div class="mini-val">10%</div>
+  </div><div class="mini-bar-row">
+    <div class="mini-label">Servicios</div>
+    <div class="mini-track"><div class="mini-fill" style="width:7%"></div></div>
+    <div class="mini-val">7%</div>
+  </div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <h2 style="font-size:15px">Gastos registrados</h2>
+    <button class="btn btn-primary btn-sm">+ Registrar gasto</button>
+  </div>
+  <div class="table-wrap">
+    <div class="table-head" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+      <div>Concepto</div><div>Categoría</div><div>Descripción</div><div>Monto</div><div>Fecha</div>
+    </div>
+    <div id="expenses-list">
+  <div class="table-row even" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">Insumos semana</div>
+    <div><span class="badge badge-gray">Insumos</span></div>
+    <div class="text-muted fs-12">Compra semanal proveedores</div>
+    <div class="fw-600 text-red">-$12,400</div>
+    <div class="text-muted fs-12">18 Abr</div>
+  </div>
+  <div class="table-row odd" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">Nómina quincenal</div>
+    <div><span class="badge badge-gray">Nómina</span></div>
+    <div class="text-muted fs-12">Pago quincena empleados</div>
+    <div class="fw-600 text-red">-$22,000</div>
+    <div class="text-muted fs-12">15 Abr</div>
+  </div>
+  <div class="table-row even" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">Renta local</div>
+    <div><span class="badge badge-gray">Renta</span></div>
+    <div class="text-muted fs-12">Renta mensual del local</div>
+    <div class="fw-600 text-red">-$12,000</div>
+    <div class="text-muted fs-12">1 Abr</div>
+  </div>
+  <div class="table-row odd" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">Gas y electricidad</div>
+    <div><span class="badge badge-gray">Servicios</span></div>
+    <div class="text-muted fs-12">Servicios del mes</div>
+    <div class="fw-600 text-red">-$3,800</div>
+    <div class="text-muted fs-12">1 Abr</div>
+  </div>
+  <div class="table-row even" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">Insumos lunes</div>
+    <div><span class="badge badge-gray">Insumos</span></div>
+    <div class="text-muted fs-12">Compra semanal proveedores</div>
+    <div class="fw-600 text-red">-$11,200</div>
+    <div class="text-muted fs-12">14 Abr</div>
+  </div></div>
+  </div>
+</div>
+
+<script>
+const months = ['Nov','Dic','Ene','Feb','Mar','Abr'];
+const revs2 = [78,85,70,90,82,100];
+const exps2 = [50,52,45,58,52,61];
+const revEl = document.getElementById('rev-exp');
+months.forEach((m,i)=>{
+  revEl.innerHTML+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div style="flex:1;display:flex;align-items:flex-end;gap:2px;width:100%">
+      <div style="flex:1;background:var(--gold);border-radius:3px 3px 0 0;opacity:.85;height:${revs2[i]}%"></div>
+      <div style="flex:1;background:var(--border);border-radius:3px 3px 0 0;height:${exps2[i]}%"></div>
+      <div style="flex:1;background:var(--green);border-radius:3px 3px 0 0;opacity:.7;height:${revs2[i]-exps2[i]}%"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text3)">${m}</div>
+  </div>`;
+});
+
+[['Insumos','45%',45],['Nómina','38%',38],['Renta','10%',10],['Servicios','7%',7]].forEach(([l,pct,w])=>{
+  document.getElementById('expense-breakdown').innerHTML+=`<div class="mini-bar-row">
+    <div class="mini-label">${l}</div>
+    <div class="mini-track"><div class="mini-fill" style="width:${w}%"></div></div>
+    <div class="mini-val">${pct}</div>
+  </div>`;
+});
+
+const EXPENSES = [
+  ['Insumos semana','Insumos','Compra semanal proveedores','$12,400','18 Abr'],
+  ['Nómina quincenal','Nómina','Pago quincena empleados','$22,000','15 Abr'],
+  ['Renta local','Renta','Renta mensual del local','$12,000','1 Abr'],
+  ['Gas y electricidad','Servicios','Servicios del mes','$3,800','1 Abr'],
+  ['Insumos lunes','Insumos','Compra semanal proveedores','$11,200','14 Abr'],
+];
+document.getElementById('expenses-list').innerHTML = EXPENSES.map((e,i)=>`
+  <div class="table-row ${i%2===0?'even':'odd'}" style="grid-template-columns:1fr 1fr 1fr 100px 90px">
+    <div class="fw-600 fs-13">${e[0]}</div>
+    <div><span class="badge badge-gray">${e[1]}</span></div>
+    <div class="text-muted fs-12">${e[2]}</div>
+    <div class="fw-600 text-red">-${e[3]}</div>
+    <div class="text-muted fs-12">${e[4]}</div>
+  </div>`).join('');
+</script>
+</div>
+  </main>
+</div>
+
+<script>
+const NAV = [
+  { id:'dashboard', label:'Dashboard', icon:'◈', single:true },
+  { id:'reportes', label:'Reportes', icon:'📊', items:[
+    { id:'sales',         label:'Ventas' },
+    { id:'orders-report', label:'Órdenes' },
+    { id:'products-sold', label:'Productos vendidos' },
+    { id:'expenses',      label:'Gastos e ingresos' },
+  ]},
+  { id:'inventario', label:'Inventario', icon:'📦', items:[
+    { id:'inventory',  label:'Insumos' },
+    { id:'movements',  label:'Movimientos' },
+    { id:'suppliers',  label:'Proveedores' },
+  ]},
+  { id:'menu_cat', label:'Menú', icon:'🍽', items:[
+    { id:'products',    label:'Productos' },
+    { id:'categories',  label:'Categorías' },
+  ]},
+  { id:'personal', label:'Personal', icon:'👥', items:[
+    { id:'employees', label:'Empleados' },
+    { id:'cash',      label:'Caja / Turnos' },
+  ]},
+  { id:'sistema', label:'Sistema', icon:'⚙', items:[
+    { id:'settings', label:'Configuración' },
+  ]},
+];
+
+// Build nav
+const navEl = document.getElementById('nav');
+const openGroups = new Set(NAV.filter(g=>!g.single).map(g=>g.id));
+
+function renderNav() {
+  navEl.innerHTML = '';
+  NAV.forEach(group => {
+    if (group.single) {
+      const el = document.createElement('div');
+      el.className = 'nav-single' + (currentSection === group.id ? ' active' : '');
+      el.innerHTML = `<span>${group.icon}</span>${group.label}`;
+      el.onclick = () => navigate(group.id);
+      navEl.appendChild(el);
+    } else {
+      const hdr = document.createElement('div');
+      hdr.className = 'nav-group-header' + (openGroups.has(group.id) ? ' open' : '');
+      hdr.innerHTML = `<span class="label">${group.icon} ${group.label}</span><span class="arrow">▶</span>`;
+      hdr.onclick = () => {
+        openGroups.has(group.id) ? openGroups.delete(group.id) : openGroups.add(group.id);
+        renderNav();
+      };
+      navEl.appendChild(hdr);
+
+      if (openGroups.has(group.id)) {
+        group.items.forEach(item => {
+          const el = document.createElement('div');
+          el.className = 'nav-item' + (currentSection === item.id ? ' active' : '');
+          el.textContent = item.label;
+          el.onclick = () => navigate(item.id);
+          navEl.appendChild(el);
+        });
+      }
+      const div = document.createElement('hr');
+      div.className = 'nav-divider';
+      navEl.appendChild(div);
+    }
+  });
+}
+
+function findLabel(id) {
+  for (const g of NAV) {
+    if (g.single && g.id === id) return { label: g.label, group: '' };
+    if (g.items) { const f = g.items.find(i=>i.id===id); if(f) return { label: f.label, group: g.label }; }
+  }
+  return { label: id, group: '' };
+}
+
+// Navigation
+let currentSection = localStorage.getItem('pos_section') || 'dashboard';
+
+async function navigate(id) {
+  currentSection = id;
+  localStorage.setItem('pos_section', id);
+
+  const { label, group } = findLabel(id);
+  document.getElementById('page-title').textContent = label;
+  document.getElementById('breadcrumb').textContent = group ? `${group} /` : '';
+
+  renderNav();
+
+  const contentEl = document.getElementById('content');
+  contentEl.classList.add('loading');
+
+  try {
+    const res = await fetch(`sections/${id}.html`);
+    if (res.ok) {
+      const html = await res.text();
+      contentEl.innerHTML = html;
+      // Run inline scripts after DOM settles
+      setTimeout(() => {
+        contentEl.querySelectorAll('script').forEach(s => {
+          const ns = document.createElement('script');
+          ns.textContent = s.textContent;
+          document.body.appendChild(ns);
+          document.body.removeChild(ns);
+        });
+      }, 0);
+    } else {
+      contentEl.innerHTML = `<div class="empty-state"><div class="icon">🚧</div><p>Sección en construcción</p></div>`;
+    }
+  } catch(e) {
+    contentEl.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><p>Error cargando sección</p></div>`;
+  }
+
+  contentEl.classList.remove('loading');
+  contentEl.scrollTop = 0;
+}
+
+// Date
+const now = new Date();
+document.getElementById('date-badge').textContent = now.toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+
+// Init
+renderNav();
+navigate(currentSection);
+</script>
+
+
+</body></html>
