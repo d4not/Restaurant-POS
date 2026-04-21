@@ -15,6 +15,8 @@ import { CategoriesPage } from './pages/menu/CategoriesPage';
 import { OrdersPage } from './pages/orders/OrdersPage';
 import { CashRegistersPage } from './pages/staff/CashRegistersPage';
 import { ShiftDetail } from './pages/staff/ShiftDetail';
+import { EmployeesPage } from './pages/staff/EmployeesPage';
+import { EmployeeDetail } from './pages/staff/EmployeeDetail';
 import { SalesReport } from './pages/reports/SalesReport';
 import { ExpensesReport } from './pages/reports/ExpensesReport';
 import { ProductCostsReport } from './pages/reports/ProductCostsReport';
@@ -80,7 +82,8 @@ export default function App() {
             {/* Staff */}
             <Route path="staff">
               <Route index element={<Navigate to="employees" replace />} />
-              <Route path="employees"          element={<Placeholder title="Employees" />} />
+              <Route path="employees"          element={<EmployeesPage />} />
+              <Route path="employees/:id"      element={<EmployeeDetail />} />
               <Route path="cash-registers"     element={<CashRegistersPage />} />
               <Route path="cash-registers/:id" element={<ShiftDetail />} />
             </Route>

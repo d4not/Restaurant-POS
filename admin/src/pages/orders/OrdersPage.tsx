@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Badge, Table } from '../../components/ui';
+import { Badge, Button, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { SearchInput } from '../../components/forms/SearchInput';
 import { useOrders } from '../../hooks/useOrders';
@@ -19,6 +19,7 @@ import {
   paymentMethodTone,
 } from '../staff/operations-meta';
 import { OrderDetailModal } from './OrderDetailModal';
+import { NewOrderModal } from './NewOrderModal';
 
 function toIsoDayStart(value: string): string | undefined {
   if (!value) return undefined;
@@ -49,6 +50,8 @@ export function OrdersPage() {
     else next.delete('id');
     setUrlParams(next, { replace: true });
   };
+
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
 
   const filters = useMemo(
     () => ({
@@ -170,6 +173,13 @@ export function OrdersPage() {
 
   return (
     <>
+      <div className="flex-between mb-12">
+        <div />
+        <Button variant="primary" onClick={() => setNewOrderOpen(true)}>
+          + New order
+        </Button>
+      </div>
+
       <div className="toolbar" style={{ alignItems: 'flex-end', gap: 10 }}>
         <div style={{ flex: '1 1 260px', minWidth: 220 }}>
           <label
@@ -294,6 +304,14 @@ export function OrdersPage() {
         open={!!selectedId}
         onClose={() => setSelectedId(null)}
         orderId={selectedId}
+      />
+
+      <NewOrderModal
+        open={newOrderOpen}
+        onClose={() => setNewOrderOpen(false)}
+        onCreated={() => {
+          /* Stay on the 'done' screen; user closes with Done button. */
+        }}
       />
     </>
   );
