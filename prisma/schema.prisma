@@ -80,6 +80,33 @@ enum UserRole {
   BARISTA
 }
 
+enum CashRegisterStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+}
+
+enum OrderStatus {
+  OPEN
+  PAID
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEOUT
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
@@ -99,6 +126,9 @@ model User {
   transfers         Transfer[]
   inventory_checks  InventoryCheck[]
   write_offs        WriteOff[]
+  cash_registers    CashRegister[]
+  cash_movements    CashMovement[]
+  orders            Order[]
 
   @@index([email])
   @@map("users")
@@ -502,6 +532,7 @@ model Product {
   recipe                 Recipe?                 @relation("ProductRecipe")
   // When this product is a PREPARATION and is used as an ingredient in other recipes.
   recipe_items_as_prep   RecipeItem[]            @relation("RecipeItemPreparation")
+  order_items            OrderItem[]
 
   @@index([category_id])
   @@index([type])
@@ -525,6 +556,7 @@ model ProductVariant {
 
   product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
   recipe  Recipe? @relation("VariantRecipe")
+  order_items OrderItem[]
 
   @@index([product_id])
   @@map("product_variants")
@@ -561,6 +593,7 @@ model Modifier {
 
   group  ModifierGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
   supply Supply?       @relation(fields: [supply_id], references: [id])
+  order_item_modifiers OrderItemModifier[]
 
   @@index([group_id])
   @@index([supply_id])
@@ -638,4 +671,141 @@ model ProductModification {
   @@index([product_id])
   @@index([supply_id])
   @@map("product_modifications")
+}
+
+// ============================================================================
+// Phase 7 — Orders, Payments & Cash Register
+// ============================================================================
+
+model CashRegister {
+  id              String             @id @default(uuid()) @db.Uuid
+  user_id         String             @db.Uuid
+  opened_at       DateTime           @default(now())
+  closed_at       DateTime?
+  opening_amount  Decimal             @db.Decimal(14, 0)
+  // expected_amount is maintained incrementally as cash payments, change-given
+  // and CashMovements land. It's authoritative for the close-flow so the user
+  // doesn't have to re-run a big aggregate query every time.
+  expected_amount Decimal             @default(0) @db.Decimal(14, 0)
+  actual_amount   Decimal?            @db.Decimal(14, 0)
+  difference      Decimal?            @db.Decimal(14, 0)
+  status          CashRegisterStatus  @default(OPEN)
+  notes           String?
+  created_at      DateTime            @default(now())
+  updated_at      DateTime            @updatedAt
+
+  user           User           @relation(fields: [user_id], references: [id])
+  orders         Order[]
+  cash_movements CashMovement[]
+
+  @@index([user_id])
+  @@index([status])
+  @@index([opened_at])
+  @@map("cash_registers")
+}
+
+model CashMovement {
+  id          String           @id @default(uuid()) @db.Uuid
+  register_id String           @db.Uuid
+  type        CashMovementType
+  amount      Decimal          @db.Decimal(14, 0)
+  reason      String
+  user_id     String           @db.Uuid
+  created_at  DateTime         @default(now())
+
+  register CashRegister @relation(fields: [register_id], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [user_id], references: [id])
+
+  @@index([register_id])
+  @@index([user_id])
+  @@index([type])
+  @@map("cash_movements")
+}
+
+model Order {
+  id              String      @id @default(uuid()) @db.Uuid
+  register_id     String      @db.Uuid
+  order_number    Int
+  status          OrderStatus @default(OPEN)
+  order_type      OrderType
+  subtotal        Decimal     @default(0) @db.Decimal(14, 0)
+  tax_amount      Decimal     @default(0) @db.Decimal(14, 0)
+  discount_amount Decimal     @default(0) @db.Decimal(14, 0)
+  discount_reason String?
+  total           Decimal     @default(0) @db.Decimal(14, 0)
+  notes           String?
+  user_id         String      @db.Uuid
+  // Keeps the daily-reset order_number unique — two orders on the same date
+  // cannot share the same number. Date stored at midnight UTC.
+  order_date      DateTime    @db.Date
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+
+  register CashRegister @relation(fields: [register_id], references: [id])
+  user     User         @relation(fields: [user_id], references: [id])
+  items    OrderItem[]
+  payments Payment[]
+
+  @@unique([order_date, order_number])
+  @@index([register_id])
+  @@index([user_id])
+  @@index([status])
+  @@index([order_type])
+  @@index([created_at])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  order_id        String   @db.Uuid
+  product_id      String   @db.Uuid
+  variant_id      String?  @db.Uuid
+  quantity        Int      @default(1)
+  unit_price      Decimal  @db.Decimal(14, 0)
+  modifiers_price Decimal  @default(0) @db.Decimal(14, 0)
+  line_total      Decimal  @db.Decimal(14, 0)
+  notes           String?
+  created_at      DateTime @default(now())
+
+  order     Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product   Product             @relation(fields: [product_id], references: [id])
+  variant   ProductVariant?     @relation(fields: [variant_id], references: [id])
+  modifiers OrderItemModifier[]
+
+  @@index([order_id])
+  @@index([product_id])
+  @@index([variant_id])
+  @@map("order_items")
+}
+
+model OrderItemModifier {
+  id            String @id @default(uuid()) @db.Uuid
+  order_item_id String @db.Uuid
+  modifier_id   String @db.Uuid
+  // Snapshots — these survive menu edits so order history stays accurate.
+  name          String
+  extra_price   Decimal @db.Decimal(14, 0)
+
+  order_item OrderItem @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+  modifier   Modifier  @relation(fields: [modifier_id], references: [id])
+
+  @@index([order_item_id])
+  @@index([modifier_id])
+  @@map("order_item_modifiers")
+}
+
+model Payment {
+  id            String        @id @default(uuid()) @db.Uuid
+  order_id      String        @db.Uuid
+  method        PaymentMethod
+  amount        Decimal       @db.Decimal(14, 0)
+  change_amount Decimal       @default(0) @db.Decimal(14, 0)
+  reference     String?
+  created_at    DateTime      @default(now())
+
+  order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+  @@index([order_id])
+  @@index([method])
+  @@map("payments")
 }

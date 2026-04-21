@@ -34,6 +34,11 @@ export interface DeductSaleResult {
 
 export interface DeductSaleOptions {
   pos_register_id?: string | null;
+  // When provided, the deduction runs inside the caller's transaction instead
+  // of opening a new one. The payment flow needs this so the order status
+  // flip, payment insert, register update, and inventory deduction all live
+  // or die together.
+  client?: Tx;
 }
 
 type RecipeItemRow = {
@@ -226,7 +231,7 @@ export async function deductSaleFromInventory(
     throw new BadRequestError('No ordered items provided');
   }
 
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Tx): Promise<DeductSaleResult> => {
     const ruleStorageId = await resolveRuleStorage(
       tx,
       stationId,
@@ -386,5 +391,8 @@ export async function deductSaleFromInventory(
     }
 
     return { order_id: orderId, deductions, warnings };
-  });
+  };
+
+  if (options.client) return run(options.client);
+  return prisma.$transaction(run);
 }

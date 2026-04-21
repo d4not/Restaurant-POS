@@ -32,6 +32,12 @@ const TRUNCATE_TABLES = [
   'recipes',
   'recipe_items',
   'product_modifications',
+  'cash_registers',
+  'cash_movements',
+  'orders',
+  'order_items',
+  'order_item_modifiers',
+  'payments',
 ];
 
 beforeEach(async () => {

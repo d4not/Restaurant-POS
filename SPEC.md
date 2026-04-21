@@ -498,6 +498,178 @@ updated_at      DateTime
 
 ---
 
+## Phase 7: Orders, Payments & Cash Register
+
+### Core concept
+An Order is the lifecycle of a customer's visit: open → add items → pay → close.
+When an order is PAID, it triggers the sale deduction engine (already built in Phase 4).
+The Cash Register (Caja) tracks money across shifts — how much cash started, how much came in, how much should be there.
+
+### 7.1 Entity: CashRegister (Caja / Turno)
+A shift. Opened by a user at the start of their work, closed at the end.
+```
+id                UUID PK
+user_id           UUID FK → User (who opened this shift)
+opened_at         DateTime
+closed_at         DateTime?
+opening_amount    Decimal (in centavos — cash in the drawer at start)
+expected_amount   Decimal (CALCULATED: opening + cash sales - cash change given)
+actual_amount     Decimal? (physically counted at close)
+difference        Decimal? (CALCULATED: actual - expected)
+status            Enum: OPEN, CLOSED
+notes             String?
+created_at        DateTime
+updated_at        DateTime
+```
+
+**Rules:**
+- Only ONE register can be OPEN per user at a time.
+- To close: user enters actual_amount (what they counted), system calculates difference.
+- Orders can only be created while a register is OPEN.
+- Non-sale cash movements (petty cash out, tips in, etc.) are tracked via CashMovement.
+
+### 7.2 Entity: CashMovement (Movimientos de caja no relacionados a ventas)
+```
+id                UUID PK
+register_id       UUID FK → CashRegister
+type              Enum: CASH_IN, CASH_OUT
+amount            Decimal (in centavos, always positive)
+reason            String (e.g., "Petty cash for supplies", "Tips")
+user_id           UUID FK → User
+created_at        DateTime
+```
+These affect expected_amount: CASH_IN adds, CASH_OUT subtracts.
+
+### 7.3 Entity: Order (Orden)
+```
+id                UUID PK
+register_id       UUID FK → CashRegister
+order_number      Int (auto-increment per day, resets daily: 1, 2, 3...)
+status            Enum: OPEN, PAID, CANCELLED
+order_type        Enum: DINE_IN, TAKEOUT
+subtotal          Decimal (sum of items before tax, in centavos)
+tax_amount        Decimal (in centavos)
+discount_amount   Decimal default 0 (in centavos)
+discount_reason   String?
+total             Decimal (subtotal + tax - discount, in centavos)
+notes             String?
+user_id           UUID FK → User (who created the order)
+created_at        DateTime
+updated_at        DateTime
+```
+
+### 7.4 Entity: OrderItem
+```
+id                UUID PK
+order_id          UUID FK → Order
+product_id        UUID FK → Product
+variant_id        UUID? FK → ProductVariant
+quantity          Int default 1
+unit_price        Decimal (in centavos — price at time of sale, snapshot)
+modifiers_price   Decimal default 0 (sum of modifier extra_prices)
+line_total        Decimal (CALCULATED: (unit_price + modifiers_price) * quantity)
+notes             String? (e.g., "extra hot", special instructions)
+created_at        DateTime
+```
+
+### 7.5 Entity: OrderItemModifier
+```
+id                UUID PK
+order_item_id     UUID FK → OrderItem
+modifier_id       UUID FK → Modifier
+name              String (snapshot — modifier name at time of sale)
+extra_price       Decimal (snapshot — price at time of sale, in centavos)
+```
+Prices are snapshotted so the order history stays accurate even if menu prices change later.
+
+### 7.6 Entity: Payment (Pago)
+```
+id                UUID PK
+order_id          UUID FK → Order
+method            Enum: CASH, CARD, TRANSFER
+amount            Decimal (in centavos — amount tendered)
+change_amount     Decimal default 0 (only for CASH: amount - order.total)
+reference         String? (transaction ID for card/transfer)
+created_at        DateTime
+```
+
+**Rules:**
+- An order can have MULTIPLE payments (split payment: part cash, part card).
+- Sum of all payment amounts must be >= order.total to mark as PAID.
+- change_amount only applies to the CASH payment in a split.
+- CARD and TRANSFER payments: amount must equal exactly what's owed (no change).
+
+### 7.7 Order lifecycle flow
+
+**Opening an order:**
+1. Verify CashRegister is OPEN for this user
+2. Create Order with status=OPEN, auto-generate order_number for today
+
+**Adding items:**
+1. Validate product/variant exists and is active
+2. Snapshot unit_price from variant.sell_price (or product.sell_price)
+3. Apply modifiers: snapshot each modifier's name and extra_price
+4. Calculate line_total = (unit_price + sum(modifier prices)) * quantity
+5. Recalculate order subtotal, tax, total
+
+**Removing/updating items:**
+- Only while order status=OPEN
+- Recalculate totals after any change
+
+**Paying:**
+1. Create Payment record(s)
+2. If method=CASH: change_amount = amount - remaining_balance (must be >= 0)
+3. If method=CARD or TRANSFER: amount must equal remaining_balance exactly
+4. When sum(payments) >= order.total:
+   a. Set order.status = PAID
+   b. Call deductSaleFromInventory (already built) with all order items
+   c. Update CashRegister.expected_amount (add cash payments, subtract change)
+5. All in a single transaction
+
+**Cancelling:**
+- Only OPEN orders can be cancelled
+- Set status=CANCELLED, no inventory deduction
+
+### 7.8 Cash register close flow
+1. User enters actual_amount (what they physically counted)
+2. System calculates expected_amount:
+   ```
+   expected = opening_amount
+            + sum(CASH payments from this register's orders)
+            - sum(change_amount from CASH payments)
+            + sum(CASH_IN movements)
+            - sum(CASH_OUT movements)
+   ```
+3. difference = actual_amount - expected_amount
+4. Set status=CLOSED, closed_at=now
+5. Positive difference = extra cash (tips left in drawer?)
+6. Negative difference = missing cash (error or theft)
+
+### 7.9 API endpoints
+```
+POST   /api/v1/registers                    — open a register (opening_amount)
+POST   /api/v1/registers/:id/close          — close register (actual_amount)
+GET    /api/v1/registers/:id                — register details + summary
+GET    /api/v1/registers                    — list registers (filter by status, user, date)
+
+POST   /api/v1/registers/:id/cash-movements — add cash in/out
+GET    /api/v1/registers/:id/cash-movements — list movements
+
+POST   /api/v1/orders                       — create order (register_id, order_type)
+GET    /api/v1/orders/:id                   — order detail with items, modifiers, payments
+GET    /api/v1/orders                       — list orders (filter by status, date, register)
+PATCH  /api/v1/orders/:id                   — update notes, discount
+DELETE /api/v1/orders/:id                   — cancel order
+
+POST   /api/v1/orders/:id/items             — add item (product_id, variant_id?, quantity, modifier_ids[])
+PATCH  /api/v1/orders/:id/items/:itemId     — update quantity or notes
+DELETE /api/v1/orders/:id/items/:itemId     — remove item
+
+POST   /api/v1/orders/:id/payments          — add payment (method, amount, reference?)
+```
+
+---
+
 ## Implementation Notes
 
 ### Monetary values

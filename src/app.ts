@@ -22,6 +22,8 @@ import { modifierGroupRouter } from './modules/modifiers/routes.js';
 import { recipeRouter } from './modules/recipes/routes.js';
 import { alertRouter } from './modules/alerts/routes.js';
 import { reportRouter } from './modules/reports/routes.js';
+import { cashRegisterRouter } from './modules/cash-registers/routes.js';
+import { orderRouter } from './modules/orders/routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -64,6 +66,8 @@ export function createApp(): Express {
   app.use('/api/v1/recipes', recipeRouter);
   app.use('/api/v1/alerts', alertRouter);
   app.use('/api/v1/reports', reportRouter);
+  app.use('/api/v1/registers', cashRegisterRouter);
+  app.use('/api/v1/orders', orderRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
