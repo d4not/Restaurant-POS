@@ -1,0 +1,631 @@
+// Restaurant POS — full data model
+// See SPEC.md for entity definitions and business rules.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum BaseUnit {
+  PIECE
+  BOTTLE
+  KG
+  LITER
+  BAG
+  BOX
+  UNIT
+}
+
+enum ContentUnit {
+  ML
+  L
+  G
+  KG
+  OZ
+  FL_OZ
+}
+
+enum PurchaseStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+enum InventoryCheckType {
+  FULL
+  PARTIAL
+}
+
+enum InventoryCheckStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum WriteOffReason {
+  EXPIRED
+  DAMAGED
+  SPILLED
+  THEFT
+  OTHER
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  TRANSFER_IN
+  TRANSFER_OUT
+  WRITE_OFF
+  ADJUSTMENT
+  MANUFACTURE
+}
+
+enum ProductType {
+  PRODUCT
+  DISH
+  PREPARATION
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  CASHIER
+  BARISTA
+}
+
+// ============================================================================
+// Phase 6 — referenced throughout; declared first
+// ============================================================================
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  email         String   @unique
+  pin           String
+  password_hash String
+  role          UserRole
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  purchases         Purchase[]
+  transfers         Transfer[]
+  inventory_checks  InventoryCheck[]
+  write_offs        WriteOff[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Tax {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  rate       Decimal  @db.Decimal(6, 2)
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  products Product[]
+
+  @@map("taxes")
+}
+
+// ============================================================================
+// Phase 2 — Supplies Module
+// ============================================================================
+
+model SupplyCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  supplies Supply[]
+
+  @@map("supply_categories")
+}
+
+model Supply {
+  id               String       @id @default(uuid()) @db.Uuid
+  barcode          String?      @unique
+  name             String
+  category_id      String       @db.Uuid
+  base_unit        BaseUnit
+  content_per_unit Decimal?     @db.Decimal(14, 4)
+  content_unit     ContentUnit?
+  average_cost     Decimal      @default(0) @db.Decimal(14, 4)
+  last_cost        Decimal      @default(0) @db.Decimal(14, 4)
+  active           Boolean      @default(true)
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
+  deleted_at       DateTime?
+
+  category              SupplyCategory        @relation(fields: [category_id], references: [id])
+  purchase_packagings   PurchasePackaging[]
+  storage_stocks        StorageStock[]
+  tare_weight           TareWeight?
+  purchase_items        PurchaseItem[]
+  transfer_items        TransferItem[]
+  inventory_check_items InventoryCheckItem[]
+  write_offs            WriteOff[]
+  stock_movements       StockMovement[]
+  modifiers             Modifier[]
+  recipe_items          RecipeItem[]
+  products              Product[]
+  product_modifications ProductModification[]
+
+  @@index([category_id])
+  @@index([active])
+  @@index([deleted_at])
+  @@map("supplies")
+}
+
+model Supplier {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  contact_name String?
+  phone        String?
+  email        String?
+  address      String?
+  credit_days  Int      @default(0)
+  notes        String?
+  active       Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  purchase_packagings PurchasePackaging[]
+  purchases           Purchase[]
+
+  @@map("suppliers")
+}
+
+model PurchasePackaging {
+  id                String   @id @default(uuid()) @db.Uuid
+  supply_id         String   @db.Uuid
+  supplier_id       String   @db.Uuid
+  name              String
+  units_per_package Decimal  @db.Decimal(14, 4)
+  active            Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  supply         Supply         @relation(fields: [supply_id], references: [id])
+  supplier       Supplier       @relation(fields: [supplier_id], references: [id])
+  purchase_items PurchaseItem[]
+
+  @@index([supply_id])
+  @@index([supplier_id])
+  @@map("purchase_packagings")
+}
+
+model Storage {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  address    String?
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  storage_stocks        StorageStock[]
+  purchases             Purchase[]
+  transfers_from        Transfer[]           @relation("TransferFrom")
+  transfers_to          Transfer[]           @relation("TransferTo")
+  inventory_checks      InventoryCheck[]
+  write_offs            WriteOff[]
+  stock_movements       StockMovement[]
+  deduction_rules       DeductionRule[]
+
+  @@map("storages")
+}
+
+model StorageStock {
+  id         String   @id @default(uuid()) @db.Uuid
+  supply_id  String   @db.Uuid
+  storage_id String   @db.Uuid
+  quantity   Decimal  @default(0) @db.Decimal(14, 4)
+  min_stock  Decimal? @db.Decimal(14, 4)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  supply  Supply  @relation(fields: [supply_id], references: [id])
+  storage Storage @relation(fields: [storage_id], references: [id])
+
+  @@unique([supply_id, storage_id])
+  @@index([storage_id])
+  @@map("storage_stocks")
+}
+
+model TareWeight {
+  id                 String   @id @default(uuid()) @db.Uuid
+  supply_id          String   @unique @db.Uuid
+  empty_weight_grams Decimal  @db.Decimal(14, 4)
+  full_weight_grams  Decimal  @db.Decimal(14, 4)
+  net_content        Decimal  @db.Decimal(14, 4)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  supply Supply @relation(fields: [supply_id], references: [id])
+
+  @@map("tare_weights")
+}
+
+model Purchase {
+  id             String         @id @default(uuid()) @db.Uuid
+  supplier_id    String         @db.Uuid
+  storage_id     String         @db.Uuid
+  date           DateTime
+  status         PurchaseStatus @default(DRAFT)
+  total          Decimal        @default(0) @db.Decimal(14, 0)
+  payment_method String?
+  notes          String?
+  user_id        String         @db.Uuid
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
+
+  supplier Supplier       @relation(fields: [supplier_id], references: [id])
+  storage  Storage        @relation(fields: [storage_id], references: [id])
+  user     User           @relation(fields: [user_id], references: [id])
+  items    PurchaseItem[]
+
+  @@index([supplier_id])
+  @@index([storage_id])
+  @@index([user_id])
+  @@index([status])
+  @@index([date])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id                 String   @id @default(uuid()) @db.Uuid
+  purchase_id        String   @db.Uuid
+  supply_id          String   @db.Uuid
+  packaging_id       String?  @db.Uuid
+  package_quantity   Decimal  @db.Decimal(14, 4)
+  price_per_package  Decimal  @db.Decimal(14, 0)
+  base_unit_quantity Decimal  @db.Decimal(14, 4)
+  unit_cost          Decimal  @db.Decimal(14, 4)
+  created_at         DateTime @default(now())
+
+  purchase  Purchase           @relation(fields: [purchase_id], references: [id], onDelete: Cascade)
+  supply    Supply             @relation(fields: [supply_id], references: [id])
+  packaging PurchasePackaging? @relation(fields: [packaging_id], references: [id])
+
+  @@index([purchase_id])
+  @@index([supply_id])
+  @@map("purchase_items")
+}
+
+model Transfer {
+  id              String   @id @default(uuid()) @db.Uuid
+  from_storage_id String   @db.Uuid
+  to_storage_id   String   @db.Uuid
+  date            DateTime
+  notes           String?
+  user_id         String   @db.Uuid
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  from_storage Storage        @relation("TransferFrom", fields: [from_storage_id], references: [id])
+  to_storage   Storage        @relation("TransferTo", fields: [to_storage_id], references: [id])
+  user         User           @relation(fields: [user_id], references: [id])
+  items        TransferItem[]
+
+  @@index([from_storage_id])
+  @@index([to_storage_id])
+  @@index([user_id])
+  @@index([date])
+  @@map("transfers")
+}
+
+model TransferItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  transfer_id String  @db.Uuid
+  supply_id   String  @db.Uuid
+  quantity    Decimal @db.Decimal(14, 4)
+
+  transfer Transfer @relation(fields: [transfer_id], references: [id], onDelete: Cascade)
+  supply   Supply   @relation(fields: [supply_id], references: [id])
+
+  @@index([transfer_id])
+  @@index([supply_id])
+  @@map("transfer_items")
+}
+
+model InventoryCheck {
+  id           String               @id @default(uuid()) @db.Uuid
+  storage_id   String               @db.Uuid
+  type         InventoryCheckType
+  status       InventoryCheckStatus @default(IN_PROGRESS)
+  date         DateTime
+  user_id      String               @db.Uuid
+  completed_at DateTime?
+  created_at   DateTime             @default(now())
+  updated_at   DateTime             @updatedAt
+
+  storage Storage              @relation(fields: [storage_id], references: [id])
+  user    User                 @relation(fields: [user_id], references: [id])
+  items   InventoryCheckItem[]
+
+  @@index([storage_id])
+  @@index([user_id])
+  @@index([status])
+  @@index([date])
+  @@map("inventory_checks")
+}
+
+model InventoryCheckItem {
+  id              String  @id @default(uuid()) @db.Uuid
+  check_id        String  @db.Uuid
+  supply_id       String  @db.Uuid
+  expected_qty    Decimal @db.Decimal(14, 4)
+  actual_qty      Decimal @db.Decimal(14, 4)
+  difference      Decimal @db.Decimal(14, 4)
+  difference_cost Decimal @db.Decimal(14, 4)
+
+  check  InventoryCheck @relation(fields: [check_id], references: [id], onDelete: Cascade)
+  supply Supply         @relation(fields: [supply_id], references: [id])
+
+  @@index([check_id])
+  @@index([supply_id])
+  @@map("inventory_check_items")
+}
+
+model WriteOff {
+  id         String         @id @default(uuid()) @db.Uuid
+  storage_id String         @db.Uuid
+  supply_id  String         @db.Uuid
+  quantity   Decimal        @db.Decimal(14, 4)
+  reason     WriteOffReason
+  notes      String?
+  date       DateTime
+  user_id    String         @db.Uuid
+  created_at DateTime       @default(now())
+
+  storage Storage @relation(fields: [storage_id], references: [id])
+  supply  Supply  @relation(fields: [supply_id], references: [id])
+  user    User    @relation(fields: [user_id], references: [id])
+
+  @@index([storage_id])
+  @@index([supply_id])
+  @@index([user_id])
+  @@index([date])
+  @@map("write_offs")
+}
+
+model StockMovement {
+  id             String            @id @default(uuid()) @db.Uuid
+  supply_id      String            @db.Uuid
+  storage_id     String            @db.Uuid
+  type           StockMovementType
+  quantity       Decimal           @db.Decimal(14, 4)
+  reference_type String
+  reference_id   String            @db.Uuid
+  unit_cost      Decimal           @db.Decimal(14, 4)
+  created_at     DateTime          @default(now())
+
+  supply  Supply  @relation(fields: [supply_id], references: [id])
+  storage Storage @relation(fields: [storage_id], references: [id])
+
+  @@index([supply_id])
+  @@index([storage_id])
+  @@index([type])
+  @@index([reference_type, reference_id])
+  @@index([created_at])
+  @@map("stock_movements")
+}
+
+model DeductionRule {
+  // station_id / pos_register_id are optional pointers.
+  // Station and PosRegister models are not defined in Phase 2 — kept as
+  // loose UUIDs so the rule table can exist without those FKs until later
+  // phases introduce them. Enforce referential integrity in app logic for now.
+  id              String   @id @default(uuid()) @db.Uuid
+  station_id      String?  @db.Uuid
+  pos_register_id String?  @db.Uuid
+  storage_id      String   @db.Uuid
+  created_at      DateTime @default(now())
+
+  storage Storage @relation(fields: [storage_id], references: [id])
+
+  @@index([station_id])
+  @@index([pos_register_id])
+  @@index([storage_id])
+  @@map("deduction_rules")
+}
+
+// ============================================================================
+// Phase 3 — Products Module
+// ============================================================================
+
+model ProductCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  description    String?
+  image_url      String?
+  color          String?
+  display_order  Int      @default(0)
+  visible_in_pos Boolean  @default(true)
+  parent_id      String?  @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children ProductCategory[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@index([parent_id])
+  @@map("product_categories")
+}
+
+model Product {
+  id             String      @id @default(uuid()) @db.Uuid
+  name           String
+  type           ProductType
+  category_id    String?     @db.Uuid
+  station_id     String?     @db.Uuid
+  sell_price     Decimal?    @db.Decimal(14, 0)
+  recipe_cost    Decimal     @default(0) @db.Decimal(14, 4)
+  food_cost_pct  Decimal     @default(0) @db.Decimal(8, 4)
+  markup         Decimal     @default(0) @db.Decimal(10, 4)
+  image_url      String?
+  icon_color     String?
+  display_order  Int         @default(0)
+  active         Boolean     @default(true)
+  allow_discount Boolean     @default(true)
+  sold_by_weight Boolean     @default(false)
+  barcode        String?     @unique
+  tax_id         String?     @db.Uuid
+  supply_id      String?     @db.Uuid
+  created_at     DateTime    @default(now())
+  updated_at     DateTime    @updatedAt
+  deleted_at     DateTime?
+
+  category               ProductCategory?        @relation(fields: [category_id], references: [id])
+  tax                    Tax?                    @relation(fields: [tax_id], references: [id])
+  supply                 Supply?                 @relation(fields: [supply_id], references: [id])
+  variants               ProductVariant[]
+  modifier_groups        ProductModifierGroup[]
+  modifications          ProductModification[]
+  recipe                 Recipe?                 @relation("ProductRecipe")
+  // When this product is a PREPARATION and is used as an ingredient in other recipes.
+  recipe_items_as_prep   RecipeItem[]            @relation("RecipeItemPreparation")
+
+  @@index([category_id])
+  @@index([type])
+  @@index([active])
+  @@index([deleted_at])
+  @@map("products")
+}
+
+model ProductVariant {
+  id            String   @id @default(uuid()) @db.Uuid
+  product_id    String   @db.Uuid
+  name          String
+  sell_price    Decimal  @db.Decimal(14, 0)
+  barcode       String?  @unique
+  recipe_cost   Decimal  @default(0) @db.Decimal(14, 4)
+  food_cost_pct Decimal  @default(0) @db.Decimal(8, 4)
+  display_order Int      @default(0)
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  recipe  Recipe? @relation("VariantRecipe")
+
+  @@index([product_id])
+  @@map("product_variants")
+}
+
+model ModifierGroup {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  min_selection Int      @default(0)
+  max_selection Int      @default(1)
+  required      Boolean  @default(false)
+  display_order Int      @default(0)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  modifiers       Modifier[]
+  product_links   ProductModifierGroup[]
+
+  @@map("modifier_groups")
+}
+
+model Modifier {
+  id              String   @id @default(uuid()) @db.Uuid
+  group_id        String   @db.Uuid
+  name            String
+  extra_price     Decimal  @default(0) @db.Decimal(14, 0)
+  supply_id       String?  @db.Uuid
+  supply_quantity Decimal? @db.Decimal(14, 4)
+  supply_unit     String?
+  active          Boolean  @default(true)
+  display_order   Int      @default(0)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  group  ModifierGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  supply Supply?       @relation(fields: [supply_id], references: [id])
+
+  @@index([group_id])
+  @@index([supply_id])
+  @@map("modifiers")
+}
+
+model ProductModifierGroup {
+  id                String @id @default(uuid()) @db.Uuid
+  product_id        String @db.Uuid
+  modifier_group_id String @db.Uuid
+
+  product        Product       @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  modifier_group ModifierGroup @relation(fields: [modifier_group_id], references: [id], onDelete: Cascade)
+
+  @@unique([product_id, modifier_group_id])
+  @@index([product_id])
+  @@index([modifier_group_id])
+  @@map("product_modifier_groups")
+}
+
+model Recipe {
+  id         String   @id @default(uuid()) @db.Uuid
+  product_id String?  @unique @db.Uuid
+  variant_id String?  @unique @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  product Product?        @relation("ProductRecipe", fields: [product_id], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation("VariantRecipe", fields: [variant_id], references: [id], onDelete: Cascade)
+  items   RecipeItem[]
+
+  @@map("recipes")
+}
+
+model RecipeItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  recipe_id      String   @db.Uuid
+  supply_id      String?  @db.Uuid
+  preparation_id String?  @db.Uuid
+  quantity       Decimal  @db.Decimal(14, 4)
+  unit           String
+  waste_pct      Decimal  @default(0) @db.Decimal(6, 4)
+  created_at     DateTime @default(now())
+
+  recipe      Recipe   @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
+  supply      Supply?  @relation(fields: [supply_id], references: [id])
+  preparation Product? @relation("RecipeItemPreparation", fields: [preparation_id], references: [id])
+
+  @@index([recipe_id])
+  @@index([supply_id])
+  @@index([preparation_id])
+  @@map("recipe_items")
+}
+
+model ProductModification {
+  id            String   @id @default(uuid()) @db.Uuid
+  product_id    String   @db.Uuid
+  name          String
+  sell_price    Decimal  @db.Decimal(14, 0)
+  barcode       String?  @unique
+  supply_id     String?  @db.Uuid
+  active        Boolean  @default(true)
+  display_order Int      @default(0)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  supply  Supply? @relation(fields: [supply_id], references: [id])
+
+  @@index([product_id])
+  @@index([supply_id])
+  @@map("product_modifications")
+}
