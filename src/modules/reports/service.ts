@@ -1,7 +1,13 @@
-import { Prisma, StockMovementType, ProductType } from '@prisma/client';
+import { OrderStatus, Prisma, StockMovementType, ProductType } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { Decimal } from '../../lib/decimal.js';
-import type { ProductCostsQuery, SupplyMovementsQuery, VarianceQuery } from './schema.js';
+import { NotFoundError } from '../../lib/errors.js';
+import type {
+  ProductAnalysisQuery,
+  ProductCostsQuery,
+  SupplyMovementsQuery,
+  VarianceQuery,
+} from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Theoretical vs Actual variance
@@ -443,5 +449,211 @@ export async function getProductCostReport(query: ProductCostsQuery): Promise<Pr
   return {
     generated_at: new Date().toISOString(),
     rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Product analysis — per-product breakdown of sales, modifiers, and ingredients
+// ---------------------------------------------------------------------------
+
+export interface ProductAnalysisVariantRow {
+  variant_id: string | null;
+  variant_name: string;
+  orders_count: number;
+  total_revenue: string;
+}
+
+export interface ProductAnalysisModifierRow {
+  modifier_id: string;
+  modifier_name: string;
+  times_used: number;
+  extra_revenue: string;
+}
+
+export interface ProductAnalysisIngredientRow {
+  supply_id: string;
+  supply_name: string;
+  total_quantity: string;
+  unit: string;
+  total_cost: string;
+}
+
+export interface ProductAnalysisReport {
+  product_id: string;
+  product_name: string;
+  from: string;
+  to: string;
+  variant_sales: ProductAnalysisVariantRow[];
+  modifier_usage: ProductAnalysisModifierRow[];
+  ingredients_used: ProductAnalysisIngredientRow[];
+}
+
+export async function getProductAnalysisReport(
+  query: ProductAnalysisQuery,
+): Promise<ProductAnalysisReport> {
+  const product = await prisma.product.findUnique({
+    where: { id: query.product_id },
+    select: { id: true, name: true },
+  });
+  if (!product) throw new NotFoundError('Product');
+
+  // Only PAID orders within the window — open/cancelled orders never deducted
+  // inventory and shouldn't show up in a revenue analysis.
+  const items = await prisma.orderItem.findMany({
+    where: {
+      product_id: query.product_id,
+      order: {
+        status: OrderStatus.PAID,
+        created_at: { gte: query.from, lte: query.to },
+      },
+    },
+    select: {
+      id: true,
+      order_id: true,
+      quantity: true,
+      line_total: true,
+      variant_id: true,
+      variant: { select: { name: true } },
+      modifiers: {
+        select: {
+          modifier_id: true,
+          name: true,
+          extra_price: true,
+        },
+      },
+    },
+  });
+
+  // --- variant_sales ----------------------------------------------------------
+  // Roll every line up by variant_id. Null variant_id (PRODUCT or a no-variant
+  // DISH) rolls into a single row labeled "—".
+  const variantMap = new Map<
+    string,
+    { variant_id: string | null; variant_name: string; orders: Set<string>; revenue: Decimal }
+  >();
+  for (const item of items) {
+    const key = item.variant_id ?? '__no_variant__';
+    let row = variantMap.get(key);
+    if (!row) {
+      row = {
+        variant_id: item.variant_id,
+        variant_name: item.variant?.name ?? '—',
+        orders: new Set<string>(),
+        revenue: new Decimal(0),
+      };
+      variantMap.set(key, row);
+    }
+    // orders_count counts distinct orders, not distinct lines — two Lattes on
+    // the same order should count once so the number matches receipts.
+    row.orders.add(item.order_id);
+    row.revenue = row.revenue.add(new Decimal(item.line_total));
+  }
+  const variant_sales: ProductAnalysisVariantRow[] = [...variantMap.values()]
+    .map((r) => ({
+      variant_id: r.variant_id,
+      variant_name: r.variant_name,
+      orders_count: r.orders.size,
+      total_revenue: r.revenue.toString(),
+    }))
+    .sort((a, b) => a.variant_name.localeCompare(b.variant_name));
+
+  // --- modifier_usage --------------------------------------------------------
+  // Each OrderItemModifier row = one use of the modifier on a single line; for
+  // a line of quantity 2, the modifier was used twice. Scale accordingly.
+  const modifierMap = new Map<
+    string,
+    { modifier_id: string; modifier_name: string; times_used: number; extra: Decimal }
+  >();
+  const qtyByItem = new Map(items.map((i) => [i.id, i.quantity]));
+  for (const item of items) {
+    const lineQty = qtyByItem.get(item.id) ?? 1;
+    for (const m of item.modifiers) {
+      let row = modifierMap.get(m.modifier_id);
+      if (!row) {
+        row = {
+          modifier_id: m.modifier_id,
+          modifier_name: m.name,
+          times_used: 0,
+          extra: new Decimal(0),
+        };
+        modifierMap.set(m.modifier_id, row);
+      }
+      row.times_used += lineQty;
+      row.extra = row.extra.add(new Decimal(m.extra_price).mul(lineQty));
+    }
+  }
+  const modifier_usage: ProductAnalysisModifierRow[] = [...modifierMap.values()]
+    .map((r) => ({
+      modifier_id: r.modifier_id,
+      modifier_name: r.modifier_name,
+      times_used: r.times_used,
+      extra_revenue: r.extra.toString(),
+    }))
+    .sort((a, b) => b.times_used - a.times_used);
+
+  // --- ingredients_used ------------------------------------------------------
+  // Pull the SALE stock movements for every order that contained this product,
+  // then sum quantity and cost per supply. Note: a shared-order movement counts
+  // even if the order had other products — the caller is asking about this
+  // product's footprint, and the StockMovement doesn't know which line drove it.
+  // For a product-focused ingredient read, prefer the order-level endpoint.
+  const orderIds = [...new Set(items.map((i) => i.order_id))];
+  let ingredients_used: ProductAnalysisIngredientRow[] = [];
+  if (orderIds.length > 0) {
+    const movements = await prisma.stockMovement.findMany({
+      where: {
+        reference_type: 'Order',
+        reference_id: { in: orderIds },
+        type: StockMovementType.SALE,
+      },
+      select: {
+        supply_id: true,
+        quantity: true,
+        unit_cost: true,
+        supply: { select: { name: true, base_unit: true } },
+      },
+    });
+
+    const ingMap = new Map<
+      string,
+      { supply_id: string; supply_name: string; unit: string; qty: Decimal; cost: Decimal }
+    >();
+    for (const m of movements) {
+      let row = ingMap.get(m.supply_id);
+      if (!row) {
+        row = {
+          supply_id: m.supply_id,
+          supply_name: m.supply.name,
+          unit: m.supply.base_unit,
+          qty: new Decimal(0),
+          cost: new Decimal(0),
+        };
+        ingMap.set(m.supply_id, row);
+      }
+      // SALE movements are stored as negative quantities — flip to a positive
+      // "used" value for the report.
+      const qty = new Decimal(m.quantity).abs();
+      row.qty = row.qty.add(qty);
+      row.cost = row.cost.add(qty.mul(new Decimal(m.unit_cost)));
+    }
+    ingredients_used = [...ingMap.values()]
+      .map((r) => ({
+        supply_id: r.supply_id,
+        supply_name: r.supply_name,
+        total_quantity: r.qty.toString(),
+        unit: r.unit,
+        total_cost: r.cost.toString(),
+      }))
+      .sort((a, b) => a.supply_name.localeCompare(b.supply_name));
+  }
+
+  return {
+    product_id: product.id,
+    product_name: product.name,
+    from: query.from.toISOString(),
+    to: query.to.toISOString(),
+    variant_sales,
+    modifier_usage,
+    ingredients_used,
   };
 }

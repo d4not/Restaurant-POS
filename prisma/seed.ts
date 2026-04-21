@@ -32,6 +32,7 @@ const TRUNCATE_TABLES = [
   'storage_stocks',
   'tare_weights',
   'product_modifications',
+  'modifier_product_overrides',
   'recipe_items',
   'recipes',
   'product_modifier_groups',
@@ -557,14 +558,27 @@ async function main(): Promise<void> {
   // Attached to Latte, Cappuccino, and Mocha (dishes where the customer
   // typically customizes). Americano only gets Extras.
   // --------------------------------------------------------------------------
+  // "Milk Type" is a SWAP group targeting Whole Milk — whichever modifier the
+  // customer picks replaces the whole-milk recipe line (Whole Milk at ratio 1.0
+  // is a no-op; Almond Milk at ratio 0.75 deducts 75% of the recipe's milk qty
+  // from the almond-milk supply instead).
   const milkGroup = await prisma.modifierGroup.create({
-    data: { name: 'Milk Type', min_selection: 0, max_selection: 1, display_order: 1 },
+    data: {
+      name: 'Milk Type',
+      type: 'SWAP',
+      replaces_supply_id: milk.id,
+      min_selection: 0,
+      max_selection: 1,
+      display_order: 1,
+    },
   });
   await prisma.modifier.create({
     data: {
       group_id: milkGroup.id,
       name: 'Whole Milk',
       extra_price: 0,
+      supply_id: milk.id,
+      ratio: 1,
       display_order: 0,
     },
   });
@@ -574,8 +588,7 @@ async function main(): Promise<void> {
       name: 'Almond Milk',
       extra_price: 1000,
       supply_id: almond.id,
-      supply_quantity: 200,
-      supply_unit: 'ml',
+      ratio: '0.75',
       display_order: 1,
     },
   });

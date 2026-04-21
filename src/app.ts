@@ -28,6 +28,7 @@ import { authRouter } from './modules/auth/routes.js';
 import { employeeRouter } from './modules/employees/routes.js';
 import { attendanceRouter } from './modules/attendance/routes.js';
 import { payrollRouter } from './modules/payroll/routes.js';
+import { taxRouter } from './modules/taxes/routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -76,6 +77,7 @@ export function createApp(): Express {
   app.use('/api/v1/employees', employeeRouter);
   app.use('/api/v1/attendance', attendanceRouter);
   app.use('/api/v1/payroll', payrollRouter);
+  app.use('/api/v1/taxes', taxRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

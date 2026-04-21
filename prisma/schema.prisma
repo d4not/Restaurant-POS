@@ -114,6 +114,16 @@ enum AttendanceStatus {
   LATE
 }
 
+enum ModifierGroupType {
+  SWAP
+  ADD
+}
+
+enum ModifierOverrideType {
+  RATIO
+  FIXED_QTY
+}
+
 enum PayrollStatus {
   DRAFT
   APPROVED
@@ -216,6 +226,7 @@ model Supply {
   recipe_items          RecipeItem[]
   products              Product[]
   product_modifications ProductModification[]
+  replacing_groups      ModifierGroup[]       @relation("ModifierGroupReplaces")
 
   @@index([category_id])
   @@index([active])
@@ -558,6 +569,7 @@ model Product {
   // When this product is a PREPARATION and is used as an ingredient in other recipes.
   recipe_items_as_prep   RecipeItem[]            @relation("RecipeItemPreparation")
   order_items            OrderItem[]
+  modifier_overrides     ModifierProductOverride[]
 
   @@index([category_id])
   @@index([type])
@@ -588,18 +600,26 @@ model ProductVariant {
 }
 
 model ModifierGroup {
-  id            String   @id @default(uuid()) @db.Uuid
-  name          String
-  min_selection Int      @default(0)
-  max_selection Int      @default(1)
-  required      Boolean  @default(false)
-  display_order Int      @default(0)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id                 String            @id @default(uuid()) @db.Uuid
+  name               String
+  // SWAP: modifiers replace `replaces_supply_id` in the target recipe.
+  // ADD (default): modifiers deduct on top of the recipe.
+  type               ModifierGroupType @default(ADD)
+  // For SWAP groups: which raw-supply recipe line the group's modifiers stand in
+  // for. e.g. "Milk Type" → whole_milk. Null for ADD groups.
+  replaces_supply_id String?           @db.Uuid
+  min_selection      Int               @default(0)
+  max_selection      Int               @default(1)
+  required           Boolean           @default(false)
+  display_order      Int               @default(0)
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @updatedAt
 
   modifiers       Modifier[]
   product_links   ProductModifierGroup[]
+  replaces_supply Supply?                @relation("ModifierGroupReplaces", fields: [replaces_supply_id], references: [id])
 
+  @@index([replaces_supply_id])
   @@map("modifier_groups")
 }
 
@@ -611,6 +631,11 @@ model Modifier {
   supply_id       String?  @db.Uuid
   supply_quantity Decimal? @db.Decimal(14, 4)
   supply_unit     String?
+  // For SWAP modifiers: multiplier applied to the original recipe ingredient
+  // quantity. 1.0 means "same amount"; 0.75 → deduct 75% of the original qty of
+  // this modifier's supply instead. Ignored for ADD modifiers (they use the
+  // supply_quantity triplet as a fixed amount).
+  ratio           Decimal  @default(1) @db.Decimal(10, 4)
   active          Boolean  @default(true)
   display_order   Int      @default(0)
   created_at      DateTime @default(now())
@@ -619,6 +644,7 @@ model Modifier {
   group  ModifierGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
   supply Supply?       @relation(fields: [supply_id], references: [id])
   order_item_modifiers OrderItemModifier[]
+  product_overrides    ModifierProductOverride[]
 
   @@index([group_id])
   @@index([supply_id])
@@ -696,6 +722,34 @@ model ProductModification {
   @@index([product_id])
   @@index([supply_id])
   @@map("product_modifications")
+}
+
+// Per-product exception to a modifier's default deduction rule. The schema-spec
+// reasoning: a Latte and a Frappe may share the "Almond Milk" modifier but need
+// different amounts (e.g. 150ml vs 90ml). An override attaches to (product,
+// modifier) and wins over the modifier's own ratio/quantity at deduction time.
+model ModifierProductOverride {
+  id                String               @id @default(uuid()) @db.Uuid
+  product_id        String               @db.Uuid
+  modifier_id       String               @db.Uuid
+  override_type     ModifierOverrideType
+  // RATIO override: multiplier applied to the recipe's original ingredient qty
+  // (same semantics as Modifier.ratio, just product-scoped).
+  override_ratio    Decimal?             @db.Decimal(10, 4)
+  // FIXED_QTY override: absolute amount of the modifier's supply to deduct in
+  // `override_unit`. Ratio is ignored when FIXED_QTY is set.
+  override_quantity Decimal?             @db.Decimal(14, 4)
+  override_unit     String?
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @updatedAt
+
+  product  Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  modifier Modifier @relation(fields: [modifier_id], references: [id], onDelete: Cascade)
+
+  @@unique([product_id, modifier_id])
+  @@index([product_id])
+  @@index([modifier_id])
+  @@map("modifier_product_overrides")
 }
 
 // ============================================================================
@@ -789,6 +843,12 @@ model OrderItem {
   unit_price      Decimal  @db.Decimal(14, 0)
   modifiers_price Decimal  @default(0) @db.Decimal(14, 0)
   line_total      Decimal  @db.Decimal(14, 0)
+  // Per-item tax snapshot. tax_rate is captured from the product's linked Tax
+  // at the moment the item is added — later edits to the tax row don't rewrite
+  // historical orders. tax_amount = line_total × tax_rate / 100, rounded to
+  // the nearest centavo. Both default to 0 for tax-exempt products.
+  tax_rate        Decimal  @default(0) @db.Decimal(6, 2)
+  tax_amount      Decimal  @default(0) @db.Decimal(14, 0)
   notes           String?
   created_at      DateTime @default(now())
 

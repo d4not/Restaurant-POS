@@ -4,6 +4,7 @@ import {
   PaymentMethod,
   Prisma,
   ProductType,
+  StockMovementType,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
@@ -61,10 +62,18 @@ async function assertOrderOpen(client: PrismaLike, id: string): Promise<void> {
   }
 }
 
+// Round half-up to nearest centavo. Every place that computes tax must use the
+// same rounding so line-level + order-level tax stays internally consistent.
+function computeLineTax(lineTotal: Decimal, taxRate: Decimal | number | string): Decimal {
+  const rate = new Decimal(taxRate);
+  if (rate.isZero()) return new Decimal(0);
+  return lineTotal.mul(rate.div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+}
+
 /**
  * Recompute subtotal / tax / total from the current set of order_items.
- * Tax is applied per-line at the line's product tax rate (if any); no tax
- * otherwise. Discount is applied to the overall total.
+ * Tax is the sum of each item's per-line snapshot (tax_rate × line_total),
+ * already stored on the item. Discount is applied to the overall total.
  *
  * Must be invoked after every add / update / remove / discount change.
  */
@@ -76,7 +85,7 @@ async function recalculateOrderTotals(tx: Tx, orderId: string): Promise<void> {
     }),
     tx.orderItem.findMany({
       where: { order_id: orderId },
-      include: { product: { include: { tax: { select: { rate: true } } } } },
+      select: { line_total: true, tax_amount: true },
     }),
   ]);
 
@@ -84,16 +93,8 @@ async function recalculateOrderTotals(tx: Tx, orderId: string): Promise<void> {
   let taxAmount = new Decimal(0);
 
   for (const item of items) {
-    const lineTotal = new Decimal(item.line_total);
-    subtotal = subtotal.add(lineTotal);
-    if (item.product.tax) {
-      // Rate is stored as a percentage (e.g. 16.00 for 16%). Tax rounds to the
-      // nearest centavo per line before accumulating, matching how receipts
-      // are typically printed.
-      const rate = new Decimal(item.product.tax.rate).div(100);
-      const lineTax = lineTotal.mul(rate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-      taxAmount = taxAmount.add(lineTax);
-    }
+    subtotal = subtotal.add(new Decimal(item.line_total));
+    taxAmount = taxAmount.add(new Decimal(item.tax_amount));
   }
 
   const discount = new Decimal(order.discount_amount);
@@ -258,6 +259,7 @@ async function resolveOrderLine(
   variantId: string | null;
   unitPrice: Decimal;
   modifiersPrice: Decimal;
+  taxRate: Decimal;
   modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[];
 }> {
   const product = await tx.product.findFirst({
@@ -267,6 +269,7 @@ async function resolveOrderLine(
       type: true,
       active: true,
       sell_price: true,
+      tax: { select: { rate: true } },
     },
   });
   if (!product) throw new NotFoundError('Product');
@@ -299,6 +302,10 @@ async function resolveOrderLine(
     unitPrice = new Decimal(product.sell_price);
   }
 
+  // Snapshot the product's current tax rate onto the line. Products without a
+  // tax_id are tax-exempt (rate stays 0).
+  const taxRate = product.tax ? new Decimal(product.tax.rate) : new Decimal(0);
+
   const modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[] = [];
   let modifiersPrice = new Decimal(0);
 
@@ -323,7 +330,7 @@ async function resolveOrderLine(
     }
   }
 
-  return { productId: product.id, variantId, unitPrice, modifiersPrice, modifierRows };
+  return { productId: product.id, variantId, unitPrice, modifiersPrice, taxRate, modifierRows };
 }
 
 export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
@@ -334,6 +341,7 @@ export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
     const lineTotal = resolved.unitPrice
       .add(resolved.modifiersPrice)
       .mul(quantity);
+    const taxAmount = computeLineTax(lineTotal, resolved.taxRate);
 
     const item = await tx.orderItem.create({
       data: {
@@ -344,6 +352,8 @@ export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
         unit_price: resolved.unitPrice,
         modifiers_price: resolved.modifiersPrice,
         line_total: lineTotal,
+        tax_rate: resolved.taxRate,
+        tax_amount: taxAmount,
         notes: input.notes,
       },
     });
@@ -379,6 +389,7 @@ export async function updateOrderItem(
         quantity: true,
         unit_price: true,
         modifiers_price: true,
+        tax_rate: true,
       },
     });
     if (!existing || existing.order_id !== orderId) throw new NotFoundError('OrderItem');
@@ -387,6 +398,7 @@ export async function updateOrderItem(
     const lineTotal = new Decimal(existing.unit_price)
       .add(new Decimal(existing.modifiers_price))
       .mul(quantity);
+    const taxAmount = computeLineTax(lineTotal, existing.tax_rate);
 
     await tx.orderItem.update({
       where: { id: itemId },
@@ -394,6 +406,7 @@ export async function updateOrderItem(
         ...(input.quantity !== undefined ? { quantity } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
         line_total: lineTotal,
+        tax_amount: taxAmount,
       },
     });
 
@@ -568,4 +581,74 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
       deduction: deductionResult,
     };
   });
+}
+
+// ----------------------------------------------------------------------------
+// Ingredients actually deducted for an order
+// ----------------------------------------------------------------------------
+
+export interface OrderIngredientRow {
+  supply_id: string;
+  supply_name: string;
+  quantity: string;
+  unit: string;
+  unit_cost: string;
+  total_cost: string;
+}
+
+export interface OrderIngredientsResult {
+  order_id: string;
+  ingredients: OrderIngredientRow[];
+  grand_total_cost: string;
+}
+
+// Reads the SALE StockMovements written when the order was paid. Unlike the
+// product-analysis endpoint this is truthful — one order, exactly what was
+// drawn. Returns an empty ingredients list for orders that never reached PAID
+// (OPEN / CANCELLED) since no movements would exist.
+export async function getOrderIngredients(orderId: string): Promise<OrderIngredientsResult> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true },
+  });
+  if (!order) throw new NotFoundError('Order');
+
+  const movements = await prisma.stockMovement.findMany({
+    where: {
+      reference_type: 'Order',
+      reference_id: orderId,
+      type: StockMovementType.SALE,
+    },
+    select: {
+      supply_id: true,
+      quantity: true,
+      unit_cost: true,
+      supply: { select: { name: true, base_unit: true } },
+    },
+    orderBy: { created_at: 'asc' },
+  });
+
+  let grandTotal = new Decimal(0);
+  const ingredients: OrderIngredientRow[] = movements.map((m) => {
+    // SALE rows are stored as negative quantities — present the positive value
+    // so consumers don't have to remember to flip signs.
+    const qty = new Decimal(m.quantity).abs();
+    const unitCost = new Decimal(m.unit_cost);
+    const total = qty.mul(unitCost);
+    grandTotal = grandTotal.add(total);
+    return {
+      supply_id: m.supply_id,
+      supply_name: m.supply.name,
+      quantity: qty.toString(),
+      unit: m.supply.base_unit,
+      unit_cost: unitCost.toString(),
+      total_cost: total.toString(),
+    };
+  });
+
+  return {
+    order_id: orderId,
+    ingredients,
+    grand_total_cost: grandTotal.toString(),
+  };
 }

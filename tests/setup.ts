@@ -32,6 +32,7 @@ const TRUNCATE_TABLES = [
   'recipes',
   'recipe_items',
   'product_modifications',
+  'modifier_product_overrides',
   'cash_registers',
   'cash_movements',
   'orders',

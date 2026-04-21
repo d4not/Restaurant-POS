@@ -78,3 +78,8 @@ export async function addPayment(req: Request, res: Response): Promise<void> {
   );
   res.status(201).json({ success: true, data: result });
 }
+
+export async function ingredients(req: Request, res: Response): Promise<void> {
+  const result = await service.getOrderIngredients(req.params.id as string);
+  res.json({ success: true, data: result });
+}

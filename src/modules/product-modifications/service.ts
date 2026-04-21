@@ -36,6 +36,7 @@ export async function createModification(
   if (input.supply_id) await assertSupplyExists(input.supply_id);
   return prisma.productModification.create({
     data: { ...input, product_id: productId },
+    include: { supply: { select: { id: true, name: true, base_unit: true } } },
   });
 }
 

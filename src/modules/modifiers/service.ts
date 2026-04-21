@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { ModifierGroupType, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, NotFoundError } from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
@@ -15,7 +15,18 @@ import type {
 // Modifier groups
 // ----------------------------------------------------------------------------
 
+async function assertReplacesSupplyExists(supplyId: string): Promise<void> {
+  const exists = await prisma.supply.findFirst({
+    where: { id: supplyId, deleted_at: null },
+    select: { id: true },
+  });
+  if (!exists) {
+    throw new BadRequestError('replaces_supply_id references a non-existent supply');
+  }
+}
+
 export async function createModifierGroup(input: CreateModifierGroupInput) {
+  if (input.replaces_supply_id) await assertReplacesSupplyExists(input.replaces_supply_id);
   return prisma.modifierGroup.create({ data: input });
 }
 
@@ -47,6 +58,24 @@ export async function updateModifierGroup(id: string, input: UpdateModifierGroup
   const nextMax = input.max_selection ?? existing.max_selection;
   if (nextMin > nextMax) {
     throw new BadRequestError('min_selection cannot exceed max_selection');
+  }
+  const nextType = input.type ?? existing.type;
+  const nextReplaces =
+    input.replaces_supply_id !== undefined
+      ? input.replaces_supply_id
+      : existing.replaces_supply_id;
+  if (nextType === ModifierGroupType.SWAP && nextReplaces == null) {
+    throw new BadRequestError('SWAP groups must provide replaces_supply_id');
+  }
+  if (nextType === ModifierGroupType.ADD && nextReplaces != null) {
+    throw new BadRequestError('ADD groups must not have replaces_supply_id');
+  }
+  if (
+    input.replaces_supply_id !== undefined &&
+    input.replaces_supply_id != null &&
+    input.replaces_supply_id !== existing.replaces_supply_id
+  ) {
+    await assertReplacesSupplyExists(input.replaces_supply_id);
   }
   return prisma.modifierGroup.update({ where: { id }, data: input });
 }

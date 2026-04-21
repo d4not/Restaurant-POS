@@ -38,3 +38,16 @@ export const productCostsQuerySchema = z.object({
 });
 
 export type ProductCostsQuery = z.infer<typeof productCostsQuerySchema>;
+
+export const productAnalysisQuerySchema = z
+  .object({
+    product_id: z.string().uuid(),
+    from: z.coerce.date(),
+    to: z.coerce.date(),
+  })
+  .refine((v) => v.from <= v.to, {
+    message: 'from must be <= to',
+    path: ['from'],
+  });
+
+export type ProductAnalysisQuery = z.infer<typeof productAnalysisQuerySchema>;

@@ -132,6 +132,35 @@ describe('Product modifications', () => {
       .send({ name: 'Orange', sell_price: 4000, supply_id: supplyId });
     expect(res.status).toBe(400);
   });
+
+  it('creates Orange + Mango modifications for a Juice product and lists them in order', async () => {
+    // Mirror the Phase 9A.3 spec scenario verbatim — Juice PRODUCT with two
+    // priced modifications, confirming the endpoint is wired end-to-end.
+    const orange = await request(app)
+      .post(`/api/v1/products/${productId}/modifications`)
+      .set(auth)
+      .send({ name: 'Orange', sell_price: 4000, display_order: 1 });
+    expect(orange.status).toBe(201);
+    expect(orange.body.data.name).toBe('Orange');
+    expect(orange.body.data.sell_price.toString()).toBe('4000');
+    expect(orange.body.data.product_id).toBe(productId);
+
+    const mango = await request(app)
+      .post(`/api/v1/products/${productId}/modifications`)
+      .set(auth)
+      .send({ name: 'Mango', sell_price: 4500, display_order: 2 });
+    expect(mango.status).toBe(201);
+
+    const list = await request(app)
+      .get(`/api/v1/products/${productId}/modifications`)
+      .set(auth);
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(2);
+    expect(list.body.data[0].name).toBe('Orange');
+    expect(list.body.data[0].sell_price.toString()).toBe('4000');
+    expect(list.body.data[1].name).toBe('Mango');
+    expect(list.body.data[1].sell_price.toString()).toBe('4500');
+  });
 });
 
 describe('Stock movements list + get', () => {

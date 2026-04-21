@@ -62,3 +62,9 @@ orderRouter.post(
   validate(createPaymentSchema),
   asyncHandler(controller.addPayment),
 );
+
+orderRouter.get(
+  '/:id/ingredients',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.ingredients),
+);
