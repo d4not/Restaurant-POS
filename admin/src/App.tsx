@@ -9,6 +9,9 @@ import { SuppliesPage } from './pages/inventory/SuppliesPage';
 import { SupplyDetail } from './pages/inventory/SupplyDetail';
 import { SuppliersPage } from './pages/inventory/SuppliersPage';
 import { MovementsPage } from './pages/inventory/MovementsPage';
+import { ProductsPage } from './pages/menu/ProductsPage';
+import { ProductDetail } from './pages/menu/ProductDetail';
+import { CategoriesPage } from './pages/menu/CategoriesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,9 +64,9 @@ export default function App() {
             {/* Menu */}
             <Route path="menu">
               <Route index element={<Navigate to="products" replace />} />
-              <Route path="products"     element={<Placeholder title="Products" description="Products, variants and recipes catalog." />} />
-              <Route path="products/:id" element={<Placeholder title="Product Detail" />} />
-              <Route path="categories"   element={<Placeholder title="Categories" description="Product categories tree." />} />
+              <Route path="products"     element={<ProductsPage />} />
+              <Route path="products/:id" element={<ProductDetail />} />
+              <Route path="categories"   element={<CategoriesPage />} />
             </Route>
 
             {/* Staff */}

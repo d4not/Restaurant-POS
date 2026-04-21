@@ -725,6 +725,90 @@ input.search-box:focus { border-color: var(--gold); }
 .flex-between  { display: flex; align-items: center; justify-content: space-between; }
 .flex-col      { display: flex; flex-direction: column; }
 
+/* ── MENU: type picker cards ─────────────────────────────── */
+.type-picker {
+  display: grid;
+  gap: 10px;
+}
+.type-picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  transition: all 0.12s;
+}
+.type-picker-card:hover { border-color: var(--gold); background: var(--surface); }
+.type-picker-head { display: flex; gap: 8px; align-items: center; }
+.type-picker-body { font-size: 12px; color: var(--text2); }
+
+/* ── MENU: attach list (modifier-group picker) ───────────── */
+.attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.attach-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  transition: all 0.12s;
+}
+.attach-item:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: var(--surface);
+}
+.attach-item:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── MENU: modifier group list on product detail ─────────── */
+.modifier-group-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+/* ── MENU: categories tree ───────────────────────────────── */
+.category-tree-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+}
+.category-tree-row:hover { background: #fef8ef; }
+.category-tree-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.category-tree-bullet {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 /* ── LOGIN SCREEN ────────────────────────────────────────── */
 .auth-screen {
   min-height: 100vh;
