@@ -64,9 +64,10 @@ export async function createInventoryCheck(
   return prisma.$transaction(async (tx) => {
     const storage = await tx.storage.findUnique({
       where: { id: input.storage_id },
-      select: { id: true },
+      select: { id: true, active: true },
     });
     if (!storage) throw new BadRequestError('storage_id references a non-existent storage');
+    if (!storage.active) throw new BadRequestError('storage is inactive');
 
     // Build the seed set of supplies to count.
     const stockWhere: Prisma.StorageStockWhereInput = { storage_id: input.storage_id };
@@ -201,7 +202,22 @@ export async function setCheckItems(id: string, input: SetCheckItemsInput) {
  */
 export async function completeInventoryCheck(id: string) {
   return prisma.$transaction(async (tx) => {
-    await assertInProgress(tx, id);
+    // Atomic status claim: flip IN_PROGRESS→COMPLETED in one statement so two
+    // concurrent completes can't both apply stock adjustments. See the same
+    // pattern in confirmPurchase for context.
+    const claim = await tx.inventoryCheck.updateMany({
+      where: { id, status: InventoryCheckStatus.IN_PROGRESS },
+      data: { status: InventoryCheckStatus.COMPLETED, completed_at: new Date() },
+    });
+    if (claim.count === 0) {
+      const existing = await tx.inventoryCheck.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!existing) throw new NotFoundError('InventoryCheck');
+      throw new ConflictError('InventoryCheck is already completed');
+    }
+
     const check = await tx.inventoryCheck.findUniqueOrThrow({
       where: { id },
       include: { items: true },
@@ -249,14 +265,7 @@ export async function completeInventoryCheck(id: string) {
       }
     }
 
-    await tx.inventoryCheck.update({
-      where: { id },
-      data: {
-        status: InventoryCheckStatus.COMPLETED,
-        completed_at: new Date(),
-      },
-    });
-
+    // Status flip already happened in the atomic claim above.
     return loadCheckOrThrow(tx, id);
   });
 }

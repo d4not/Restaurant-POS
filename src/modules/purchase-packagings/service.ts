@@ -11,10 +11,14 @@ import type {
 async function assertRefs(supplyId: string, supplierId: string): Promise<void> {
   const [supply, supplier] = await Promise.all([
     prisma.supply.findFirst({ where: { id: supplyId, deleted_at: null }, select: { id: true } }),
-    prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } }),
+    prisma.supplier.findUnique({
+      where: { id: supplierId },
+      select: { id: true, active: true },
+    }),
   ]);
   if (!supply) throw new BadRequestError('supply_id references a non-existent supply');
   if (!supplier) throw new BadRequestError('supplier_id references a non-existent supplier');
+  if (!supplier.active) throw new BadRequestError('supplier is inactive');
 }
 
 export async function createPackaging(input: CreatePackagingInput) {

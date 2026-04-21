@@ -19,13 +19,17 @@ const writeOffInclude = {
 export async function createWriteOff(userId: string, input: CreateWriteOffInput) {
   return prisma.$transaction(async (tx) => {
     const [storage, supply] = await Promise.all([
-      tx.storage.findUnique({ where: { id: input.storage_id }, select: { id: true } }),
+      tx.storage.findUnique({
+        where: { id: input.storage_id },
+        select: { id: true, active: true },
+      }),
       tx.supply.findFirst({
         where: { id: input.supply_id, deleted_at: null },
         select: { id: true, average_cost: true },
       }),
     ]);
     if (!storage) throw new BadRequestError('storage_id references a non-existent storage');
+    if (!storage.active) throw new BadRequestError('storage is inactive');
     if (!supply) throw new BadRequestError('supply_id references a non-existent supply');
 
     const qty = new Decimal(input.quantity);

@@ -28,11 +28,19 @@ async function loadTransferOrThrow(client: Prisma.TransactionClient | typeof pri
 export async function createTransfer(userId: string, input: CreateTransferInput) {
   return prisma.$transaction(async (tx) => {
     const [from, to] = await Promise.all([
-      tx.storage.findUnique({ where: { id: input.from_storage_id }, select: { id: true } }),
-      tx.storage.findUnique({ where: { id: input.to_storage_id }, select: { id: true } }),
+      tx.storage.findUnique({
+        where: { id: input.from_storage_id },
+        select: { id: true, active: true },
+      }),
+      tx.storage.findUnique({
+        where: { id: input.to_storage_id },
+        select: { id: true, active: true },
+      }),
     ]);
     if (!from) throw new BadRequestError('from_storage_id references a non-existent storage');
+    if (!from.active) throw new BadRequestError('from_storage is inactive');
     if (!to) throw new BadRequestError('to_storage_id references a non-existent storage');
+    if (!to.active) throw new BadRequestError('to_storage is inactive');
 
     // Aggregate duplicate supply_id lines so the per-supply stock check below
     // reflects the true requested draw rather than each line in isolation.
@@ -88,15 +96,24 @@ export async function createTransfer(userId: string, input: CreateTransferInput)
         select: { average_cost: true },
       });
 
-      await tx.storageStock.update({
-        where: {
-          supply_id_storage_id: {
-            supply_id: item.supply_id,
-            storage_id: input.from_storage_id,
-          },
-        },
-        data: { quantity: { decrement: qty } },
-      });
+      // Atomic conditional decrement: only succeed if the row still has
+      // enough stock at apply-time. Two concurrent transfers drawing from
+      // the same (supply, storage) would both pass the upfront pre-check
+      // above because SELECT doesn't hold a row lock — this guard catches
+      // the loser and rolls the whole transaction back.
+      const decremented = await tx.$executeRaw`
+        UPDATE storage_stocks
+           SET quantity   = quantity - ${qty}::numeric,
+               updated_at = now()
+         WHERE supply_id  = ${item.supply_id}::uuid
+           AND storage_id = ${input.from_storage_id}::uuid
+           AND quantity  >= ${qty}::numeric
+      `;
+      if (decremented === 0) {
+        throw new ConflictError(
+          `Insufficient stock for supply ${item.supply_id} at source (concurrent draw)`,
+        );
+      }
 
       await tx.storageStock.upsert({
         where: {

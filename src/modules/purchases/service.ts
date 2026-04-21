@@ -91,11 +91,19 @@ async function recomputePurchaseTotal(client: PrismaLike, purchaseId: string): P
 export async function createPurchase(userId: string, input: CreatePurchaseInput) {
   return prisma.$transaction(async (tx) => {
     const [supplier, storage] = await Promise.all([
-      tx.supplier.findUnique({ where: { id: input.supplier_id }, select: { id: true } }),
-      tx.storage.findUnique({ where: { id: input.storage_id }, select: { id: true } }),
+      tx.supplier.findUnique({
+        where: { id: input.supplier_id },
+        select: { id: true, active: true },
+      }),
+      tx.storage.findUnique({
+        where: { id: input.storage_id },
+        select: { id: true, active: true },
+      }),
     ]);
     if (!supplier) throw new BadRequestError('supplier_id references a non-existent supplier');
+    if (!supplier.active) throw new BadRequestError('supplier is inactive');
     if (!storage) throw new BadRequestError('storage_id references a non-existent storage');
+    if (!storage.active) throw new BadRequestError('storage is inactive');
 
     const purchase = await tx.purchase.create({
       data: {
@@ -168,12 +176,20 @@ export async function updatePurchase(id: string, input: UpdatePurchaseInput) {
   return prisma.$transaction(async (tx) => {
     await assertDraft(tx, id);
     if (input.supplier_id) {
-      const s = await tx.supplier.findUnique({ where: { id: input.supplier_id }, select: { id: true } });
+      const s = await tx.supplier.findUnique({
+        where: { id: input.supplier_id },
+        select: { id: true, active: true },
+      });
       if (!s) throw new BadRequestError('supplier_id references a non-existent supplier');
+      if (!s.active) throw new BadRequestError('supplier is inactive');
     }
     if (input.storage_id) {
-      const s = await tx.storage.findUnique({ where: { id: input.storage_id }, select: { id: true } });
+      const s = await tx.storage.findUnique({
+        where: { id: input.storage_id },
+        select: { id: true, active: true },
+      });
       if (!s) throw new BadRequestError('storage_id references a non-existent storage');
+      if (!s.active) throw new BadRequestError('storage is inactive');
     }
     await tx.purchase.update({ where: { id }, data: input });
     return loadPurchaseOrThrow(tx, id);
@@ -300,17 +316,31 @@ export async function removePurchaseItem(purchaseId: string, itemId: string) {
  */
 export async function confirmPurchase(id: string) {
   return prisma.$transaction(async (tx) => {
-    const purchase = await tx.purchase.findUnique({
+    // Atomic status claim: only one concurrent caller can flip DRAFT→CONFIRMED.
+    // The read-then-write pattern used elsewhere would let two transactions
+    // both see DRAFT, each apply stock/WAC mutations, and double-count the
+    // purchase. updateMany returns count=0 if no row matches, which lets us
+    // distinguish "already confirmed" from "not found" with a follow-up read.
+    const claim = await tx.purchase.updateMany({
+      where: { id, status: PurchaseStatus.DRAFT },
+      data: { status: PurchaseStatus.CONFIRMED },
+    });
+    if (claim.count === 0) {
+      const existing = await tx.purchase.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!existing) throw new NotFoundError('Purchase');
+      if (existing.status === PurchaseStatus.CONFIRMED) {
+        throw new ConflictError('Purchase already confirmed');
+      }
+      throw new ConflictError('Cannot confirm a cancelled purchase');
+    }
+
+    const purchase = await tx.purchase.findUniqueOrThrow({
       where: { id },
       include: { items: { include: { packaging: true } } },
     });
-    if (!purchase) throw new NotFoundError('Purchase');
-    if (purchase.status === PurchaseStatus.CONFIRMED) {
-      throw new ConflictError('Purchase already confirmed');
-    }
-    if (purchase.status === PurchaseStatus.CANCELLED) {
-      throw new ConflictError('Cannot confirm a cancelled purchase');
-    }
     if (purchase.items.length === 0) {
       throw new BadRequestError('Cannot confirm a purchase with no items');
     }
@@ -385,9 +415,11 @@ export async function confirmPurchase(id: string) {
       });
     }
 
+    // Status was already flipped to CONFIRMED by the atomic claim above;
+    // only the recomputed total still needs to land.
     await tx.purchase.update({
       where: { id: purchase.id },
-      data: { status: PurchaseStatus.CONFIRMED, total },
+      data: { total },
     });
 
     return loadPurchaseOrThrow(tx, purchase.id);
