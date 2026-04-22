@@ -422,6 +422,30 @@ export function ProductDetail() {
 
   return (
     <>
+      {/* Unsaved-changes banner. Rendered inline at the top of the page so
+          it lives in normal flow — no fixed/sticky positioning to fight with. */}
+      {isDirty && (
+        <div className="save-bar" role="region" aria-label="Unsaved changes">
+          <span className="save-bar-msg">Unsaved changes</span>
+          <div className="save-bar-actions">
+            <Button
+              variant="ghost"
+              onClick={onDiscard}
+              disabled={updateProduct.isPending}
+            >
+              Discard
+            </Button>
+            <Button
+              variant="primary"
+              onClick={onSave}
+              loading={updateProduct.isPending}
+            >
+              Save changes
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Header — inline edit form. The page is the edit form; there's no modal. */}
       <div
         className="flex-between mb-16"
@@ -864,27 +888,6 @@ export function ProductDetail() {
         existingOverride={overrideModal.existing}
       />
 
-      {isDirty && (
-        <div className="save-bar" role="region" aria-label="Unsaved changes">
-          <span className="save-bar-msg">Unsaved changes</span>
-          <div className="save-bar-actions">
-            <Button
-              variant="ghost"
-              onClick={onDiscard}
-              disabled={updateProduct.isPending}
-            >
-              Discard
-            </Button>
-            <Button
-              variant="primary"
-              onClick={onSave}
-              loading={updateProduct.isPending}
-            >
-              Save changes
-            </Button>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -5,12 +5,16 @@ export const createPackagingSchema = z.object({
   supplier_id: z.string().uuid(),
   name: z.string().min(1).max(200),
   units_per_package: z.number().positive(),
+  price_per_package: z.number().int().nonnegative().nullable().optional(),
+  is_primary: z.boolean().optional(),
   active: z.boolean().optional(),
 });
 
 export const updatePackagingSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   units_per_package: z.number().positive().optional(),
+  price_per_package: z.number().int().nonnegative().nullable().optional(),
+  is_primary: z.boolean().optional(),
   active: z.boolean().optional(),
 });
 

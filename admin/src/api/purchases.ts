@@ -1,24 +1,16 @@
 import { api } from './client';
 import type { Paginated } from '../types/api';
+import type {
+  CreatePurchaseInput,
+  CreatePurchaseItemInput,
+  Purchase,
+  PurchaseItem,
+  PurchaseStatus,
+  UpdatePurchaseInput,
+  UpdatePurchaseItemInput,
+} from '../types/inventory';
 
-export type PurchaseStatus = 'DRAFT' | 'CONFIRMED' | 'CANCELLED';
-
-export interface Purchase {
-  id: string;
-  supplier_id: string;
-  storage_id: string;
-  date: string;
-  status: PurchaseStatus;
-  total: string;
-  payment_method: string | null;
-  notes: string | null;
-  user_id: string;
-  created_at: string;
-  updated_at: string;
-  supplier?: { id: string; name: string };
-  storage?: { id: string; name: string };
-  user?: { id: string; name: string };
-}
+export type { Purchase, PurchaseItem, PurchaseStatus } from '../types/inventory';
 
 export interface ListPurchasesParams {
   cursor?: string;
@@ -32,4 +24,44 @@ export interface ListPurchasesParams {
 
 export function listPurchases(params: ListPurchasesParams = {}) {
   return api.get<Paginated<Purchase>>('/purchases', { ...params });
+}
+
+export function getPurchase(id: string) {
+  return api.get<Purchase>(`/purchases/${id}`);
+}
+
+export function createPurchase(input: CreatePurchaseInput) {
+  return api.post<Purchase>('/purchases', input);
+}
+
+export function updatePurchase(id: string, input: UpdatePurchaseInput) {
+  return api.patch<Purchase>(`/purchases/${id}`, input);
+}
+
+export function deletePurchase(id: string) {
+  return api.delete<void>(`/purchases/${id}`);
+}
+
+export function confirmPurchase(id: string) {
+  return api.post<Purchase>(`/purchases/${id}/confirm`);
+}
+
+export function cancelPurchase(id: string) {
+  return api.post<Purchase>(`/purchases/${id}/cancel`);
+}
+
+export function addPurchaseItem(purchaseId: string, input: CreatePurchaseItemInput) {
+  return api.post<PurchaseItem>(`/purchases/${purchaseId}/items`, input);
+}
+
+export function updatePurchaseItem(
+  purchaseId: string,
+  itemId: string,
+  input: UpdatePurchaseItemInput,
+) {
+  return api.patch<PurchaseItem>(`/purchases/${purchaseId}/items/${itemId}`, input);
+}
+
+export function removePurchaseItem(purchaseId: string, itemId: string) {
+  return api.delete<void>(`/purchases/${purchaseId}/items/${itemId}`);
 }

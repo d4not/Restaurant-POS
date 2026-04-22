@@ -7,7 +7,6 @@ import { useSupplies } from '../../hooks/useSupplies';
 import { useSupplyCategories } from '../../hooks/useSupplyCategories';
 import { formatMoney, formatNumber } from '../../utils/format';
 import type { Supply } from '../../types/inventory';
-import { SupplyFormModal } from './SupplyFormModal';
 
 export function SuppliesPage() {
   const navigate = useNavigate();
@@ -15,7 +14,6 @@ export function SuppliesPage() {
   const [categoryId, setCategoryId] = useState<string>('');
   const [showInactive, setShowInactive] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
-  const [modalOpen, setModalOpen] = useState(false);
 
   const categoriesQ = useSupplyCategories();
 
@@ -159,7 +157,7 @@ export function SuppliesPage() {
           {showInactive ? '✓ Inactive visible' : 'Show inactive'}
         </button>
 
-        <Button variant="primary" onClick={() => setModalOpen(true)}>
+        <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
           + New supply
         </Button>
       </div>
@@ -176,7 +174,7 @@ export function SuppliesPage() {
         emptyMessage="No supplies yet"
         emptySub="Create your first supply to start tracking inventory."
         emptyAction={
-          <Button variant="primary" onClick={() => setModalOpen(true)}>
+          <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
             + New supply
           </Button>
         }
@@ -184,8 +182,6 @@ export function SuppliesPage() {
         isLoadingMore={query.isFetchingNextPage}
         onLoadMore={() => query.fetchNextPage()}
       />
-
-      <SupplyFormModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </>
   );
 }

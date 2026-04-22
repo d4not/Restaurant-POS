@@ -113,6 +113,92 @@ export interface StockMovement {
   storage?: { id: string; name: string };
 }
 
+export interface PurchasePackaging {
+  id: string;
+  supply_id: string;
+  supplier_id: string;
+  name: string;
+  units_per_package: string;
+  price_per_package: string | null;
+  is_primary: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  supplier?: { id: string; name: string };
+}
+
+export interface CreatePackagingInput {
+  supply_id: string;
+  supplier_id: string;
+  name: string;
+  units_per_package: number;
+  price_per_package?: number | null;
+  is_primary?: boolean;
+  active?: boolean;
+}
+
+export type UpdatePackagingInput = Partial<Omit<CreatePackagingInput, 'supply_id' | 'supplier_id'>>;
+
+export type PurchaseStatus = 'DRAFT' | 'CONFIRMED' | 'CANCELLED';
+
+export interface PurchaseItem {
+  id: string;
+  purchase_id: string;
+  supply_id: string;
+  packaging_id: string | null;
+  package_quantity: string;
+  price_per_package: string;
+  base_unit_quantity: string;
+  unit_cost: string;
+  created_at: string;
+  supply?: { id: string; name: string; base_unit: BaseUnit };
+  packaging?: PurchasePackaging | null;
+}
+
+export interface Purchase {
+  id: string;
+  supplier_id: string;
+  storage_id: string;
+  date: string;
+  status: PurchaseStatus;
+  total: string;
+  payment_method: string | null;
+  notes: string | null;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+  items?: PurchaseItem[];
+  supplier?: { id: string; name: string };
+  storage?: { id: string; name: string };
+  user?: { id: string; name: string };
+}
+
+export interface CreatePurchaseItemInput {
+  supply_id: string;
+  packaging_id?: string | null;
+  package_quantity: number;
+  price_per_package: number;
+}
+
+export interface CreatePurchaseInput {
+  supplier_id: string;
+  storage_id: string;
+  date: string;
+  payment_method?: string;
+  notes?: string;
+  items?: CreatePurchaseItemInput[];
+}
+
+export interface UpdatePurchaseInput {
+  supplier_id?: string;
+  storage_id?: string;
+  date?: string;
+  payment_method?: string | null;
+  notes?: string | null;
+}
+
+export type UpdatePurchaseItemInput = Partial<CreatePurchaseItemInput>;
+
 export interface CreateSupplyInput {
   name: string;
   barcode?: string;

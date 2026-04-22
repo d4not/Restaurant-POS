@@ -1,16 +1,12 @@
 import { api } from './client';
 import type { Paginated } from '../types/api';
+import type {
+  CreatePackagingInput,
+  PurchasePackaging,
+  UpdatePackagingInput,
+} from '../types/inventory';
 
-export interface PurchasePackaging {
-  id: string;
-  supply_id: string;
-  supplier_id: string;
-  name: string;
-  units_per_package: string;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+export type { PurchasePackaging } from '../types/inventory';
 
 export interface ListPackagingsParams {
   cursor?: string;
@@ -22,4 +18,16 @@ export interface ListPackagingsParams {
 
 export function listPackagings(params: ListPackagingsParams = {}) {
   return api.get<Paginated<PurchasePackaging>>('/packagings', { ...params });
+}
+
+export function createPackaging(input: CreatePackagingInput) {
+  return api.post<PurchasePackaging>('/packagings', input);
+}
+
+export function updatePackaging(id: string, input: UpdatePackagingInput) {
+  return api.patch<PurchasePackaging>(`/packagings/${id}`, input);
+}
+
+export function deletePackaging(id: string) {
+  return api.delete<void>(`/packagings/${id}`);
 }

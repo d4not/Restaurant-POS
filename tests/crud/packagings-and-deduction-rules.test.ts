@@ -85,6 +85,58 @@ describe('PurchasePackaging CRUD', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.message).toMatch(/supply/i);
   });
+
+  it('allows exactly one primary packaging per supply', async () => {
+    const supplier2 = await makeSupplier();
+
+    // First packaging marked primary.
+    const a = await request(app)
+      .post('/api/v1/packagings')
+      .set(auth)
+      .send({
+        supply_id: supplyId,
+        supplier_id: supplierId,
+        name: 'Case of 12',
+        units_per_package: 12,
+        price_per_package: 18000,
+        is_primary: true,
+      });
+    expect(a.status).toBe(201);
+    expect(a.body.data.is_primary).toBe(true);
+    expect(a.body.data.price_per_package?.toString()).toBe('18000');
+
+    // Second packaging for the same supply, also marked primary — the first
+    // should be demoted automatically by the service.
+    const b = await request(app)
+      .post('/api/v1/packagings')
+      .set(auth)
+      .send({
+        supply_id: supplyId,
+        supplier_id: supplier2.id,
+        name: 'Pallet',
+        units_per_package: 144,
+        is_primary: true,
+      });
+    expect(b.status).toBe(201);
+
+    const primaries = await prisma.purchasePackaging.findMany({
+      where: { supply_id: supplyId, is_primary: true },
+    });
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0].id).toBe(b.body.data.id);
+
+    // Toggling via PATCH also enforces the invariant.
+    const flip = await request(app)
+      .patch(`/api/v1/packagings/${a.body.data.id}`)
+      .set(auth)
+      .send({ is_primary: true });
+    expect(flip.status).toBe(200);
+    const after = await prisma.purchasePackaging.findMany({
+      where: { supply_id: supplyId, is_primary: true },
+    });
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe(a.body.data.id);
+  });
 });
 
 describe('DeductionRule CRUD', () => {

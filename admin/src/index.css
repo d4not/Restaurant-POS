@@ -1226,42 +1226,208 @@ input.search-box:focus { border-color: var(--gold); }
 .product-name-input:hover { border-color: var(--border2); }
 .product-name-input:focus { border-color: var(--gold); background: var(--surface); }
 
-/* ── STICKY "UNSAVED CHANGES" BAR ─────────────────────────── */
-/* Sticks to the bottom of the scrollable .content area. Appears only when
-   something is dirty. */
+/* ── "UNSAVED CHANGES" BANNER ────────────────────────────── */
+/* Rendered at the top of the page in normal document flow so it can't be
+   hidden by overflow or positioning quirks. Prominent gold accent so it reads
+   as "action needed" at a glance. */
 .save-bar {
-  position: sticky;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  margin: 20px -24px -24px;
-  padding: 12px 24px;
-  background: var(--sidebar2);
-  color: #f0e0c0;
-  border-top: 1px solid rgba(200, 146, 42, 0.4);
-  box-shadow: 0 -6px 20px rgba(30, 17, 8, 0.16);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  z-index: 50;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--gold-bg);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
 }
 .save-bar-msg {
   font-size: 13px;
   font-weight: 600;
+  color: var(--text);
+}
+.save-bar-msg::before {
+  content: '●';
+  display: inline-block;
   color: var(--gold);
+  margin-right: 8px;
+  animation: save-bar-pulse 1.4s ease-in-out infinite;
+}
+@keyframes save-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 .save-bar-actions {
   display: flex;
   gap: 8px;
 }
-/* Ghost buttons live on a warm-brown bar so flip them to a readable palette. */
-.save-bar .btn-ghost {
-  color: #f0e0c0;
-  border-color: rgba(240, 224, 192, 0.4);
+
+/* ── MODIFIER-GROUP DETAIL EDITOR ────────────────────────── */
+/* Inline select sharing the visual language of .inline-input so editable
+   cells line up consistently whether the value is text, number, or enum. */
+.inline-select {
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  outline: none;
+  transition: border 0.12s, background 0.12s;
 }
-.save-bar .btn-ghost:hover:not(:disabled) {
-  background: rgba(240, 224, 192, 0.1);
-  border-color: rgba(240, 224, 192, 0.7);
+.inline-select:focus {
+  border-color: var(--gold);
+  background: var(--surface);
 }
+.inline-select.saving { opacity: 0.6; cursor: wait; }
+.inline-select.error  { border-color: var(--red); }
+
+/* "Add a modifier" row lives inside the table-wrap and shares the grid
+   template with the rows below so each input sits under its column header. */
+.table-row.modifier-add-row {
+  background: var(--gold-bg);
+  border-top: 1px solid var(--gold);
+  border-bottom: 1px solid var(--gold);
+  cursor: default;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.table-row.modifier-add-row:hover { background: var(--gold-bg); }
+.table-row.modifier-add-row .inline-input,
+.table-row.modifier-add-row .inline-select {
+  background: var(--surface);
+}
+
+/* Inactive modifier rows stay in their original slot (display_order) so the
+   user doesn't lose track of them — just visually muted and tagged. */
+.table-row.row-inactive { opacity: 0.55; }
+.table-row.row-inactive:hover { opacity: 0.9; }
+
+/* Clickable "Default" pill. Filled gold when the modifier is the current
+   default, outlined/ghost otherwise. Unlike .badge this is a <button>. */
+.default-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 0.12s, border 0.12s, color 0.12s;
+}
+.default-btn:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.default-btn.is-default {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+  cursor: default;
+}
+.default-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Status pill that looks like a .badge but behaves like a button so clicks
+   on the row's Status cell can toggle active/inactive. */
+.status-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: filter 0.12s;
+}
+.status-btn:hover { filter: brightness(1.08); }
+.status-btn.is-active {
+  color: var(--green);
+  background: var(--green-bg);
+  border-color: var(--green);
+}
+.status-btn.is-inactive {
+  color: var(--text3);
+  background: rgba(0,0,0,0.04);
+  border-color: var(--border2);
+}
+
+/* ── STEPPER ─────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.stepper-item { display: flex; align-items: center; gap: 10px; }
+.stepper-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--border);
+  color: var(--text3);
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+.stepper-dot.active {
+  background: var(--gold);
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--gold-bg);
+}
+.stepper-dot.done {
+  background: var(--green);
+  color: #fff;
+}
+.stepper-label {
+  font-size: 13px;
+  color: var(--text3);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.stepper-label.active { color: var(--text); font-weight: 700; }
+.stepper-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  margin: 0 14px;
+  min-width: 40px;
+}
+
+/* ── PURCHASE ORDER STATUS BADGES / ACTION ROW ─────────────── */
+.po-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.po-status-pill.draft     { background: var(--gold-bg);  color: var(--gold);  }
+.po-status-pill.confirmed { background: var(--green-bg); color: var(--green); }
+.po-status-pill.cancelled { background: rgba(0,0,0,0.05); color: var(--text3); }
 

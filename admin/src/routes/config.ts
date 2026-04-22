@@ -53,9 +53,10 @@ export const NAV: NavEntry[] = [
     label: 'Inventory',
     icon: '📦',
     items: [
-      { id: 'supplies',  label: 'Supplies',   path: '/inventory/supplies' },
-      { id: 'movements', label: 'Movements',  path: '/inventory/movements' },
-      { id: 'suppliers', label: 'Suppliers',  path: '/inventory/suppliers' },
+      { id: 'supplies',  label: 'Supplies',        path: '/inventory/supplies' },
+      { id: 'movements', label: 'Movements',       path: '/inventory/movements' },
+      { id: 'purchases', label: 'Purchase Orders', path: '/inventory/purchases' },
+      { id: 'suppliers', label: 'Suppliers',       path: '/inventory/suppliers' },
     ],
   },
   {

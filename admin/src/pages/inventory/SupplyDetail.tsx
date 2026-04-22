@@ -4,26 +4,40 @@ import { Badge, Button, Card, EmptyState, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { useSupply, useSupplyStocks } from '../../hooks/useSupplies';
 import { useSuppliers } from '../../hooks/useSuppliers';
-import { usePackagings } from '../../hooks/usePackagings';
+import {
+  usePackagings,
+  useDeletePackaging,
+  useUpdatePackaging,
+} from '../../hooks/usePackagings';
 import { useMovements } from '../../hooks/useMovements';
 import {
   formatDateTime,
   formatMoney,
   formatNumber,
 } from '../../utils/format';
-import type { StockMovement, StorageStock } from '../../types/inventory';
+import type {
+  PurchasePackaging,
+  StockMovement,
+  StorageStock,
+} from '../../types/inventory';
 import { SupplyFormModal } from './SupplyFormModal';
+import { PackagingFormModal } from './PackagingFormModal';
 import { movementTypeTone } from './movement-meta';
 
 export function SupplyDetail() {
   const { id } = useParams<{ id: string }>();
   const [editing, setEditing] = useState(false);
+  const [packagingEditor, setPackagingEditor] = useState<
+    { open: true; packaging: PurchasePackaging | null } | { open: false }
+  >({ open: false });
 
   const supplyQ = useSupply(id);
   const stocksQ = useSupplyStocks(id);
   const packagingsQ = usePackagings({ supply_id: id });
   const movementsQ = useMovements({ supply_id: id });
   const suppliersQ = useSuppliers({});
+  const updatePackagingM = useUpdatePackaging();
+  const deletePackagingM = useDeletePackaging();
 
   const suppliersById = useMemo(() => {
     const map = new Map<string, string>();
@@ -61,12 +75,37 @@ export function SupplyDetail() {
   const stocks = stocksQ.data?.items ?? [];
   const totalStock = stocks.reduce((acc, s) => acc + Number(s.quantity), 0);
   const packagings = packagingsQ.data?.items ?? [];
+  const activePackagings = packagings.filter((p) => p.active);
   const movements = movementsQ.data?.pages.flatMap((p) => p.items) ?? [];
 
   const contentLine =
     supply.content_per_unit && supply.content_unit
       ? `${formatNumber(supply.content_per_unit)} ${supply.content_unit.toLowerCase()} per ${supply.base_unit.toLowerCase()}`
       : '—';
+
+  const makePrimary = async (pkg: PurchasePackaging) => {
+    if (pkg.is_primary) return;
+    try {
+      await updatePackagingM.mutateAsync({
+        id: pkg.id,
+        input: { is_primary: true },
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to set primary');
+    }
+  };
+
+  const removePackaging = async (pkg: PurchasePackaging) => {
+    const ok = window.confirm(
+      `Remove "${pkg.name}" from ${suppliersById.get(pkg.supplier_id) ?? 'this supplier'}?\n\nThe packaging will be deactivated — historical purchases keep the link.`,
+    );
+    if (!ok) return;
+    try {
+      await deletePackagingM.mutateAsync(pkg.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to remove packaging');
+    }
+  };
 
   const stockColumns: TableColumn<StorageStock>[] = [
     {
@@ -106,6 +145,106 @@ export function SupplyDetail() {
         if (min !== null && qty <= min * 1.5) return <Badge tone="gold">Low</Badge>;
         return <Badge tone="green">OK</Badge>;
       },
+    },
+  ];
+
+  const packagingColumns: TableColumn<PurchasePackaging>[] = [
+    {
+      key: 'supplier',
+      header: 'Supplier',
+      width: '1.3fr',
+      render: (p) => (
+        <div className="fw-600 fs-13">
+          {p.supplier?.name ?? suppliersById.get(p.supplier_id) ?? '—'}
+        </div>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Packaging',
+      width: '1.3fr',
+      render: (p) => <span className="fs-13">{p.name}</span>,
+    },
+    {
+      key: 'upp',
+      header: 'Units / pkg',
+      width: '110px',
+      render: (p) => (
+        <span className="fs-13">
+          {formatNumber(p.units_per_package, 4)} {supply.base_unit.toLowerCase()}
+        </span>
+      ),
+    },
+    {
+      key: 'price',
+      header: 'Price / pkg',
+      width: '110px',
+      render: (p) =>
+        p.price_per_package ? (
+          <span className="fs-13">{formatMoney(Number(p.price_per_package))}</span>
+        ) : (
+          <span className="fs-12 text-muted">—</span>
+        ),
+    },
+    {
+      key: 'unit_cost',
+      header: 'Unit cost',
+      width: '110px',
+      render: (p) => {
+        if (!p.price_per_package) return <span className="fs-12 text-muted">—</span>;
+        const upp = Number(p.units_per_package);
+        if (!Number.isFinite(upp) || upp <= 0) {
+          return <span className="fs-12 text-muted">—</span>;
+        }
+        return (
+          <span className="fs-13 text-gold fw-600">
+            {formatMoney(Number(p.price_per_package) / upp)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'primary',
+      header: 'Primary',
+      width: '120px',
+      render: (p) =>
+        p.is_primary ? (
+          <Badge tone="gold">Primary</Badge>
+        ) : (
+          <button
+            type="button"
+            className="filter-pill"
+            style={{ padding: '3px 10px', fontSize: 11 }}
+            onClick={() => makePrimary(p)}
+            disabled={updatePackagingM.isPending}
+          >
+            Make primary
+          </button>
+        ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '150px',
+      render: (p) => (
+        <div className="flex gap-4" style={{ justifyContent: 'flex-end' }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setPackagingEditor({ open: true, packaging: p })}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => removePackaging(p)}
+            disabled={deletePackagingM.isPending}
+          >
+            Remove
+          </Button>
+        </div>
+      ),
     },
   ];
 
@@ -195,44 +334,10 @@ export function SupplyDetail() {
         </Button>
       </div>
 
-      {/* 3-layer unit model */}
+      {/* Base / cost summary */}
       <div className="section-grid-3 mb-16">
         <Card>
-          <div className="chart-title">Purchase layer</div>
-          {packagingsQ.isLoading ? (
-            <div className="loading-block"><span className="spinner" />Loading packagings…</div>
-          ) : packagings.length === 0 ? (
-            <div className="fs-12 text-muted">
-              No purchase packagings yet. When you buy this supply, you can
-              register packaging options (box, case, bag) that map to base units.
-            </div>
-          ) : (
-            <div className="detail-grid">
-              {packagings.map((p) => (
-                <div key={p.id} className="detail-row cols-2">
-                  <div className="detail-cell">
-                    <div className="dk">Package</div>
-                    <div className="dv">
-                      <div className="fw-600">{p.name}</div>
-                      <div className="fs-11 text-muted">
-                        {suppliersById.get(p.supplier_id) ?? '—'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="detail-cell">
-                    <div className="dk">Units / pkg</div>
-                    <div className="dv gold">
-                      {formatNumber(p.units_per_package)} {supply.base_unit.toLowerCase()}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card>
-          <div className="chart-title">Base &amp; recipe layers</div>
+          <div className="chart-title">Supply profile</div>
           <div className="detail-grid">
             <div className="detail-row cols-2">
               <div className="detail-cell">
@@ -270,6 +375,72 @@ export function SupplyDetail() {
             </div>
           </div>
         </Card>
+
+        <Card>
+          <div className="chart-title">Suppliers at a glance</div>
+          {packagingsQ.isLoading ? (
+            <div className="loading-block">
+              <span className="spinner" />
+              Loading…
+            </div>
+          ) : activePackagings.length === 0 ? (
+            <div className="fs-12 text-muted">
+              No active supplier packagings. Add one below to buy this supply.
+            </div>
+          ) : (
+            <div className="detail-grid">
+              <div className="detail-row cols-2">
+                <div className="detail-cell">
+                  <div className="dk">Primary</div>
+                  <div className="dv fw-600">
+                    {activePackagings.find((p) => p.is_primary)?.supplier?.name ??
+                      suppliersById.get(
+                        activePackagings.find((p) => p.is_primary)?.supplier_id ?? '',
+                      ) ??
+                      '—'}
+                  </div>
+                </div>
+                <div className="detail-cell">
+                  <div className="dk">Sources</div>
+                  <div className="dv gold">{activePackagings.length}</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Suppliers & packaging — the new CRUD table */}
+      <div className="detail-section">
+        <div className="flex-between mb-8">
+          <h3 style={{ marginBottom: 0, paddingBottom: 0, border: 'none' }}>
+            Suppliers & packaging
+          </h3>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setPackagingEditor({ open: true, packaging: null })}
+          >
+            + Add supplier
+          </Button>
+        </div>
+        <Table
+          columns={packagingColumns}
+          rows={packagings}
+          getRowKey={(p) => p.id}
+          isInitialLoad={packagingsQ.isLoading}
+          error={packagingsQ.error as Error | null}
+          emptyMessage="No supplier packagings yet"
+          emptySub="Register how each supplier sells this supply — packaging name, units per package, price."
+          emptyAction={
+            <Button
+              variant="primary"
+              onClick={() => setPackagingEditor({ open: true, packaging: null })}
+            >
+              + Add supplier
+            </Button>
+          }
+        />
       </div>
 
       {/* Stock by storage */}
@@ -351,6 +522,13 @@ export function SupplyDetail() {
         open={editing}
         onClose={() => setEditing(false)}
         supply={supply}
+      />
+
+      <PackagingFormModal
+        open={packagingEditor.open}
+        onClose={() => setPackagingEditor({ open: false })}
+        supplyId={supply.id}
+        packaging={packagingEditor.open ? packagingEditor.packaging : null}
       />
     </>
   );

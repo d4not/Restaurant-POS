@@ -7,8 +7,12 @@ import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { SuppliesPage } from './pages/inventory/SuppliesPage';
 import { SupplyDetail } from './pages/inventory/SupplyDetail';
+import { SupplyCreate } from './pages/inventory/SupplyCreate';
 import { SuppliersPage } from './pages/inventory/SuppliersPage';
 import { MovementsPage } from './pages/inventory/MovementsPage';
+import { PurchaseOrdersPage } from './pages/inventory/PurchaseOrdersPage';
+import { PurchaseOrderCreate } from './pages/inventory/PurchaseOrderCreate';
+import { PurchaseOrderDetail } from './pages/inventory/PurchaseOrderDetail';
 import { ProductsPage } from './pages/menu/ProductsPage';
 import { ProductDetail } from './pages/menu/ProductDetail';
 import { CategoriesPage } from './pages/menu/CategoriesPage';
@@ -72,10 +76,14 @@ export default function App() {
             {/* Inventory */}
             <Route path="inventory">
               <Route index element={<Navigate to="supplies" replace />} />
-              <Route path="supplies"      element={<SuppliesPage />} />
-              <Route path="supplies/:id"  element={<SupplyDetail />} />
-              <Route path="movements"     element={<MovementsPage />} />
-              <Route path="suppliers"     element={<SuppliersPage />} />
+              <Route path="supplies"           element={<SuppliesPage />} />
+              <Route path="supplies/new"       element={<SupplyCreate />} />
+              <Route path="supplies/:id"       element={<SupplyDetail />} />
+              <Route path="movements"          element={<MovementsPage />} />
+              <Route path="purchases"          element={<PurchaseOrdersPage />} />
+              <Route path="purchases/new"      element={<PurchaseOrderCreate />} />
+              <Route path="purchases/:id"      element={<PurchaseOrderDetail />} />
+              <Route path="suppliers"          element={<SuppliersPage />} />
             </Route>
 
             {/* Menu */}

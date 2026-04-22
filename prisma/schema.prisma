@@ -258,6 +258,8 @@ model PurchasePackaging {
   supplier_id       String   @db.Uuid
   name              String
   units_per_package Decimal  @db.Decimal(14, 4)
+  price_per_package Decimal? @db.Decimal(14, 0)
+  is_primary        Boolean  @default(false)
   active            Boolean  @default(true)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
@@ -268,6 +270,7 @@ model PurchasePackaging {
 
   @@index([supply_id])
   @@index([supplier_id])
+  @@index([supply_id, is_primary])
   @@map("purchase_packagings")
 }
 
