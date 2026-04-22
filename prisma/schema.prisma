@@ -226,7 +226,6 @@ model Supply {
   recipe_items          RecipeItem[]
   products              Product[]
   product_modifications ProductModification[]
-  replacing_groups      ModifierGroup[]       @relation("ModifierGroupReplaces")
 
   @@index([category_id])
   @@index([active])
@@ -600,26 +599,24 @@ model ProductVariant {
 }
 
 model ModifierGroup {
-  id                 String            @id @default(uuid()) @db.Uuid
-  name               String
-  // SWAP: modifiers replace `replaces_supply_id` in the target recipe.
-  // ADD (default): modifiers deduct on top of the recipe.
-  type               ModifierGroupType @default(ADD)
-  // For SWAP groups: which raw-supply recipe line the group's modifiers stand in
-  // for. e.g. "Milk Type" → whole_milk. Null for ADD groups.
-  replaces_supply_id String?           @db.Uuid
-  min_selection      Int               @default(0)
-  max_selection      Int               @default(1)
-  required           Boolean           @default(false)
-  display_order      Int               @default(0)
-  created_at         DateTime          @default(now())
-  updated_at         DateTime          @updatedAt
+  id            String            @id @default(uuid()) @db.Uuid
+  name          String
+  // SWAP: recipe lines link to this group via RecipeItem.modifier_group_id —
+  // at deduction the selected modifier (or the group's is_default modifier, if
+  // none was picked) provides the supply. ADD (default): modifiers deduct on
+  // top of the recipe.
+  type          ModifierGroupType @default(ADD)
+  min_selection Int               @default(0)
+  max_selection Int               @default(1)
+  required      Boolean           @default(false)
+  display_order Int               @default(0)
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
 
-  modifiers       Modifier[]
-  product_links   ProductModifierGroup[]
-  replaces_supply Supply?                @relation("ModifierGroupReplaces", fields: [replaces_supply_id], references: [id])
+  modifiers     Modifier[]
+  product_links ProductModifierGroup[]
+  recipe_items  RecipeItem[]           @relation("RecipeItemModifierGroup")
 
-  @@index([replaces_supply_id])
   @@map("modifier_groups")
 }
 
@@ -631,11 +628,15 @@ model Modifier {
   supply_id       String?  @db.Uuid
   supply_quantity Decimal? @db.Decimal(14, 4)
   supply_unit     String?
-  // For SWAP modifiers: multiplier applied to the original recipe ingredient
-  // quantity. 1.0 means "same amount"; 0.75 → deduct 75% of the original qty of
-  // this modifier's supply instead. Ignored for ADD modifiers (they use the
-  // supply_quantity triplet as a fixed amount).
+  // For SWAP modifiers: multiplier applied to the recipe line's quantity when
+  // this modifier fills the slot. 1.0 means "same amount"; 0.75 → deduct 75%
+  // of the recipe qty from this modifier's supply. Ignored for ADD modifiers
+  // (they use the supply_quantity triplet as a fixed amount).
   ratio           Decimal  @default(1) @db.Decimal(10, 4)
+  // SWAP groups must have exactly one modifier with is_default=true — the
+  // fallback used when the customer doesn't pick anything from the group at
+  // the POS. Ignored for ADD modifiers (they never default).
+  is_default      Boolean  @default(false)
   active          Boolean  @default(true)
   display_order   Int      @default(0)
   created_at      DateTime @default(now())
@@ -685,22 +686,30 @@ model Recipe {
 }
 
 model RecipeItem {
-  id             String   @id @default(uuid()) @db.Uuid
-  recipe_id      String   @db.Uuid
-  supply_id      String?  @db.Uuid
-  preparation_id String?  @db.Uuid
-  quantity       Decimal  @db.Decimal(14, 4)
-  unit           String
-  waste_pct      Decimal  @default(0) @db.Decimal(6, 4)
-  created_at     DateTime @default(now())
+  id                String   @id @default(uuid()) @db.Uuid
+  recipe_id         String   @db.Uuid
+  // Exactly one of supply_id, preparation_id, or modifier_group_id is set.
+  // modifier_group_id makes the line a "slot" filled at sale time by the
+  // selected SWAP modifier — or the group's is_default modifier when the
+  // customer picks nothing. quantity/unit/waste_pct still drive the deduction;
+  // the modifier's supply + ratio determine which supply is drawn and how much.
+  supply_id         String?  @db.Uuid
+  preparation_id    String?  @db.Uuid
+  modifier_group_id String?  @db.Uuid
+  quantity          Decimal  @db.Decimal(14, 4)
+  unit              String
+  waste_pct         Decimal  @default(0) @db.Decimal(6, 4)
+  created_at        DateTime @default(now())
 
-  recipe      Recipe   @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
-  supply      Supply?  @relation(fields: [supply_id], references: [id])
-  preparation Product? @relation("RecipeItemPreparation", fields: [preparation_id], references: [id])
+  recipe         Recipe         @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
+  supply         Supply?        @relation(fields: [supply_id], references: [id])
+  preparation    Product?       @relation("RecipeItemPreparation", fields: [preparation_id], references: [id])
+  modifier_group ModifierGroup? @relation("RecipeItemModifierGroup", fields: [modifier_group_id], references: [id])
 
   @@index([recipe_id])
   @@index([supply_id])
   @@index([preparation_id])
+  @@index([modifier_group_id])
   @@map("recipe_items")
 }
 

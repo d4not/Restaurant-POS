@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Modal } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
-import { Select } from '../../components/forms/Select';
 import {
   useCreateModifierGroup,
   useUpdateModifierGroup,
 } from '../../hooks/useModifierGroups';
-import { useSupplies } from '../../hooks/useSupplies';
 import type {
   ModifierGroup,
   ModifierGroupType,
@@ -21,7 +19,6 @@ interface Props {
 interface FormState {
   name: string;
   type: ModifierGroupType;
-  replaces_supply_id: string;
   min_selection: string;
   max_selection: string;
   required: boolean;
@@ -31,7 +28,6 @@ interface FormState {
 const emptyForm: FormState = {
   name: '',
   type: 'ADD',
-  replaces_supply_id: '',
   min_selection: '0',
   max_selection: '1',
   required: false,
@@ -39,12 +35,6 @@ const emptyForm: FormState = {
 };
 
 export function ModifierGroupFormModal({ open, onClose, group }: Props) {
-  const suppliesQ = useSupplies({ active: true });
-  const supplies = useMemo(
-    () => suppliesQ.data?.pages.flatMap((p) => p.items) ?? [],
-    [suppliesQ.data],
-  );
-
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +48,6 @@ export function ModifierGroupFormModal({ open, onClose, group }: Props) {
       setForm({
         name: group.name,
         type: group.type,
-        replaces_supply_id: group.replaces_supply_id ?? '',
         min_selection: String(group.min_selection),
         max_selection: String(group.max_selection),
         required: group.required,
@@ -90,16 +79,10 @@ export function ModifierGroupFormModal({ open, onClose, group }: Props) {
       setError('Min selection cannot exceed max selection');
       return;
     }
-    if (form.type === 'SWAP' && !form.replaces_supply_id) {
-      setError('SWAP groups must select the ingredient being replaced');
-      return;
-    }
 
     const body = {
       name: form.name.trim(),
       type: form.type,
-      replaces_supply_id:
-        form.type === 'SWAP' ? form.replaces_supply_id : null,
       min_selection: min,
       max_selection: max,
       required: form.required,
@@ -163,31 +146,17 @@ export function ModifierGroupFormModal({ open, onClose, group }: Props) {
           <button
             type="button"
             className={`filter-pill ${form.type === 'ADD' ? 'active' : ''}`}
-            onClick={() =>
-              setForm((f) => ({ ...f, type: 'ADD', replaces_supply_id: '' }))
-            }
+            onClick={() => setForm((f) => ({ ...f, type: 'ADD' }))}
           >
             ADD
           </button>
         </div>
         <div className="fs-11 text-muted mt-4">
           {form.type === 'SWAP'
-            ? 'SWAP: modifiers replace a recipe ingredient (e.g. Whole Milk → Almond Milk).'
+            ? 'SWAP: modifiers fill a recipe slot (e.g. Whole Milk → Almond Milk). Mark one modifier as Default — the recipe uses that fallback when the customer picks nothing.'
             : 'ADD: modifiers deduct extra inventory on top of the recipe (e.g. extra shot).'}
         </div>
       </div>
-
-      {form.type === 'SWAP' && (
-        <Select
-          label="Replaces ingredient"
-          placeholder="Select supply…"
-          options={supplies.map((s) => ({ value: s.id, label: s.name }))}
-          value={form.replaces_supply_id}
-          onValueChange={(v) =>
-            setForm((f) => ({ ...f, replaces_supply_id: v }))
-          }
-        />
-      )}
 
       <div
         style={{

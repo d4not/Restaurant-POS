@@ -15,6 +15,7 @@ import {
 import { useProducts } from '../../hooks/useProducts';
 import { useProduct } from '../../hooks/useProducts';
 import { useModifierGroup } from '../../hooks/useModifierGroups';
+import { useRecipe } from '../../hooks/useRecipes';
 import type {
   Modifier,
   ModifierGroup,
@@ -568,6 +569,27 @@ function ProductPicker({ open, orderId, product, onClose }: ProductPickerProps) 
 
   const addItemM = useAddOrderItem();
 
+  // DISH lines deduct inventory from a recipe at payment time — an item
+  // without a recipe would crash the close-flow with "Variant X has no recipe".
+  // Preflight the recipe here so the cashier gets an actionable message
+  // instead of the raw backend error. PRODUCT lines skip this check entirely.
+  const recipeOwner =
+    full.type === 'DISH'
+      ? variantId
+        ? ({ kind: 'variant', id: variantId } as const)
+        : (full.variants ?? []).length === 0
+          ? ({ kind: 'product', id: full.id } as const)
+          : undefined
+      : undefined;
+  const recipeQ = useRecipe(recipeOwner);
+  const recipeLoading = !!recipeOwner && recipeQ.isLoading;
+  const recipeMissing =
+    !!recipeOwner && !recipeQ.isLoading && recipeQ.data == null;
+
+  const variantLabel = variantId
+    ? (full.variants ?? []).find((v) => v.id === variantId)?.name ?? null
+    : null;
+
   useEffect(() => {
     if (!open) return;
     setVariantId(null);
@@ -627,8 +649,20 @@ function ProductPicker({ open, orderId, product, onClose }: ProductPickerProps) 
 
   const allModifiers = Object.values(selectedModifiers).flat();
 
+  const missingRecipeMessage = recipeMissing
+    ? variantLabel
+      ? `Cannot add ${full.name} — ${variantLabel}: no recipe configured. Please add a recipe in Menu > Products.`
+      : `Cannot add ${full.name}: no recipe configured. Please add a recipe in Menu > Products.`
+    : null;
+
   const submit = async () => {
     setServerError(null);
+    // Defense in depth — the button is disabled when the recipe is missing,
+    // but a quick double-click shouldn't bypass the check.
+    if (missingRecipeMessage) {
+      setServerError(missingRecipeMessage);
+      return;
+    }
     try {
       await addItemM.mutateAsync({
         orderId,
@@ -705,6 +739,12 @@ function ProductPicker({ open, orderId, product, onClose }: ProductPickerProps) 
             </div>
           )}
 
+          {missingRecipeMessage && !serverError && (
+            <div className="auth-alert" style={{ marginBottom: 12 }}>
+              {missingRecipeMessage}
+            </div>
+          )}
+
           {activeVariants.length > 0 && (
             <div className="picker-section">
               <div className="picker-section-title">Size</div>
@@ -760,13 +800,18 @@ function ProductPicker({ open, orderId, product, onClose }: ProductPickerProps) 
               {validation.reason}
             </span>
           )}
+          {validation.ok && recipeLoading && (
+            <span className="text-muted fs-12" style={{ marginRight: 'auto' }}>
+              Checking recipe…
+            </span>
+          )}
           <Button variant="ghost" onClick={onClose} disabled={addItemM.isPending}>
             Cancel
           </Button>
           <Button
             variant="primary"
             loading={addItemM.isPending}
-            disabled={!validation.ok}
+            disabled={!validation.ok || recipeLoading || recipeMissing}
             onClick={submit}
           >
             Add to order

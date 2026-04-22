@@ -115,11 +115,16 @@ export function ModifierGroupDetail() {
             <span className="fs-12 text-muted">
               min {group.min_selection} · max {group.max_selection}
             </span>
-            {group.replaces_supply && (
-              <span className="fs-12 text-muted">
-                Replaces: <span className="fw-600">{group.replaces_supply.name}</span>
-              </span>
-            )}
+            {isSwap && (() => {
+              const def = group.modifiers?.find((m) => m.is_default);
+              return def ? (
+                <span className="fs-12 text-muted">
+                  Default: <span className="fw-600">{def.name}</span>
+                </span>
+              ) : (
+                <span className="fs-12 text-red">No default set</span>
+              );
+            })()}
           </div>
         </div>
         <div className="flex gap-8">
@@ -264,6 +269,18 @@ function ModifiersSection({ groupId, isSwap }: ModifiersSectionProps) {
     }
   };
 
+  const onSetDefault = async (m: Modifier) => {
+    if (m.is_default) return;
+    try {
+      await updateMod.mutateAsync({
+        modifierId: m.id,
+        input: { is_default: true },
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Update failed');
+    }
+  };
+
   const onDelete = async (m: Modifier) => {
     if (!confirm(`Delete modifier "${m.name}"?`)) return;
     try {
@@ -292,6 +309,32 @@ function ModifiersSection({ groupId, isSwap }: ModifiersSectionProps) {
     },
     ...(isSwap
       ? [
+          {
+            key: 'default',
+            header: 'Default',
+            width: '80px',
+            render: (m: Modifier) => (
+              <label
+                className="flex gap-8"
+                style={{ alignItems: 'center', cursor: m.is_default ? 'default' : 'pointer' }}
+                onClick={(ev) => ev.stopPropagation()}
+                title={
+                  m.is_default
+                    ? 'Used when the customer picks nothing from this group'
+                    : 'Set as default'
+                }
+              >
+                <input
+                  type="radio"
+                  name={`modifier-default-${groupId}`}
+                  checked={m.is_default}
+                  onChange={() => onSetDefault(m)}
+                  disabled={!m.supply_id}
+                  style={{ cursor: m.supply_id ? 'pointer' : 'not-allowed' }}
+                />
+              </label>
+            ),
+          },
           {
             key: 'ratio',
             header: 'Ratio',

@@ -52,14 +52,16 @@ export function ModifierGroupsPage() {
         ),
     },
     {
-      key: 'replaces',
-      header: 'Replaces',
+      key: 'default',
+      header: 'Default',
       width: '1.5fr',
-      render: (g) => (
-        <span className="fs-12 text-muted">
-          {g.replaces_supply?.name ?? '—'}
-        </span>
-      ),
+      render: (g) => {
+        if (g.type !== 'SWAP') return <span className="fs-12 text-muted">—</span>;
+        const def = g.modifiers?.find((m) => m.is_default);
+        return (
+          <span className="fs-12 text-muted">{def?.name ?? '—'}</span>
+        );
+      },
     },
     {
       key: 'selection',

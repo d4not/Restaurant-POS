@@ -8,10 +8,12 @@ import {
   useDeleteRecipeItem,
   useRecipe,
   useUpdateRecipe,
+  useUpdateRecipeItem,
 } from '../../hooks/useRecipes';
 import { useSupplies } from '../../hooks/useSupplies';
 import { useProducts } from '../../hooks/useProducts';
-import { formatMoney, formatNumber, formatPct } from '../../utils/format';
+import { useModifierGroups } from '../../hooks/useModifierGroups';
+import { formatMoney, formatPct } from '../../utils/format';
 import {
   estimatePreparationItemCost,
   estimateSupplyItemCost,
@@ -132,6 +134,7 @@ function RecipeEditorInner({
 }: InnerProps) {
   const addItem = useAddRecipeItem(owner);
   const deleteItem = useDeleteRecipeItem(owner);
+  const updateItem = useUpdateRecipeItem(owner);
 
   // Yield editing mirrors the stored value; we only persist on blur so we
   // don't POST per keystroke.
@@ -197,10 +200,16 @@ function RecipeEditorInner({
   const onAddItem = (input: {
     supply_id?: string | null;
     preparation_id?: string | null;
+    modifier_group_id?: string | null;
     quantity: number;
     unit: string;
     waste_pct?: number;
   }) => addItem.mutateAsync({ recipeId: recipe.id, input });
+
+  const onUpdateItem = (
+    itemId: string,
+    input: { quantity?: number; waste_pct?: number },
+  ) => updateItem.mutateAsync({ recipeId: recipe.id, itemId, input });
 
   return (
     <div>
@@ -267,7 +276,7 @@ function RecipeEditorInner({
         {items.length === 0 ? (
           <div className="empty-state" style={{ padding: '24px 16px' }}>
             <div className="msg">No ingredients yet</div>
-            <div className="sub">Add supplies and preparations below.</div>
+            <div className="sub">Add supplies, preparations, or modifier groups below.</div>
           </div>
         ) : (
           items.map((it, idx) => (
@@ -279,6 +288,7 @@ function RecipeEditorInner({
                 deleteItem.mutate({ recipeId: recipe.id, itemId: it.id })
               }
               deleting={deleteItem.isPending}
+              onUpdate={(input) => onUpdateItem(it.id, input)}
             />
           ))
         )}
@@ -351,6 +361,22 @@ function estimateItemCost(it: RecipeItem): number | null {
       averageCost: Number(it.supply.average_cost),
     });
   }
+  if (it.modifier_group_id && it.modifier_group) {
+    // Cost the slot against the is_default modifier's supply at ratio 1.0 —
+    // mirrors the backend cost engine so the preview matches what the server
+    // persists.
+    const def = it.modifier_group.modifiers?.find((m) => m.is_default);
+    if (!def?.supply) return null;
+    return estimateSupplyItemCost({
+      quantity: qty,
+      recipeUnit: it.unit,
+      wastePct: waste,
+      contentPerUnit:
+        def.supply.content_per_unit != null ? Number(def.supply.content_per_unit) : null,
+      contentUnit: def.supply.content_unit,
+      averageCost: Number(def.supply.average_cost),
+    });
+  }
   if (it.preparation_id && it.preparation) {
     // The recipe endpoint doesn't embed the preparation's yield, so local
     // preview is only accurate when quantity × recipe_cost happens to align.
@@ -372,12 +398,29 @@ interface RecipeItemRowProps {
   even: boolean;
   onDelete: () => void;
   deleting: boolean;
+  onUpdate: (input: { quantity?: number; waste_pct?: number }) => Promise<unknown>;
 }
 
-function RecipeItemRow({ item, even, onDelete, deleting }: RecipeItemRowProps) {
+function RecipeItemRow({
+  item,
+  even,
+  onDelete,
+  deleting,
+  onUpdate,
+}: RecipeItemRowProps) {
   const estCost = estimateItemCost(item);
-  const label = item.supply?.name ?? item.preparation?.name ?? 'Unknown';
-  const kind = item.supply_id ? 'supply' : 'preparation';
+  const kind: 'modifier' | 'preparation' | 'supply' = item.modifier_group_id
+    ? 'modifier'
+    : item.preparation_id
+      ? 'preparation'
+      : 'supply';
+  // For slots, show the group name up top with the 🔄 badge and surface the
+  // default modifier (the fallback when the customer picks nothing) below.
+  const defaultMod = item.modifier_group?.modifiers?.find((m) => m.is_default);
+  const label =
+    kind === 'modifier'
+      ? item.modifier_group?.name ?? 'Modifier group'
+      : item.supply?.name ?? item.preparation?.name ?? 'Unknown';
   return (
     <div
       className={`table-row ${even ? 'even' : 'odd'}`}
@@ -387,17 +430,52 @@ function RecipeItemRow({ item, even, onDelete, deleting }: RecipeItemRowProps) {
       }}
     >
       <div>
-        <div className="fw-600 fs-13">{label}</div>
+        <div className="fw-600 fs-13">
+          {kind === 'modifier' && (
+            <span style={{ marginRight: 6 }} title="Modifier group slot">🔄</span>
+          )}
+          {label}
+        </div>
         <div className="fs-11 text-muted mt-4">
-          <Badge tone={kind === 'preparation' ? 'gold' : 'gray'}>
-            {kind === 'preparation' ? 'Preparation' : 'Supply'}
-          </Badge>
+          {kind === 'modifier' ? (
+            <Badge tone="gold">Modifier group</Badge>
+          ) : kind === 'preparation' ? (
+            <Badge tone="gold">Preparation</Badge>
+          ) : (
+            <Badge tone="gray">Supply</Badge>
+          )}
+          {kind === 'modifier' && defaultMod?.supply?.name && (
+            <span className="text-muted" style={{ marginLeft: 8 }}>
+              default: {defaultMod.supply.name}
+            </span>
+          )}
+          {kind === 'modifier' && !defaultMod && (
+            <span className="text-red" style={{ marginLeft: 8 }}>
+              · no default set
+            </span>
+          )}
         </div>
       </div>
-      <div className="fs-13">{formatNumber(item.quantity, 4)}</div>
+      <div>
+        <InlineNumberCell
+          value={item.quantity}
+          min={0}
+          step="any"
+          validate={(n) => (n > 0 ? null : 'Must be positive')}
+          onSave={(n) => onUpdate({ quantity: n })}
+        />
+      </div>
       <div className="fs-13 text-muted">{item.unit}</div>
-      <div className="fs-13">
-        {Number(item.waste_pct) > 0 ? formatPct(item.waste_pct) : '—'}
+      <div>
+        <InlineNumberCell
+          value={item.waste_pct}
+          min={0}
+          max={99}
+          step="any"
+          emptyAs={0}
+          validate={(n) => (n >= 0 && n < 100 ? null : '0–99')}
+          onSave={(n) => onUpdate({ waste_pct: n })}
+        />
       </div>
       <div className="fs-13 fw-600">
         {estCost != null ? formatMoney(estCost) : <span className="text-muted">—</span>}
@@ -420,10 +498,111 @@ function RecipeItemRow({ item, even, onDelete, deleting }: RecipeItemRowProps) {
 
 /* ───────────────────────────────────────────────────────── */
 
+interface InlineNumberCellProps {
+  value: string;
+  min?: number;
+  max?: number;
+  step?: string;
+  /** When the field is cleared, write this value instead of failing. */
+  emptyAs?: number;
+  validate?: (n: number) => string | null;
+  onSave: (n: number) => Promise<unknown>;
+}
+
+function InlineNumberCell({
+  value,
+  min,
+  max,
+  step = 'any',
+  emptyAs,
+  validate,
+  onSave,
+}: InlineNumberCellProps) {
+  const [draft, setDraft] = useState<string>(value);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+  }, [value]);
+
+  const commit = async () => {
+    if (saving) return;
+    let next: number;
+    if (draft.trim() === '') {
+      if (emptyAs === undefined) {
+        setError('Required');
+        setDraft(value);
+        return;
+      }
+      next = emptyAs;
+    } else {
+      next = Number(draft);
+      if (!Number.isFinite(next)) {
+        setError('Invalid number');
+        return;
+      }
+    }
+    const validationError = validate?.(next);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    // No-op when the value hasn't changed — avoids an unnecessary PATCH.
+    if (Number(value) === next) {
+      setError(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+      setDraft(value);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="number"
+        className={`inline-input${error ? ' error' : ''}${saving ? ' saving' : ''}`}
+        value={draft}
+        min={min}
+        max={max}
+        step={step}
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'Escape') {
+            setDraft(value);
+            setError(null);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {error && <div className="inline-cell-error">{error}</div>}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────── */
+
+type AddKind = 'supply' | 'preparation' | 'modifier';
+
 interface AddFormProps {
   onAdd: (input: {
     supply_id?: string | null;
     preparation_id?: string | null;
+    modifier_group_id?: string | null;
     quantity: number;
     unit: string;
     waste_pct?: number;
@@ -433,7 +612,7 @@ interface AddFormProps {
 }
 
 function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
-  const [kind, setKind] = useState<'supply' | 'preparation'>('supply');
+  const [kind, setKind] = useState<AddKind>('supply');
   const [entityId, setEntityId] = useState<string>('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState<RecipeUnit | ''>('');
@@ -444,24 +623,70 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
 
   // Clear the currently-selected entity when switching kind so stale IDs
   // from the other list don't submit.
-  const switchKind = (next: 'supply' | 'preparation') => {
+  const switchKind = (next: AddKind) => {
     setKind(next);
     setEntityId('');
+    setErrors({});
+    setServerError(null);
   };
 
   const suppliesQ = useSupplies({ active: true });
   const prepsQ = useProducts({ type: 'PREPARATION', active: true });
+  // The modifier picker lists SWAP groups only — ADD groups stack on top of
+  // the recipe at sale time and don't belong on the recipe line itself.
+  const groupsQ = useModifierGroups({});
+
+  // SWAP groups attachable to a recipe must have an is_default modifier —
+  // the deduction engine needs that fallback when the customer picks nothing.
+  // Groups without one are surfaced as disabled below.
+  const swapGroups = useMemo(() => {
+    const items = groupsQ.data?.items ?? [];
+    return items.filter((g) => g.type === 'SWAP');
+  }, [groupsQ.data]);
+
+  const selectedGroup = useMemo(
+    () => swapGroups.find((g) => g.id === entityId) ?? null,
+    [swapGroups, entityId],
+  );
+
+  const selectedGroupDefault = useMemo(
+    () => selectedGroup?.modifiers?.find((m) => m.is_default) ?? null,
+    [selectedGroup],
+  );
 
   const entityOptions = useMemo(() => {
     if (kind === 'supply') {
       const items = suppliesQ.data?.pages.flatMap((p) => p.items) ?? [];
       return items.map((s) => ({ value: s.id, label: s.name }));
     }
-    const items = prepsQ.data?.pages.flatMap((p) => p.items) ?? [];
-    return items
-      .filter((p) => p.id !== excludePreparationId)
-      .map((p) => ({ value: p.id, label: p.name }));
-  }, [kind, suppliesQ.data, prepsQ.data, excludePreparationId]);
+    if (kind === 'preparation') {
+      const items = prepsQ.data?.pages.flatMap((p) => p.items) ?? [];
+      return items
+        .filter((p) => p.id !== excludePreparationId)
+        .map((p) => ({ value: p.id, label: p.name }));
+    }
+    return swapGroups.map((g) => {
+      const def = g.modifiers?.find((m) => m.is_default);
+      if (!def) return { value: g.id, label: `${g.name} — no default set` };
+      // supply is embedded via the list endpoint; fall back to the modifier
+      // name if the include ever drops it so the option still labels usefully.
+      const defaultLabel = def.supply?.name ?? def.name;
+      return { value: g.id, label: `${g.name} — default ${defaultLabel}` };
+    });
+  }, [
+    kind,
+    suppliesQ.data,
+    prepsQ.data,
+    swapGroups,
+    excludePreparationId,
+  ]);
+
+  const loadingEntities =
+    kind === 'supply'
+      ? suppliesQ.isLoading
+      : kind === 'preparation'
+        ? prepsQ.isLoading
+        : groupsQ.isLoading;
 
   const reset = () => {
     setEntityId('');
@@ -474,7 +699,10 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
 
   const submit = async () => {
     const e: Record<string, string> = {};
-    if (!entityId) e.entityId = `Select a ${kind}`;
+    if (!entityId) {
+      e.entityId =
+        kind === 'modifier' ? 'Select a modifier group' : `Select a ${kind}`;
+    }
     const q = Number(quantity);
     if (!quantity.trim() || !Number.isFinite(q) || q <= 0) {
       e.quantity = 'Must be positive';
@@ -490,13 +718,33 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
     setAdding(true);
     setServerError(null);
     try {
-      await onAdd({
-        supply_id: kind === 'supply' ? entityId : null,
-        preparation_id: kind === 'preparation' ? entityId : null,
-        quantity: q,
-        unit: unit as string,
-        waste_pct: w,
-      });
+      if (kind === 'modifier') {
+        if (!selectedGroup) {
+          throw new Error('Modifier group is no longer available');
+        }
+        // is_default is the real gate — the backend rejects is_default=true
+        // without a supply_id, so a defaulted modifier is guaranteed to have
+        // a supply even if the list include doesn't embed it.
+        if (!selectedGroupDefault) {
+          throw new Error(
+            'This modifier group has no default modifier yet. Set one in the modifier group page before attaching it to a recipe.',
+          );
+        }
+        await onAdd({
+          modifier_group_id: selectedGroup.id,
+          quantity: q,
+          unit: unit as string,
+          waste_pct: w,
+        });
+      } else {
+        await onAdd({
+          supply_id: kind === 'supply' ? entityId : null,
+          preparation_id: kind === 'preparation' ? entityId : null,
+          quantity: q,
+          unit: unit as string,
+          waste_pct: w,
+        });
+      }
       reset();
     } catch (err) {
       setServerError(err instanceof Error ? err.message : 'Failed to add item');
@@ -504,6 +752,18 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
       setAdding(false);
     }
   };
+
+  const entityLabel =
+    kind === 'supply'
+      ? 'Supply'
+      : kind === 'preparation'
+        ? 'Preparation'
+        : 'Modifier group';
+
+  const emptyHint =
+    kind === 'modifier'
+      ? 'No SWAP groups available'
+      : `No ${kind}s available`;
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -535,7 +795,38 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
         >
           Preparation
         </button>
+        <button
+          type="button"
+          className={`filter-pill ${kind === 'modifier' ? 'active' : ''}`}
+          onClick={() => switchKind('modifier')}
+        >
+          Modifier
+        </button>
       </div>
+
+      {kind === 'modifier' && selectedGroup && (
+        <div
+          className="fs-11 text-muted mb-8"
+          style={{ background: 'var(--bg)', padding: '6px 10px', borderRadius: 4 }}
+        >
+          {selectedGroupDefault ? (
+            <>
+              🔄 This line is a slot filled by <strong>{selectedGroup.name}</strong>{' '}
+              at the POS. Defaults to{' '}
+              <strong>
+                {selectedGroupDefault.supply?.name ?? selectedGroupDefault.name}
+              </strong>{' '}
+              when the customer picks nothing.
+            </>
+          ) : (
+            <span className="text-red">
+              ⚠ <strong>{selectedGroup.name}</strong> has no default modifier
+              yet. Mark one modifier in the group as Default before attaching
+              it to a recipe.
+            </span>
+          )}
+        </div>
+      )}
 
       <div
         style={{
@@ -546,23 +837,20 @@ function AddRecipeItemForm({ onAdd, excludePreparationId }: AddFormProps) {
         }}
       >
         <Select
-          label={kind === 'supply' ? 'Supply' : 'Preparation'}
+          label={entityLabel}
           name="entityId"
           value={entityId}
           onValueChange={setEntityId}
           placeholder={
-            (kind === 'supply' ? suppliesQ.isLoading : prepsQ.isLoading)
+            loadingEntities
               ? 'Loading…'
               : entityOptions.length === 0
-                ? `No ${kind}s available`
+                ? emptyHint
                 : 'Select…'
           }
           options={entityOptions}
           error={errors.entityId}
-          disabled={
-            (kind === 'supply' ? suppliesQ.isLoading : prepsQ.isLoading) ||
-            entityOptions.length === 0
-          }
+          disabled={loadingEntities || entityOptions.length === 0}
         />
         <Input
           label="Quantity"

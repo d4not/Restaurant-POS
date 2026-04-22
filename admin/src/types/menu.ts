@@ -155,6 +155,7 @@ export interface Modifier {
   supply_quantity: string | null;
   supply_unit: string | null;
   ratio: string;
+  is_default: boolean;
   active: boolean;
   display_order: number;
   created_at: string;
@@ -166,7 +167,6 @@ export interface ModifierGroup {
   id: string;
   name: string;
   type: ModifierGroupType;
-  replaces_supply_id: string | null;
   min_selection: number;
   max_selection: number;
   required: boolean;
@@ -174,14 +174,12 @@ export interface ModifierGroup {
   created_at: string;
   updated_at: string;
   modifiers?: Modifier[];
-  replaces_supply?: { id: string; name: string; base_unit: BaseUnit } | null;
   _count?: { product_links: number };
 }
 
 export interface CreateModifierGroupInput {
   name: string;
   type?: ModifierGroupType;
-  replaces_supply_id?: string | null;
   min_selection?: number;
   max_selection?: number;
   required?: boolean;
@@ -197,6 +195,7 @@ export interface CreateModifierInput {
   supply_quantity?: number | null;
   supply_unit?: string | null;
   ratio?: number;
+  is_default?: boolean;
   active?: boolean;
   display_order?: number;
 }
@@ -285,6 +284,7 @@ export interface RecipeItem {
   recipe_id: string;
   supply_id: string | null;
   preparation_id: string | null;
+  modifier_group_id: string | null;
   quantity: string;
   unit: string;
   waste_pct: string;
@@ -301,6 +301,24 @@ export interface RecipeItem {
     name: string;
     type: ProductType;
     recipe_cost: string;
+  } | null;
+  modifier_group?: {
+    id: string;
+    name: string;
+    type: ModifierGroupType;
+    modifiers?: {
+      id: string;
+      name: string;
+      is_default: boolean;
+      ratio: string;
+      supply?: {
+        id: string;
+        name: string;
+        content_per_unit: string | null;
+        content_unit: ContentUnit | null;
+        average_cost: string;
+      } | null;
+    }[];
   } | null;
 }
 
@@ -329,6 +347,7 @@ export interface UpdateRecipeInput {
 export interface CreateRecipeItemInput {
   supply_id?: string | null;
   preparation_id?: string | null;
+  modifier_group_id?: string | null;
   quantity: number;
   unit: string;
   waste_pct?: number;

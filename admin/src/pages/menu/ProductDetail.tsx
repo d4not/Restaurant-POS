@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge, Button, Card, EmptyState, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
@@ -7,6 +7,7 @@ import {
   useDeleteVariant,
   useDetachModifierGroup,
   useProduct,
+  useUpdateProduct,
 } from '../../hooks/useProducts';
 import {
   useDeleteModification,
@@ -16,6 +17,7 @@ import {
   useDeleteOverride,
   useModifierOverrides,
 } from '../../hooks/useModifierOverrides';
+import { useProductCategories } from '../../hooks/useProductCategories';
 import {
   formatMoney,
   formatNumber,
@@ -25,11 +27,12 @@ import type {
   Modifier,
   ModifierGroupLink,
   ModifierProductOverride,
+  Product,
   ProductModification,
   ProductVariant,
+  UpdateProductInput,
 } from '../../types/menu';
 import { productTypeTone, productTypeLabel } from './product-meta';
-import { ProductFormModal } from './ProductFormModal';
 import { VariantFormModal } from './VariantFormModal';
 import { ModificationFormModal } from './ModificationFormModal';
 import { AttachModifierGroupModal } from './AttachModifierGroupModal';
@@ -42,7 +45,6 @@ export function ProductDetail() {
   const modsQ = useModifications(id, { enabled: productQ.data?.type === 'PRODUCT' });
   const overridesQ = useModifierOverrides(id);
 
-  const [editing, setEditing] = useState(false);
   const [variantModal, setVariantModal] = useState<{
     open: boolean;
     variant: ProductVariant | null;
@@ -69,8 +71,117 @@ export function ProductDetail() {
   const deleteVariant = useDeleteVariant(id);
   const deleteModification = useDeleteModification(id);
   const detachGroup = useDetachModifierGroup(id);
+  const updateProduct = useUpdateProduct();
+
+  const categoriesQ = useProductCategories();
+  const categoryOptions = useMemo(
+    () =>
+      categoriesQ.data?.items.map((c) => ({ value: c.id, label: c.name })) ?? [],
+    [categoriesQ.data],
+  );
 
   const product = productQ.data;
+
+  // ── Inline edit state ──────────────────────────────────────
+  // `form` tracks every editable header field. We diff against the latest
+  // server-fetched product via `buildFormState` so the dirty check stays
+  // accurate across refetches (after save, the product data refreshes and
+  // buildFormState produces a matching snapshot — dirty clears automatically).
+  const [form, setForm] = useState<HeaderFormState | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (product) setForm(buildFormState(product));
+  }, [product]);
+
+  const setField = <K extends keyof HeaderFormState>(
+    key: K,
+    value: HeaderFormState[K],
+  ) => {
+    setForm((f) => (f ? { ...f, [key]: value } : f));
+    setFieldErrors((e) => {
+      if (!(key in e)) return e;
+      const rest = { ...e };
+      delete rest[key as string];
+      return rest;
+    });
+    setSaveError(null);
+  };
+
+  const isDirty = useMemo(() => {
+    if (!product || !form) return false;
+    const original = buildFormState(product);
+    return (Object.keys(form) as (keyof HeaderFormState)[]).some(
+      (k) => form[k] !== original[k],
+    );
+  }, [product, form]);
+
+  const onDiscard = () => {
+    if (!product) return;
+    setForm(buildFormState(product));
+    setFieldErrors({});
+    setSaveError(null);
+  };
+
+  const onSave = async () => {
+    if (!product || !form) return;
+    const errors: Record<string, string> = {};
+    if (!form.name.trim()) errors.name = 'Name is required';
+    const isPrepForm = product.type === 'PREPARATION';
+    if (!isPrepForm && form.sell_price.trim()) {
+      const n = Number(form.sell_price);
+      if (!Number.isFinite(n) || n < 0) {
+        errors.sell_price = 'Must be a non-negative number';
+      }
+    }
+    if (
+      !isPrepForm &&
+      form.icon_color.trim() &&
+      !/^#[0-9a-fA-F]{6}$/.test(form.icon_color.trim())
+    ) {
+      errors.icon_color = 'Must be a #rrggbb hex color';
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
+
+    // Send only fields that actually changed so unrelated validation on the
+    // backend (e.g. category_id on a PREPARATION) doesn't fire on a no-op edit.
+    const original = buildFormState(product);
+    const payload: UpdateProductInput = {};
+    if (form.name.trim() !== original.name) payload.name = form.name.trim();
+    if (form.category_id !== original.category_id) {
+      payload.category_id = form.category_id || null;
+    }
+    if (form.sell_price !== original.sell_price) {
+      payload.sell_price = form.sell_price.trim()
+        ? Math.round(Number(form.sell_price) * 100)
+        : null;
+    }
+    if (form.barcode !== original.barcode) {
+      payload.barcode = form.barcode.trim() || null;
+    }
+    if (form.icon_color !== original.icon_color) {
+      payload.icon_color = form.icon_color.trim() || null;
+    }
+    if (form.sold_by_weight !== original.sold_by_weight) {
+      payload.sold_by_weight = form.sold_by_weight;
+    }
+    if (form.allow_discount !== original.allow_discount) {
+      payload.allow_discount = form.allow_discount;
+    }
+    if (form.active !== original.active) payload.active = form.active;
+
+    setSaveError(null);
+    try {
+      await updateProduct.mutateAsync({ id: product.id, input: payload });
+      setFieldErrors({});
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
 
   const variants = useMemo<ProductVariant[]>(
     () => product?.variants ?? [],
@@ -311,9 +422,12 @@ export function ProductDetail() {
 
   return (
     <>
-      {/* Header + actions */}
-      <div className="flex-between mb-16" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div>
+      {/* Header — inline edit form. The page is the edit form; there's no modal. */}
+      <div
+        className="flex-between mb-16"
+        style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}
+      >
+        <div style={{ flex: 1, minWidth: 320 }}>
           <Link
             to="/menu/products"
             className="fs-12 text-muted"
@@ -321,31 +435,184 @@ export function ProductDetail() {
           >
             ← Back to products
           </Link>
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 24 }}>
-            {product.name}
-          </h1>
           <div className="flex gap-8 mt-4" style={{ alignItems: 'center' }}>
-            <Badge tone={productTypeTone(product.type)}>{productTypeLabel(product.type)}</Badge>
-            {product.active ? (
+            <Badge tone={productTypeTone(product.type)}>
+              {productTypeLabel(product.type)}
+            </Badge>
+            {form?.active ? (
               <Badge tone="green">Active</Badge>
             ) : (
               <Badge tone="red">Inactive</Badge>
             )}
-            {product.category && <Badge tone="gray">{product.category.name}</Badge>}
-            {product.barcode && (
-              <span className="fs-12 text-muted">{product.barcode}</span>
-            )}
           </div>
         </div>
         <div className="flex gap-8">
-          <Button variant="secondary" onClick={() => setEditing(true)}>
-            Edit product
-          </Button>
           <Button variant="danger" onClick={onDeleteProduct} loading={deleteProduct.isPending}>
             Delete
           </Button>
         </div>
       </div>
+
+      {form && (
+        <Card className="mb-16">
+          {saveError && (
+            <div className="auth-alert" style={{ marginBottom: 12 }}>
+              {saveError}
+            </div>
+          )}
+
+          {/* Product name — styled like a heading so it doesn't look like a form field. */}
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label htmlFor="product-name">Product name</label>
+            <input
+              id="product-name"
+              className="product-name-input"
+              value={form.name}
+              onChange={(e) => setField('name', e.target.value)}
+              maxLength={200}
+              placeholder="Product name"
+            />
+            {fieldErrors.name && (
+              <div className="field-error">{fieldErrors.name}</div>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 12,
+            }}
+          >
+            {!isPrep && (
+              <div className="field">
+                <label htmlFor="product-category">Category</label>
+                <select
+                  id="product-category"
+                  value={form.category_id}
+                  onChange={(e) => setField('category_id', e.target.value)}
+                  disabled={categoriesQ.isLoading}
+                >
+                  <option value="">— none —</option>
+                  {categoryOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {!isPrep && (
+              <div className="field">
+                <label htmlFor="product-sell-price">Sell price (MXN)</label>
+                <input
+                  id="product-sell-price"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.sell_price}
+                  onChange={(e) => setField('sell_price', e.target.value)}
+                  placeholder={variants.length > 0 ? 'Set per variant' : ''}
+                />
+                {fieldErrors.sell_price ? (
+                  <div className="field-error">{fieldErrors.sell_price}</div>
+                ) : variants.length > 0 ? (
+                  <div className="fs-11 text-muted mt-4">
+                    Leave blank when the price is set on each variant.
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <div className="field">
+              <label htmlFor="product-barcode">Barcode</label>
+              <input
+                id="product-barcode"
+                value={form.barcode}
+                onChange={(e) => setField('barcode', e.target.value)}
+                maxLength={64}
+                placeholder="optional"
+              />
+            </div>
+
+            {!isPrep && (
+              <div className="field">
+                <label htmlFor="product-icon-color">Icon color</label>
+                <div className="flex gap-8" style={{ alignItems: 'center' }}>
+                  <input
+                    type="color"
+                    value={form.icon_color || '#c8922a'}
+                    onChange={(e) => setField('icon_color', e.target.value)}
+                    style={{
+                      width: 40,
+                      height: 36,
+                      padding: 2,
+                      border: '1px solid var(--border2)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                      background: 'var(--bg)',
+                    }}
+                    aria-label="Pick icon color"
+                  />
+                  <input
+                    id="product-icon-color"
+                    value={form.icon_color}
+                    onChange={(e) => setField('icon_color', e.target.value)}
+                    placeholder="#c8922a"
+                    maxLength={7}
+                    style={{ flex: 1 }}
+                  />
+                </div>
+                {fieldErrors.icon_color && (
+                  <div className="field-error">{fieldErrors.icon_color}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div
+            className="flex gap-16 mt-4"
+            style={{ flexWrap: 'wrap', paddingTop: 4 }}
+          >
+            {!isPrep && (
+              <label
+                className="flex gap-8"
+                style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.sold_by_weight}
+                  onChange={(e) => setField('sold_by_weight', e.target.checked)}
+                />
+                Sold by weight
+              </label>
+            )}
+            <label
+              className="flex gap-8"
+              style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={form.allow_discount}
+                onChange={(e) => setField('allow_discount', e.target.checked)}
+              />
+              Allow discount
+            </label>
+            <label
+              className="flex gap-8"
+              style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={form.active}
+                onChange={(e) => setField('active', e.target.checked)}
+              />
+              Active
+            </label>
+          </div>
+        </Card>
+      )}
 
       {/* Summary cards */}
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -562,11 +829,6 @@ export function ProductDetail() {
       )}
 
       {/* Modals */}
-      <ProductFormModal
-        open={editing}
-        onClose={() => setEditing(false)}
-        product={product}
-      />
       <VariantFormModal
         open={variantModal.open}
         onClose={() => setVariantModal({ open: false, variant: null })}
@@ -601,8 +863,58 @@ export function ProductDetail() {
         groupType={overrideModal.groupType}
         existingOverride={overrideModal.existing}
       />
+
+      {isDirty && (
+        <div className="save-bar" role="region" aria-label="Unsaved changes">
+          <span className="save-bar-msg">Unsaved changes</span>
+          <div className="save-bar-actions">
+            <Button
+              variant="ghost"
+              onClick={onDiscard}
+              disabled={updateProduct.isPending}
+            >
+              Discard
+            </Button>
+            <Button
+              variant="primary"
+              onClick={onSave}
+              loading={updateProduct.isPending}
+            >
+              Save changes
+            </Button>
+          </div>
+        </div>
+      )}
     </>
   );
+}
+
+/* ───────────────────────────────────────────────────────── */
+
+interface HeaderFormState {
+  name: string;
+  category_id: string;
+  sell_price: string;
+  barcode: string;
+  icon_color: string;
+  sold_by_weight: boolean;
+  allow_discount: boolean;
+  active: boolean;
+}
+
+// Single source of truth for "form initial values given a Product". Called on
+// mount and again after save so the form stays in sync with the server.
+function buildFormState(p: Product): HeaderFormState {
+  return {
+    name: p.name,
+    category_id: p.category_id ?? '',
+    sell_price: p.sell_price ? String(Number(p.sell_price) / 100) : '',
+    barcode: p.barcode ?? '',
+    icon_color: p.icon_color ?? '',
+    sold_by_weight: p.sold_by_weight,
+    allow_discount: p.allow_discount,
+    active: p.active,
+  };
 }
 
 /* ───────────────────────────────────────────────────────── */
@@ -664,15 +976,23 @@ function ModifierGroupList({
                   <span>min {g.min_selection}</span>
                   <span>·</span>
                   <span>max {g.max_selection}</span>
-                  {g.replaces_supply && (
-                    <>
-                      <span>·</span>
-                      <span>
-                        Replaces:{' '}
-                        <span className="fw-600">{g.replaces_supply.name}</span>
-                      </span>
-                    </>
-                  )}
+                  {isSwap && (() => {
+                    const def = g.modifiers?.find((m) => m.is_default);
+                    return def ? (
+                      <>
+                        <span>·</span>
+                        <span>
+                          Default:{' '}
+                          <span className="fw-600">{def.name}</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>·</span>
+                        <span className="text-red">No default set</span>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               <button

@@ -1,4 +1,4 @@
-import { Prisma, ProductType } from '@prisma/client';
+import { ModifierGroupType, Prisma, ProductType } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
 import { Decimal } from '../../lib/decimal.js';
@@ -25,6 +25,32 @@ const recipeInclude = {
         },
       },
       preparation: { select: { id: true, name: true, type: true, recipe_cost: true } },
+      modifier_group: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          modifiers: {
+            where: { active: true },
+            orderBy: { display_order: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              is_default: true,
+              ratio: true,
+              supply: {
+                select: {
+                  id: true,
+                  name: true,
+                  content_per_unit: true,
+                  content_unit: true,
+                  average_cost: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   },
 } satisfies Prisma.RecipeInclude;
@@ -56,8 +82,58 @@ async function loadVariantForRecipe(client: Tx, variantId: string) {
 async function validateRecipeItem(
   client: Tx,
   owner: { type: ProductType; productId?: string | null },
-  input: { supply_id?: string | null; preparation_id?: string | null },
+  input: {
+    supply_id?: string | null;
+    preparation_id?: string | null;
+    modifier_group_id?: string | null;
+  },
 ): Promise<void> {
+  // A recipe item is exactly one of: raw supply, sub-recipe preparation, or
+  // modifier-group slot. More than one would leave the deduction engine with
+  // an ambiguous source of truth.
+  const refCount =
+    (input.supply_id ? 1 : 0) +
+    (input.preparation_id ? 1 : 0) +
+    (input.modifier_group_id ? 1 : 0);
+  if (refCount !== 1) {
+    throw new BadRequestError(
+      'Recipe item must reference exactly one of supply_id, preparation_id, or modifier_group_id',
+    );
+  }
+
+  if (input.modifier_group_id) {
+    const group = await client.modifierGroup.findUnique({
+      where: { id: input.modifier_group_id },
+      select: {
+        id: true,
+        type: true,
+        modifiers: {
+          where: { is_default: true },
+          select: { id: true, supply_id: true },
+        },
+      },
+    });
+    if (!group) {
+      throw new BadRequestError('modifier_group_id references a non-existent group');
+    }
+    if (group.type !== ModifierGroupType.SWAP) {
+      throw new BadRequestError(
+        'Only SWAP modifier groups can be attached to a recipe item',
+      );
+    }
+    if (group.modifiers.length === 0) {
+      throw new BadRequestError(
+        'Modifier group has no default modifier — set one modifier as is_default before attaching to a recipe',
+      );
+    }
+    if (group.modifiers[0].supply_id == null) {
+      throw new BadRequestError(
+        "Modifier group's default modifier has no supply_id — cannot attach to a recipe",
+      );
+    }
+    return;
+  }
+
   if (input.supply_id) {
     const supply = await client.supply.findFirst({
       where: { id: input.supply_id, deleted_at: null },
@@ -103,6 +179,7 @@ async function insertItems(
         recipe_id: recipeId,
         supply_id: item.supply_id ?? null,
         preparation_id: item.preparation_id ?? null,
+        modifier_group_id: item.modifier_group_id ?? null,
         quantity: new Decimal(item.quantity),
         unit: item.unit,
         waste_pct: new Decimal(item.waste_pct ?? 0),
@@ -327,6 +404,7 @@ export async function addRecipeItem(recipeId: string, input: CreateRecipeItemInp
         recipe_id: recipeId,
         supply_id: input.supply_id ?? null,
         preparation_id: input.preparation_id ?? null,
+        modifier_group_id: input.modifier_group_id ?? null,
         quantity: new Decimal(input.quantity),
         unit: input.unit,
         waste_pct: new Decimal(input.waste_pct ?? 0),
@@ -351,17 +429,16 @@ export async function updateRecipeItem(
       input.supply_id !== undefined ? input.supply_id : existing.supply_id;
     const nextPrep =
       input.preparation_id !== undefined ? input.preparation_id : existing.preparation_id;
-    const hasSupply = nextSupply != null;
-    const hasPrep = nextPrep != null;
-    if (hasSupply === hasPrep) {
-      throw new BadRequestError(
-        'Recipe item must reference exactly one of supply_id or preparation_id',
-      );
-    }
+    const nextModifierGroup =
+      input.modifier_group_id !== undefined
+        ? input.modifier_group_id
+        : existing.modifier_group_id;
+
     const owner = await ownerForRecipe(tx, recipeId);
     await validateRecipeItem(tx, owner, {
       supply_id: nextSupply,
       preparation_id: nextPrep,
+      modifier_group_id: nextModifierGroup,
     });
 
     const data: Prisma.RecipeItemUpdateInput = {};
@@ -373,6 +450,11 @@ export async function updateRecipeItem(
     if (input.preparation_id !== undefined) {
       data.preparation = input.preparation_id
         ? { connect: { id: input.preparation_id } }
+        : { disconnect: true };
+    }
+    if (input.modifier_group_id !== undefined) {
+      data.modifier_group = input.modifier_group_id
+        ? { connect: { id: input.modifier_group_id } }
         : { disconnect: true };
     }
     if (input.quantity !== undefined) data.quantity = new Decimal(input.quantity);

@@ -81,16 +81,27 @@ async function seedScenario(): Promise<Seed> {
     .send({ name: 'Frappe', type: 'DISH', category_id: category.body.data.id, sell_price: 8500 })
     .expect(201);
 
-  // SWAP group for milk, used to test RATIO overrides.
+  // SWAP group for milk, used to test RATIO overrides. Whole Milk is the
+  // is_default fallback so the group is wireable to a recipe slot.
   const milkGroup = await request(app)
     .post('/api/v1/modifier-groups')
     .set(auth)
     .send({
       name: 'Milk Type',
       type: 'SWAP',
-      replaces_supply_id: milk.id,
       min_selection: 0,
       max_selection: 1,
+    })
+    .expect(201);
+  await request(app)
+    .post(`/api/v1/modifier-groups/${milkGroup.body.data.id}/modifiers`)
+    .set(auth)
+    .send({
+      name: 'Whole Milk',
+      supply_id: milk.id,
+      ratio: 1,
+      is_default: true,
+      extra_price: 0,
     })
     .expect(201);
   const almondMod = await request(app)

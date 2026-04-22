@@ -94,6 +94,7 @@ export function convertQuantity(
 type RecipeItemRow = {
   supply_id: string | null;
   preparation_id: string | null;
+  modifier_group_id: string | null;
   quantity: Prisma.Decimal;
   unit: string;
   waste_pct: Prisma.Decimal;
@@ -285,6 +286,51 @@ export async function computeRecipeCost(
       }
       total = total.add(
         computeSupplyItemCost(item.quantity, item.unit, item.waste_pct, supply),
+      );
+      continue;
+    }
+
+    // modifier_group_id slots are costed against the group's is_default
+    // modifier supply at ratio 1.0 — the "what the customer gets if they pick
+    // nothing" case. Per-modifier ratios only matter at sale time.
+    if (item.modifier_group_id) {
+      const group = await client.modifierGroup.findUnique({
+        where: { id: item.modifier_group_id },
+        select: {
+          id: true,
+          modifiers: {
+            where: { is_default: true },
+            select: {
+              id: true,
+              supply: {
+                select: {
+                  content_per_unit: true,
+                  content_unit: true,
+                  average_cost: true,
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!group) {
+        throw new BadRequestError(
+          `Recipe item references unknown modifier group ${item.modifier_group_id}`,
+        );
+      }
+      const defaultMod = group.modifiers[0];
+      if (!defaultMod) {
+        throw new BadRequestError(
+          `Modifier group ${item.modifier_group_id} has no is_default modifier — recipe cannot be costed`,
+        );
+      }
+      if (!defaultMod.supply) {
+        throw new BadRequestError(
+          `Default modifier in group ${item.modifier_group_id} has no supply — recipe cannot be costed`,
+        );
+      }
+      total = total.add(
+        computeSupplyItemCost(item.quantity, item.unit, item.waste_pct, defaultMod.supply),
       );
       continue;
     }

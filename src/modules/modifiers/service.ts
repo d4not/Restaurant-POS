@@ -15,18 +15,7 @@ import type {
 // Modifier groups
 // ----------------------------------------------------------------------------
 
-async function assertReplacesSupplyExists(supplyId: string): Promise<void> {
-  const exists = await prisma.supply.findFirst({
-    where: { id: supplyId, deleted_at: null },
-    select: { id: true },
-  });
-  if (!exists) {
-    throw new BadRequestError('replaces_supply_id references a non-existent supply');
-  }
-}
-
 export async function createModifierGroup(input: CreateModifierGroupInput) {
-  if (input.replaces_supply_id) await assertReplacesSupplyExists(input.replaces_supply_id);
   return prisma.modifierGroup.create({ data: input });
 }
 
@@ -38,8 +27,13 @@ export async function listModifierGroups(query: ListModifierGroupQuery) {
     where,
     orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
     include: {
-      modifiers: { where: { active: true }, orderBy: { display_order: 'asc' } },
-      replaces_supply: { select: { id: true, name: true, base_unit: true } },
+      modifiers: {
+        where: { active: true },
+        orderBy: { display_order: 'asc' },
+        // Embed each modifier's supply so the recipe editor can show
+        // "default: Whole Milk" without a second fetch per group.
+        include: { supply: { select: { id: true, name: true, content_unit: true } } },
+      },
       _count: { select: { product_links: true } },
     },
     ...buildCursorArgs(query),
@@ -55,7 +49,6 @@ export async function getModifierGroup(id: string) {
         orderBy: { display_order: 'asc' },
         include: { supply: { select: { id: true, name: true, content_unit: true } } },
       },
-      replaces_supply: { select: { id: true, name: true, base_unit: true } },
     },
   });
   if (!row) throw new NotFoundError('ModifierGroup');
@@ -106,24 +99,6 @@ export async function updateModifierGroup(id: string, input: UpdateModifierGroup
   if (nextMin > nextMax) {
     throw new BadRequestError('min_selection cannot exceed max_selection');
   }
-  const nextType = input.type ?? existing.type;
-  const nextReplaces =
-    input.replaces_supply_id !== undefined
-      ? input.replaces_supply_id
-      : existing.replaces_supply_id;
-  if (nextType === ModifierGroupType.SWAP && nextReplaces == null) {
-    throw new BadRequestError('SWAP groups must provide replaces_supply_id');
-  }
-  if (nextType === ModifierGroupType.ADD && nextReplaces != null) {
-    throw new BadRequestError('ADD groups must not have replaces_supply_id');
-  }
-  if (
-    input.replaces_supply_id !== undefined &&
-    input.replaces_supply_id != null &&
-    input.replaces_supply_id !== existing.replaces_supply_id
-  ) {
-    await assertReplacesSupplyExists(input.replaces_supply_id);
-  }
   return prisma.modifierGroup.update({ where: { id }, data: input });
 }
 
@@ -145,6 +120,15 @@ async function assertGroupExists(groupId: string): Promise<void> {
   if (!exists) throw new NotFoundError('ModifierGroup');
 }
 
+async function loadGroupType(groupId: string): Promise<ModifierGroupType> {
+  const group = await prisma.modifierGroup.findUnique({
+    where: { id: groupId },
+    select: { type: true },
+  });
+  if (!group) throw new NotFoundError('ModifierGroup');
+  return group.type;
+}
+
 async function assertSupplyExists(supplyId: string): Promise<void> {
   const exists = await prisma.supply.findFirst({
     where: { id: supplyId, deleted_at: null },
@@ -153,11 +137,43 @@ async function assertSupplyExists(supplyId: string): Promise<void> {
   if (!exists) throw new BadRequestError('supply_id references a non-existent supply');
 }
 
+// is_default is a SWAP-only concept: ADD modifiers don't have a "default"
+// because they stack on top of the recipe rather than filling a slot. Also,
+// a defaulted SWAP modifier MUST have a supply — without one there's nothing
+// to deduct when the customer picks nothing.
+function validateIsDefault(
+  groupType: ModifierGroupType,
+  isDefault: boolean | undefined,
+  supplyId: string | null | undefined,
+): void {
+  if (!isDefault) return;
+  if (groupType !== ModifierGroupType.SWAP) {
+    throw new BadRequestError('is_default is only valid on modifiers in SWAP groups');
+  }
+  if (supplyId == null) {
+    throw new BadRequestError(
+      'Default SWAP modifiers must have a supply_id — without one there is nothing to deduct when the customer picks nothing',
+    );
+  }
+}
+
 export async function createModifier(groupId: string, input: CreateModifierInput) {
-  await assertGroupExists(groupId);
+  const groupType = await loadGroupType(groupId);
   if (input.supply_id) await assertSupplyExists(input.supply_id);
-  return prisma.modifier.create({
-    data: { ...input, group_id: groupId },
+  validateIsDefault(groupType, input.is_default, input.supply_id);
+
+  return prisma.$transaction(async (tx) => {
+    // Setting is_default atomically clears any existing default in the group —
+    // enforces the "at most one default" invariant without a separate guard.
+    if (input.is_default) {
+      await tx.modifier.updateMany({
+        where: { group_id: groupId, is_default: true },
+        data: { is_default: false },
+      });
+    }
+    return tx.modifier.create({
+      data: { ...input, group_id: groupId },
+    });
   });
 }
 
@@ -205,13 +221,36 @@ export async function updateModifier(
   const has = (v: unknown) => v != null;
   const tripletOk =
     (!has(merged.supply_id) && !has(merged.supply_quantity) && !has(merged.supply_unit)) ||
-    (has(merged.supply_id) && has(merged.supply_quantity) && has(merged.supply_unit));
+    (has(merged.supply_id) && has(merged.supply_quantity) && has(merged.supply_unit)) ||
+    // SWAP modifiers with only supply_id are allowed.
+    (has(merged.supply_id) && !has(merged.supply_quantity) && !has(merged.supply_unit));
   if (!tripletOk) {
     throw new BadRequestError(
       'supply_id, supply_quantity, and supply_unit must all be provided together',
     );
   }
-  return prisma.modifier.update({ where: { id: modifierId }, data: input });
+
+  // Validate is_default against the merged (post-patch) state.
+  const groupType = await loadGroupType(groupId);
+  const nextIsDefault = input.is_default ?? existing.is_default;
+  const nextSupplyId = merged.supply_id;
+  if (nextIsDefault) {
+    validateIsDefault(groupType, true, nextSupplyId);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (input.is_default === true) {
+      await tx.modifier.updateMany({
+        where: {
+          group_id: groupId,
+          is_default: true,
+          id: { not: modifierId },
+        },
+        data: { is_default: false },
+      });
+    }
+    return tx.modifier.update({ where: { id: modifierId }, data: input });
+  });
 }
 
 export async function deleteModifier(groupId: string, modifierId: string) {

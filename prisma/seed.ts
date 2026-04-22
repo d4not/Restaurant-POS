@@ -371,202 +371,18 @@ async function main(): Promise<void> {
     ],
   });
 
-  // --- Helper to build a DISH with N variants and a recipe per variant -----
-  async function createDish(params: {
-    name: string;
-    category_id: string;
-    variants: Array<{
-      name: string;
-      sell_price: number;
-      items: Array<{
-        supply_id?: string;
-        preparation_id?: string;
-        quantity: number;
-        unit: string;
-        waste_pct?: number;
-      }>;
-    }>;
-  }): Promise<void> {
-    const product = await prisma.product.create({
-      data: {
-        name: params.name,
-        type: ProductType.DISH,
-        category_id: params.category_id,
-        tax_id: tax.id,
-      },
-    });
-    for (const [idx, v] of params.variants.entries()) {
-      const variant = await prisma.productVariant.create({
-        data: {
-          product_id: product.id,
-          name: v.name,
-          sell_price: v.sell_price,
-          display_order: idx,
-        },
-      });
-      await createVariantRecipe(variant.id, { items: v.items });
-    }
-  }
-
-  // --- Latte (3 variants) ---------------------------------------------------
-  await createDish({
-    name: 'Latte',
-    category_id: hotCoffeeCat.id,
-    variants: [
-      {
-        name: 'Small 8oz',
-        sell_price: 5500,
-        items: [
-          { supply_id: milk.id, quantity: 150, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 14, unit: 'g' },
-          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Medium 12oz',
-        sell_price: 6500,
-        items: [
-          { supply_id: milk.id, quantity: 200, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 18, unit: 'g' },
-          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Large 16oz',
-        sell_price: 7500,
-        items: [
-          { supply_id: milk.id, quantity: 280, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 22, unit: 'g' },
-          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-    ],
-  });
-
-  // --- Cappuccino (3 variants) ---------------------------------------------
-  await createDish({
-    name: 'Cappuccino',
-    category_id: hotCoffeeCat.id,
-    variants: [
-      {
-        name: 'Small 8oz',
-        sell_price: 5500,
-        items: [
-          { supply_id: milk.id, quantity: 100, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 14, unit: 'g' },
-          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Medium 12oz',
-        sell_price: 6500,
-        items: [
-          { supply_id: milk.id, quantity: 150, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 18, unit: 'g' },
-          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Large 16oz',
-        sell_price: 7500,
-        items: [
-          { supply_id: milk.id, quantity: 220, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 22, unit: 'g' },
-          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-    ],
-  });
-
-  // --- Americano (2 variants) ----------------------------------------------
-  await createDish({
-    name: 'Americano',
-    category_id: hotCoffeeCat.id,
-    variants: [
-      {
-        name: 'Medium 12oz',
-        sell_price: 4500,
-        items: [
-          { supply_id: espresso.id, quantity: 14, unit: 'g' },
-          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Large 16oz',
-        sell_price: 5500,
-        items: [
-          { supply_id: espresso.id, quantity: 18, unit: 'g' },
-          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-    ],
-  });
-
-  // --- Mocha (3 variants) - uses the mocha sauce preparation ---------------
-  await createDish({
-    name: 'Mocha',
-    category_id: hotCoffeeCat.id,
-    variants: [
-      {
-        name: 'Small 8oz',
-        sell_price: 6500,
-        items: [
-          { supply_id: milk.id, quantity: 130, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 14, unit: 'g' },
-          { preparation_id: mochaSauce.id, quantity: 30, unit: 'ml' },
-          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Medium 12oz',
-        sell_price: 7500,
-        items: [
-          { supply_id: milk.id, quantity: 170, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 18, unit: 'g' },
-          { preparation_id: mochaSauce.id, quantity: 40, unit: 'ml' },
-          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-      {
-        name: 'Large 16oz',
-        sell_price: 8500,
-        items: [
-          { supply_id: milk.id, quantity: 240, unit: 'ml' },
-          { supply_id: espresso.id, quantity: 22, unit: 'g' },
-          { preparation_id: mochaSauce.id, quantity: 50, unit: 'ml' },
-          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
-        ],
-      },
-    ],
-  });
-
-  // --- Bottled Water (packaged PRODUCT, deducts 1 supply unit per sale) ----
-  await prisma.product.create({
-    data: {
-      name: 'Bottled Water',
-      type: ProductType.PRODUCT,
-      category_id: bottledDrinksCat.id,
-      sell_price: 2500,
-      supply_id: water.id,
-      tax_id: tax.id,
-    },
-  });
-
   // --------------------------------------------------------------------------
-  // Modifier groups — Milk Type, Extras, Sweetener.
+  // Modifier groups — created BEFORE dish recipes so recipes can reference
+  // the Milk Type SWAP group via modifier_group_id.
   //
-  // Attached to Latte, Cappuccino, and Mocha (dishes where the customer
-  // typically customizes). Americano only gets Extras.
+  // Milk Type is a SWAP group. Whole Milk is is_default=true — the fallback
+  // used when the customer doesn't pick anything at the POS. Almond Milk is
+  // an alternative at ratio 0.75 (a 200ml recipe slot → 150ml almond milk).
   // --------------------------------------------------------------------------
-  // "Milk Type" is a SWAP group targeting Whole Milk — whichever modifier the
-  // customer picks replaces the whole-milk recipe line (Whole Milk at ratio 1.0
-  // is a no-op; Almond Milk at ratio 0.75 deducts 75% of the recipe's milk qty
-  // from the almond-milk supply instead).
   const milkGroup = await prisma.modifierGroup.create({
     data: {
       name: 'Milk Type',
       type: 'SWAP',
-      replaces_supply_id: milk.id,
       min_selection: 0,
       max_selection: 1,
       display_order: 1,
@@ -579,6 +395,7 @@ async function main(): Promise<void> {
       extra_price: 0,
       supply_id: milk.id,
       ratio: 1,
+      is_default: true,
       display_order: 0,
     },
   });
@@ -650,6 +467,196 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Helper to build a DISH with N variants and a recipe per variant -----
+  async function createDish(params: {
+    name: string;
+    category_id: string;
+    variants: Array<{
+      name: string;
+      sell_price: number;
+      items: Array<{
+        supply_id?: string;
+        preparation_id?: string;
+        modifier_group_id?: string;
+        quantity: number;
+        unit: string;
+        waste_pct?: number;
+      }>;
+    }>;
+  }): Promise<void> {
+    const product = await prisma.product.create({
+      data: {
+        name: params.name,
+        type: ProductType.DISH,
+        category_id: params.category_id,
+        tax_id: tax.id,
+      },
+    });
+    for (const [idx, v] of params.variants.entries()) {
+      const variant = await prisma.productVariant.create({
+        data: {
+          product_id: product.id,
+          name: v.name,
+          sell_price: v.sell_price,
+          display_order: idx,
+        },
+      });
+      await createVariantRecipe(variant.id, { items: v.items });
+    }
+  }
+
+  // --- Latte (3 variants) ---------------------------------------------------
+  // Milk lines carry modifier_group_id so the Milk Type SWAP group fills the
+  // slot — Whole Milk (is_default) when nothing is picked, Almond Milk (or
+  // any other modifier) when the customer chooses.
+  await createDish({
+    name: 'Latte',
+    category_id: hotCoffeeCat.id,
+    variants: [
+      {
+        name: 'Small 8oz',
+        sell_price: 5500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 150, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 14, unit: 'g' },
+          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Medium 12oz',
+        sell_price: 6500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 200, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 18, unit: 'g' },
+          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Large 16oz',
+        sell_price: 7500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 280, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 22, unit: 'g' },
+          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+    ],
+  });
+
+  // --- Cappuccino (3 variants) ---------------------------------------------
+  await createDish({
+    name: 'Cappuccino',
+    category_id: hotCoffeeCat.id,
+    variants: [
+      {
+        name: 'Small 8oz',
+        sell_price: 5500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 100, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 14, unit: 'g' },
+          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Medium 12oz',
+        sell_price: 6500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 150, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 18, unit: 'g' },
+          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Large 16oz',
+        sell_price: 7500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 220, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 22, unit: 'g' },
+          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+    ],
+  });
+
+  // --- Americano (2 variants) ----------------------------------------------
+  await createDish({
+    name: 'Americano',
+    category_id: hotCoffeeCat.id,
+    variants: [
+      {
+        name: 'Medium 12oz',
+        sell_price: 4500,
+        items: [
+          { supply_id: espresso.id, quantity: 14, unit: 'g' },
+          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Large 16oz',
+        sell_price: 5500,
+        items: [
+          { supply_id: espresso.id, quantity: 18, unit: 'g' },
+          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+    ],
+  });
+
+  // --- Mocha (3 variants) - uses the mocha sauce preparation ---------------
+  await createDish({
+    name: 'Mocha',
+    category_id: hotCoffeeCat.id,
+    variants: [
+      {
+        name: 'Small 8oz',
+        sell_price: 6500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 130, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 14, unit: 'g' },
+          { preparation_id: mochaSauce.id, quantity: 30, unit: 'ml' },
+          { supply_id: cup8.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Medium 12oz',
+        sell_price: 7500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 170, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 18, unit: 'g' },
+          { preparation_id: mochaSauce.id, quantity: 40, unit: 'ml' },
+          { supply_id: cup12.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+      {
+        name: 'Large 16oz',
+        sell_price: 8500,
+        items: [
+          { modifier_group_id: milkGroup.id, quantity: 240, unit: 'ml' },
+          { supply_id: espresso.id, quantity: 22, unit: 'g' },
+          { preparation_id: mochaSauce.id, quantity: 50, unit: 'ml' },
+          { supply_id: cup16.id, quantity: 1, unit: 'piece' },
+        ],
+      },
+    ],
+  });
+
+  // --- Bottled Water (packaged PRODUCT, deducts 1 supply unit per sale) ----
+  await prisma.product.create({
+    data: {
+      name: 'Bottled Water',
+      type: ProductType.PRODUCT,
+      category_id: bottledDrinksCat.id,
+      sell_price: 2500,
+      supply_id: water.id,
+      tax_id: tax.id,
+    },
+  });
+
+  // --------------------------------------------------------------------------
+  // Attach modifier groups to the dishes that customize at the POS. Milk Type
+  // + Extras + Sweetener on Latte/Cappuccino/Mocha; Americano gets Extras +
+  // Sweetener only (no milk in the recipe).
+  // --------------------------------------------------------------------------
   const latteProduct = await prisma.product.findFirstOrThrow({ where: { name: 'Latte' } });
   const cappuccinoProduct = await prisma.product.findFirstOrThrow({
     where: { name: 'Cappuccino' },

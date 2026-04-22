@@ -50,6 +50,7 @@ export interface DeductSaleOptions {
 type RecipeItemRow = {
   supply_id: string | null;
   preparation_id: string | null;
+  modifier_group_id: string | null;
   quantity: Prisma.Decimal;
   unit: string;
   waste_pct: Prisma.Decimal;
@@ -144,11 +145,11 @@ type ResolvedModifier = {
   id: string;
   group_id: string;
   group_type: ModifierGroupType;
-  replaces_supply_id: string | null;
   supply_id: string | null;
   supply_quantity: Prisma.Decimal | null;
   supply_unit: string | null;
   ratio: Prisma.Decimal;
+  is_default: boolean;
 };
 
 type OverrideRow = {
@@ -174,8 +175,9 @@ async function loadModifiersForLine(
       supply_quantity: true,
       supply_unit: true,
       ratio: true,
+      is_default: true,
       group: {
-        select: { type: true, replaces_supply_id: true },
+        select: { type: true },
       },
     },
   });
@@ -188,11 +190,11 @@ async function loadModifiersForLine(
       id: row.id,
       group_id: row.group_id,
       group_type: row.group.type,
-      replaces_supply_id: row.group.replaces_supply_id ?? null,
       supply_id: row.supply_id,
       supply_quantity: row.supply_quantity,
       supply_unit: row.supply_unit,
       ratio: row.ratio,
+      is_default: row.is_default,
     };
   });
 }
@@ -211,12 +213,106 @@ async function loadOverridesForLine(
   return byModifierId;
 }
 
+// Look up the is_default modifier for a given SWAP group — used as fallback
+// when a recipe line references a group but the customer didn't pick anything.
+async function loadDefaultModifier(
+  client: PrismaLike,
+  groupId: string,
+): Promise<ResolvedModifier | null> {
+  const row = await client.modifier.findFirst({
+    where: { group_id: groupId, is_default: true, active: true },
+    select: {
+      id: true,
+      group_id: true,
+      supply_id: true,
+      supply_quantity: true,
+      supply_unit: true,
+      ratio: true,
+      is_default: true,
+      group: { select: { type: true } },
+    },
+  });
+  if (!row) return null;
+  return {
+    id: row.id,
+    group_id: row.group_id,
+    group_type: row.group.type,
+    supply_id: row.supply_id,
+    supply_quantity: row.supply_quantity,
+    supply_unit: row.supply_unit,
+    ratio: row.ratio,
+    is_default: row.is_default,
+  };
+}
+
+// Deduct for one SWAP modifier filling a recipe slot. Shared by the "customer
+// selected" path and the "default fallback" path so the two stay in lockstep.
+async function deductSwapSlot(
+  client: PrismaLike,
+  modifier: ResolvedModifier,
+  override: OverrideRow | undefined,
+  recipeQty: Decimal,
+  recipeUnit: string,
+  recipeWastePct: Decimal,
+  lineQty: Decimal,
+  storageResolver: (supplyId: string) => Promise<string>,
+  agg: Aggregate,
+  productId: string,
+): Promise<void> {
+  if (!modifier.supply_id) {
+    // Informational SWAP ("No milk") — intentionally deducts nothing. The
+    // recipe slot is skipped and the customer gets the dish without it.
+    return;
+  }
+  const supply = await client.supply.findUnique({
+    where: { id: modifier.supply_id },
+    select: { content_per_unit: true, content_unit: true, deleted_at: true },
+  });
+  if (!supply || supply.deleted_at) {
+    throw new BadRequestError(
+      `Modifier ${modifier.id} references unknown supply ${modifier.supply_id}`,
+    );
+  }
+
+  if (override && override.override_type === ModifierOverrideType.FIXED_QTY) {
+    if (override.override_quantity == null || override.override_unit == null) {
+      throw new BadRequestError(
+        `Override for product ${productId} + modifier ${modifier.id} is FIXED_QTY but missing quantity/unit`,
+      );
+    }
+    const base = convertRecipeQuantityToBase(
+      new Decimal(override.override_quantity).mul(lineQty),
+      override.override_unit,
+      0,
+      supply,
+    );
+    const storageId = await storageResolver(modifier.supply_id);
+    addDraw(agg, modifier.supply_id, storageId, base);
+    return;
+  }
+
+  // RATIO path: per-product override ratio wins over the modifier's default.
+  // recipeQty is already scaled by lineQty at the caller.
+  const ratio =
+    override && override.override_type === ModifierOverrideType.RATIO && override.override_ratio != null
+      ? new Decimal(override.override_ratio)
+      : new Decimal(modifier.ratio);
+  const base = convertRecipeQuantityToBase(
+    recipeQty.mul(ratio),
+    recipeUnit,
+    recipeWastePct,
+    supply,
+  );
+  const storageId = await storageResolver(modifier.supply_id);
+  addDraw(agg, modifier.supply_id, storageId, base);
+}
+
 // Walk a recipe and add each supply draw (scaled by `multiplier`) to `agg`.
 // Preparations recurse with their own factor (requested qty / yield qty).
 //
-// `swappedSupplyIds` is the set of supply IDs that a SWAP modifier is
-// replacing for this line — the raw-supply branches skip those lines and the
-// modifier handler deducts the replacement.
+// `slotContext` is set only at the top level — nested preparations don't
+// support SWAP slots (preparations are stable sub-recipes, not
+// customer-customized).
 async function accumulateRecipe(
   client: PrismaLike,
   items: RecipeItemRow[],
@@ -224,27 +320,53 @@ async function accumulateRecipe(
   storageResolver: (supplyId: string) => Promise<string>,
   agg: Aggregate,
   visited: Set<string>,
-  swappedSupplyIds: Set<string>,
-  swapContext: {
-    // Maps replaced supply id → full captured recipe line so the modifier
-    // handler can use the original qty/unit to compute the ratio'd replacement.
-    replaced: Map<string, { quantity: Decimal; unit: string; waste_pct: Decimal }>;
+  slotContext: {
+    productId: string;
+    lineQty: Decimal;
+    selectedByGroupId: Map<string, ResolvedModifier>;
+    overrides: Map<string, OverrideRow>;
+    consumedGroupIds: Set<string>;
   } | null,
 ): Promise<void> {
   for (const item of items) {
-    if (item.supply_id) {
-      if (swappedSupplyIds.has(item.supply_id)) {
-        // Capture the recipe line for the SWAP modifier to use.
-        if (swapContext) {
-          const scaledQty = new Decimal(item.quantity).mul(multiplier);
-          swapContext.replaced.set(item.supply_id, {
-            quantity: scaledQty,
-            unit: item.unit,
-            waste_pct: new Decimal(item.waste_pct),
-          });
-        }
-        continue;
+    if (item.modifier_group_id) {
+      if (!slotContext) {
+        throw new BadRequestError(
+          'Modifier-group recipe lines are only supported at the top level of a DISH recipe',
+        );
       }
+      // Find which modifier fills this slot: customer selection wins; fall
+      // back to the group's is_default when nothing was picked.
+      let modifier = slotContext.selectedByGroupId.get(item.modifier_group_id);
+      if (!modifier) {
+        const fallback = await loadDefaultModifier(client, item.modifier_group_id);
+        if (!fallback) {
+          throw new BadRequestError(
+            `Modifier group ${item.modifier_group_id} has no is_default modifier and the customer didn't pick one — cannot deduct for this recipe line`,
+          );
+        }
+        modifier = fallback;
+      } else {
+        slotContext.consumedGroupIds.add(item.modifier_group_id);
+      }
+      const override = slotContext.overrides.get(modifier.id);
+      const scaledRecipeQty = new Decimal(item.quantity).mul(multiplier);
+      await deductSwapSlot(
+        client,
+        modifier,
+        override,
+        scaledRecipeQty,
+        item.unit,
+        new Decimal(item.waste_pct),
+        slotContext.lineQty,
+        storageResolver,
+        agg,
+        slotContext.productId,
+      );
+      continue;
+    }
+
+    if (item.supply_id) {
       const supply = await client.supply.findUnique({
         where: { id: item.supply_id },
         select: { content_per_unit: true, content_unit: true, deleted_at: true },
@@ -299,8 +421,8 @@ async function accumulateRecipe(
         prep.recipe,
       );
       visited.add(item.preparation_id);
-      // SWAP only applies at the top-level recipe — preparations have stable
-      // sub-recipes that customers aren't customizing.
+      // SWAP only applies at the top-level recipe — pass null slotContext so
+      // sub-recipes can't accidentally host a slot.
       await accumulateRecipe(
         client,
         prep.recipe.items,
@@ -308,13 +430,14 @@ async function accumulateRecipe(
         storageResolver,
         agg,
         visited,
-        new Set(),
         null,
       );
       visited.delete(item.preparation_id);
       continue;
     }
-    throw new BadRequestError('Recipe item has neither supply_id nor preparation_id');
+    throw new BadRequestError(
+      'Recipe item must reference exactly one of supply_id, preparation_id, or modifier_group_id',
+    );
   }
 }
 
@@ -324,8 +447,9 @@ async function accumulateRecipe(
  * For each ordered line:
  *   - PRODUCT: decrement 1 × line.quantity from the product's linked supply.
  *   - DISH: walk the variant (or product) recipe; preparations recurse.
- *   - SWAP modifiers: replace a targeted recipe ingredient with the modifier's
- *     supply at a ratio (or per-product FIXED_QTY override).
+ *   - Recipe line with modifier_group_id: deduct the selected SWAP modifier's
+ *     supply (or the group's is_default when the customer picked nothing) at
+ *     recipe_qty × ratio × overrides.
  *   - ADD modifiers: draw the configured supply_quantity on top of the recipe.
  *
  * All draws are aggregated per (supply, storage) and persisted as a single
@@ -409,36 +533,22 @@ export async function deductSaleFromInventory(
       const modifiers = await loadModifiersForLine(tx, modifierIds);
       const overrides = await loadOverridesForLine(tx, line.product_id, modifierIds);
 
-      // Which recipe supply_ids are overridden by a SWAP modifier on this line?
-      // Collect them first so the recipe walker can skip them and hand the
-      // captured line to the modifier handler.
-      //
-      // Two SWAP modifiers targeting the same supply on one line would both
-      // substitute the same recipe ingredient and both deduct at their ratio —
-      // effectively drawing the swapped supply twice (e.g. picking both "Almond
-      // Milk" and "Oat Milk" from a max=2 Milk Type group would deduct 2× the
-      // recipe's milk amount). A customer can only drink one milk, so treat
-      // this as a misconfiguration and refuse the sale rather than silently
-      // double-deduct.
-      const swappedSupplyIds = new Set<string>();
-      const swapTargetCounts = new Map<string, number>();
+      // Index SWAP modifiers by their group so recipe slots can find them.
+      // Two modifiers from the same SWAP group on one line would try to fill
+      // the same slot with different supplies — a customer can only pick one
+      // milk, so refuse rather than silently double-deduct.
+      const selectedByGroupId = new Map<string, ResolvedModifier>();
       for (const m of modifiers) {
-        if (m.group_type === ModifierGroupType.SWAP && m.replaces_supply_id) {
-          swappedSupplyIds.add(m.replaces_supply_id);
-          swapTargetCounts.set(
-            m.replaces_supply_id,
-            (swapTargetCounts.get(m.replaces_supply_id) ?? 0) + 1,
-          );
-        }
-      }
-      for (const [targetId, count] of swapTargetCounts) {
-        if (count > 1) {
+        if (m.group_type !== ModifierGroupType.SWAP) continue;
+        if (selectedByGroupId.has(m.group_id)) {
           throw new BadRequestError(
-            `Multiple SWAP modifiers on product ${line.product_id} target the same ingredient ${targetId} — only one swap per ingredient is allowed per line`,
+            `Multiple SWAP modifiers from group ${m.group_id} on product ${line.product_id} — only one modifier per SWAP group is allowed per line`,
           );
         }
+        selectedByGroupId.set(m.group_id, m);
       }
-      const swapContext = { replaced: new Map<string, { quantity: Decimal; unit: string; waste_pct: Decimal }>() };
+
+      const consumedGroupIds = new Set<string>();
 
       await accumulateRecipe(
         tx,
@@ -447,98 +557,30 @@ export async function deductSaleFromInventory(
         storageResolver,
         agg,
         new Set(),
-        swappedSupplyIds,
-        swapContext,
+        {
+          productId: line.product_id,
+          lineQty,
+          selectedByGroupId,
+          overrides,
+          consumedGroupIds,
+        },
       );
 
-      // Process every modifier selected for this line.
-      for (const modifier of modifiers) {
-        if (modifier.group_type === ModifierGroupType.SWAP) {
-          // A SWAP group without a replaces_supply_id is a data error — the
-          // schema prevents it, but defend against legacy rows and make the
-          // failure loud rather than silent.
-          if (!modifier.replaces_supply_id) {
-            throw new BadRequestError(
-              `SWAP modifier ${modifier.id} is attached to a group with no replaces_supply_id — this group is misconfigured`,
-            );
-          }
-
-          // Whether the SWAP is informational ("No milk", supply_id=null) or
-          // substituting, the recipe MUST contain the replaced ingredient at
-          // the top level. Attaching a SWAP group to a product whose recipe
-          // doesn't use that supply is a misconfiguration we surface loudly
-          // rather than silently letting the modifier do nothing. This also
-          // covers the case where the ingredient lives only inside a nested
-          // preparation — SWAPs intentionally don't reach into sub-recipes
-          // (preparations are stable, not customer-customized).
-          const replacedLine = swapContext.replaced.get(modifier.replaces_supply_id);
-          if (!replacedLine) {
-            throw new BadRequestError(
-              `SWAP modifier ${modifier.id} targets supply ${modifier.replaces_supply_id} but the recipe for product ${line.product_id} has no top-level line using that supply`,
-            );
-          }
-
-          // Informational SWAP ("No milk", no replacement supply): the recipe
-          // line has already been skipped by the walker, so we have nothing to
-          // deduct. That's the whole point — the customer gets the dish
-          // without the swapped ingredient.
-          if (!modifier.supply_id) continue;
-
-          const override = overrides.get(modifier.id);
-          const supply = await tx.supply.findUnique({
-            where: { id: modifier.supply_id },
-            select: { content_per_unit: true, content_unit: true, deleted_at: true },
-          });
-          if (!supply || supply.deleted_at) {
-            throw new BadRequestError(
-              `Modifier ${modifier.id} references unknown supply ${modifier.supply_id}`,
-            );
-          }
-
-          if (override && override.override_type === ModifierOverrideType.FIXED_QTY) {
-            // FIXED_QTY: deduct the exact amount stored on the override,
-            // regardless of the recipe quantity. Scale by the line quantity so
-            // ordering 2 Lattes still deducts 2× the fixed override.
-            if (override.override_quantity == null || override.override_unit == null) {
-              throw new BadRequestError(
-                `Override for product ${line.product_id} + modifier ${modifier.id} is FIXED_QTY but missing quantity/unit`,
-              );
-            }
-            const base = convertRecipeQuantityToBase(
-              new Decimal(override.override_quantity).mul(lineQty),
-              override.override_unit,
-              0,
-              supply,
-            );
-            const storageId = await storageResolver(modifier.supply_id);
-            addDraw(agg, modifier.supply_id, storageId, base);
-            continue;
-          }
-
-          // RATIO path: pick the per-product override ratio if present,
-          // otherwise the modifier's default ratio. The captured recipe line
-          // tells us the original qty+unit; we deduct that × ratio of the
-          // modifier's supply (converted to base units).
-          const ratio =
-            override && override.override_type === ModifierOverrideType.RATIO && override.override_ratio != null
-              ? new Decimal(override.override_ratio)
-              : new Decimal(modifier.ratio);
-          // Use the original unit so conversion goes recipe-unit → modifier's
-          // base unit through the recipe engine's unit rules. lineQty is
-          // already baked into replacedLine.quantity.
-          const base = convertRecipeQuantityToBase(
-            replacedLine.quantity.mul(ratio),
-            replacedLine.unit,
-            replacedLine.waste_pct,
-            supply,
+      // Every SWAP modifier picked by the customer must correspond to a
+      // recipe slot (a RecipeItem with matching modifier_group_id). Otherwise
+      // the modifier is attached to a product whose recipe has no slot for
+      // it — a misconfiguration we surface loudly rather than silently no-op.
+      for (const [groupId, modifier] of selectedByGroupId) {
+        if (!consumedGroupIds.has(groupId)) {
+          throw new BadRequestError(
+            `SWAP modifier ${modifier.id} belongs to group ${groupId} but the recipe for product ${line.product_id} has no slot for that group`,
           );
-          const storageId = await storageResolver(modifier.supply_id);
-          addDraw(agg, modifier.supply_id, storageId, base);
-          continue;
         }
+      }
 
-        // ADD modifier — supply_quantity / supply_unit must both be present
-        // (informational ADD modifiers have no supply at all and are skipped).
+      // ADD modifiers still stack on top of the recipe.
+      for (const modifier of modifiers) {
+        if (modifier.group_type !== ModifierGroupType.ADD) continue;
         if (!modifier.supply_id) continue;
         if (modifier.supply_quantity == null || modifier.supply_unit == null) {
           throw new BadRequestError(
