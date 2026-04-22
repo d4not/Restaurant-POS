@@ -6,6 +6,12 @@ const number = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
+// The store lookup is intentionally non-reactive here: `formatMoney` is a
+// plain function called during render, not a hook. The reactive part lives at
+// the App root (see App.tsx), which subscribes to `usePreferencesStore` so any
+// preference change triggers a subtree re-render — which re-runs every call
+// site with the fresh preference. Keep this function hook-free so it can be
+// used in callbacks, useMemo deps, etc. without violating Rules of Hooks.
 function currencyFormatter(): Intl.NumberFormat {
   const code = usePreferencesStore.getState().currency;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: code });

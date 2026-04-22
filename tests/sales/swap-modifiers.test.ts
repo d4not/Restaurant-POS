@@ -495,3 +495,306 @@ describe('Phase 9A — per-product overrides change the SWAP deduction amount', 
     expectClose(before.sub(after), new Decimal('0.24'));
   });
 });
+
+// ============================================================================
+// Audit gap coverage — edge cases the initial Phase 9A tests didn't hit.
+// ============================================================================
+
+describe('Phase 9A audit — SWAP misconfigurations and edge cases', () => {
+  let s: Scenario;
+  beforeEach(async () => {
+    s = await seedScenario();
+  });
+
+  it('informational SWAP with no replacement supply ("no milk") skips the recipe line without deducting anything', async () => {
+    // Add a "No Milk" modifier to the existing Milk Type group: supply_id=null
+    // and ratio defaults to 1 (ignored when there's no replacement supply).
+    const noMilk = await prisma.modifier.create({
+      data: {
+        group_id: s.milkSwapGroupId,
+        name: 'No Milk',
+        extra_price: 0,
+        supply_id: null,
+      },
+    });
+
+    const before = {
+      milk: await stockAt(s.supplyIds.milk, s.barraId),
+      almond: await stockAt(s.supplyIds.almond, s.barraId),
+      espresso: await stockAt(s.supplyIds.espresso, s.barraId),
+    };
+
+    await deductSaleFromInventory(
+      [
+        {
+          product_id: s.latteProductId,
+          variant_id: s.latteLargeId,
+          quantity: 1,
+          modifier_ids: [noMilk.id],
+        },
+      ],
+      s.stationId,
+      randomUUID(),
+    );
+
+    const after = {
+      milk: await stockAt(s.supplyIds.milk, s.barraId),
+      almond: await stockAt(s.supplyIds.almond, s.barraId),
+      espresso: await stockAt(s.supplyIds.espresso, s.barraId),
+    };
+
+    // Milk skipped entirely — untouched.
+    expect(after.milk.equals(before.milk)).toBe(true);
+    // No substitute supply either.
+    expect(after.almond.equals(before.almond)).toBe(true);
+    // Other recipe ingredients still deduct normally.
+    expectClose(before.espresso.sub(after.espresso), new Decimal(18).div(1000));
+  });
+
+  it('two SWAP groups targeting DIFFERENT recipe ingredients both take effect on the same line', async () => {
+    // Create an espresso-type SWAP group that swaps espresso for decaf beans.
+    const decafCat = await prisma.supplyCategory.create({ data: { name: 'Decaf' } });
+    const decaf = await prisma.supply.create({
+      data: {
+        category_id: decafCat.id,
+        name: 'Decaf Beans 1kg',
+        base_unit: 'BAG',
+        content_per_unit: 1000,
+        content_unit: 'G',
+      },
+    });
+    // Seed stock directly so we don't have to round-trip through a purchase.
+    await prisma.storageStock.create({
+      data: { supply_id: decaf.id, storage_id: s.barraId, quantity: 2 },
+    });
+    await prisma.supply.update({
+      where: { id: decaf.id },
+      data: { average_cost: 20000, last_cost: 20000 },
+    });
+
+    const beanSwapGroup = await request(app).post('/api/v1/modifier-groups').set(s.auth).send({
+      name: 'Bean Type',
+      type: 'SWAP',
+      replaces_supply_id: s.supplyIds.espresso,
+      min_selection: 0,
+      max_selection: 1,
+    });
+    expect(beanSwapGroup.status).toBe(201);
+    const decafMod = await request(app)
+      .post(`/api/v1/modifier-groups/${beanSwapGroup.body.data.id}/modifiers`)
+      .set(s.auth)
+      .send({ name: 'Decaf', supply_id: decaf.id, ratio: 1, extra_price: 0 });
+    expect(decafMod.status).toBe(201);
+    await request(app)
+      .post(`/api/v1/products/${s.latteProductId}/modifier-groups`)
+      .set(s.auth)
+      .send({ modifier_group_id: beanSwapGroup.body.data.id })
+      .expect(201);
+
+    const before = {
+      milk: await stockAt(s.supplyIds.milk, s.barraId),
+      almond: await stockAt(s.supplyIds.almond, s.barraId),
+      espresso: await stockAt(s.supplyIds.espresso, s.barraId),
+      decaf: await stockAt(decaf.id, s.barraId),
+    };
+
+    await deductSaleFromInventory(
+      [
+        {
+          product_id: s.latteProductId,
+          variant_id: s.latteLargeId,
+          quantity: 1,
+          modifier_ids: [s.almondMilkModifierId, decafMod.body.data.id],
+        },
+      ],
+      s.stationId,
+      randomUUID(),
+    );
+
+    const after = {
+      milk: await stockAt(s.supplyIds.milk, s.barraId),
+      almond: await stockAt(s.supplyIds.almond, s.barraId),
+      espresso: await stockAt(s.supplyIds.espresso, s.barraId),
+      decaf: await stockAt(decaf.id, s.barraId),
+    };
+
+    // Both recipe ingredients were skipped.
+    expect(after.milk.equals(before.milk)).toBe(true);
+    expect(after.espresso.equals(before.espresso)).toBe(true);
+    // And both substitutes were drawn: 200ml × 0.75 = 0.15 bottles almond,
+    // 18g × 1.0 = 0.018 bags decaf.
+    expectClose(before.almond.sub(after.almond), new Decimal('0.15'));
+    expectClose(before.decaf.sub(after.decaf), new Decimal('0.018'));
+  });
+
+  it('two SWAP modifiers targeting the SAME ingredient on one line are rejected (double-substitution prevented)', async () => {
+    // Create a second milk substitute (Oat Milk) on the existing Milk Type
+    // group, then widen max_selection to 2 directly in the DB to simulate a
+    // misconfigured group (business-wise, a single milk choice should be one
+    // option, but guard against the data shape just in case).
+    const oatMilk = await prisma.supply.create({
+      data: {
+        category_id: (await prisma.supplyCategory.findFirstOrThrow({ where: { name: 'Dairy' } })).id,
+        name: 'Oat Milk 1L',
+        base_unit: 'BOTTLE',
+        content_per_unit: 1000,
+        content_unit: 'ML',
+      },
+    });
+    await prisma.storageStock.create({
+      data: { supply_id: oatMilk.id, storage_id: s.barraId, quantity: 3 },
+    });
+    const oatMod = await prisma.modifier.create({
+      data: {
+        group_id: s.milkSwapGroupId,
+        name: 'Oat Milk',
+        extra_price: 1000,
+        supply_id: oatMilk.id,
+        ratio: 1,
+      },
+    });
+    await prisma.modifierGroup.update({
+      where: { id: s.milkSwapGroupId },
+      data: { max_selection: 2 },
+    });
+
+    await expect(
+      deductSaleFromInventory(
+        [
+          {
+            product_id: s.latteProductId,
+            variant_id: s.latteLargeId,
+            quantity: 1,
+            modifier_ids: [s.almondMilkModifierId, oatMod.id],
+          },
+        ],
+        s.stationId,
+        randomUUID(),
+      ),
+    ).rejects.toThrow(/Multiple SWAP modifiers.*target the same ingredient/);
+  });
+
+  it('SWAP targeting a supply that the recipe does not use at the top level is rejected', async () => {
+    // Create a Syrup SWAP group (replaces a syrup supply), attach it to Latte
+    // even though Latte's recipe has no syrup line. Ordering Latte with a
+    // syrup swap should error loudly instead of silently no-op'ing.
+    const syrupCat = await prisma.supplyCategory.create({ data: { name: 'Syrups' } });
+    const vanilla = await prisma.supply.create({
+      data: {
+        category_id: syrupCat.id,
+        name: 'Vanilla Syrup 750ml',
+        base_unit: 'BOTTLE',
+        content_per_unit: 750,
+        content_unit: 'ML',
+      },
+    });
+    const hazelnut = await prisma.supply.create({
+      data: {
+        category_id: syrupCat.id,
+        name: 'Hazelnut Syrup 750ml',
+        base_unit: 'BOTTLE',
+        content_per_unit: 750,
+        content_unit: 'ML',
+      },
+    });
+
+    const syrupGroup = await request(app).post('/api/v1/modifier-groups').set(s.auth).send({
+      name: 'Syrup Type',
+      type: 'SWAP',
+      replaces_supply_id: vanilla.id,
+      min_selection: 0,
+      max_selection: 1,
+    });
+    expect(syrupGroup.status).toBe(201);
+    const hazelnutMod = await request(app)
+      .post(`/api/v1/modifier-groups/${syrupGroup.body.data.id}/modifiers`)
+      .set(s.auth)
+      .send({ name: 'Hazelnut', supply_id: hazelnut.id, ratio: 1, extra_price: 0 });
+    expect(hazelnutMod.status).toBe(201);
+    await request(app)
+      .post(`/api/v1/products/${s.latteProductId}/modifier-groups`)
+      .set(s.auth)
+      .send({ modifier_group_id: syrupGroup.body.data.id })
+      .expect(201);
+
+    await expect(
+      deductSaleFromInventory(
+        [
+          {
+            product_id: s.latteProductId,
+            variant_id: s.latteLargeId,
+            quantity: 1,
+            modifier_ids: [hazelnutMod.body.data.id],
+          },
+        ],
+        s.stationId,
+        randomUUID(),
+      ),
+    ).rejects.toThrow(/no top-level line using that supply/);
+  });
+
+  it('SWAP does NOT reach into nested preparations — swapping milk on a drink whose recipe only uses milk via a preparation is rejected', async () => {
+    // Build a scenario where Whole Milk is consumed only inside a preparation
+    // (Steamed Milk 300ml yield), and the top-level drink recipe references
+    // the preparation. Ordering that drink with an Almond Milk swap must
+    // error because SWAPs only apply at the top of the recipe by design.
+    const category = await prisma.productCategory.findFirstOrThrow({ where: { name: 'Hot Coffee' } });
+
+    const steamedMilkProduct = await request(app).post('/api/v1/products').set(s.auth).send({
+      name: 'Steamed Milk',
+      type: 'PREPARATION',
+    });
+    expect(steamedMilkProduct.status).toBe(201);
+    await request(app)
+      .post(`/api/v1/recipes/products/${steamedMilkProduct.body.data.id}`)
+      .set(s.auth)
+      .send({
+        yield_quantity: 300,
+        yield_unit: 'ml',
+        items: [{ supply_id: s.supplyIds.milk, quantity: 300, unit: 'ml' }],
+      })
+      .expect(201);
+
+    const cortado = await request(app).post('/api/v1/products').set(s.auth).send({
+      name: 'Cortado',
+      type: 'DISH',
+      category_id: category.id,
+      sell_price: 5500,
+    });
+    const cortadoVar = await request(app)
+      .post(`/api/v1/products/${cortado.body.data.id}/variants`)
+      .set(s.auth)
+      .send({ name: 'Regular', sell_price: 5500 })
+      .expect(201);
+    await request(app)
+      .post(`/api/v1/recipes/variants/${cortadoVar.body.data.id}`)
+      .set(s.auth)
+      .send({
+        items: [
+          { preparation_id: steamedMilkProduct.body.data.id, quantity: 150, unit: 'ml' },
+          { supply_id: s.supplyIds.espresso, quantity: 18, unit: 'g' },
+        ],
+      })
+      .expect(201);
+    await request(app)
+      .post(`/api/v1/products/${cortado.body.data.id}/modifier-groups`)
+      .set(s.auth)
+      .send({ modifier_group_id: s.milkSwapGroupId })
+      .expect(201);
+
+    await expect(
+      deductSaleFromInventory(
+        [
+          {
+            product_id: cortado.body.data.id,
+            variant_id: cortadoVar.body.data.id,
+            quantity: 1,
+            modifier_ids: [s.almondMilkModifierId],
+          },
+        ],
+        s.stationId,
+        randomUUID(),
+      ),
+    ).rejects.toThrow(/no top-level line using that supply/);
+  });
+});

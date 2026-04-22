@@ -111,6 +111,10 @@ export interface OrderItem {
   unit_price: string;
   modifiers_price: string;
   line_total: string;
+  // Tax snapshot captured at add-time — never recomputed from the current
+  // Tax row, so historical orders stay stable across rate changes.
+  tax_rate: string;
+  tax_amount: string;
   notes: string | null;
   created_at: string;
   product?: {

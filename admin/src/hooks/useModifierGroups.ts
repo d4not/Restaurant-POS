@@ -65,7 +65,13 @@ export function useDeleteModifierGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteModifierGroup,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['modifier-groups'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['modifier-groups'] });
+      // Deleting the group cascades to ProductModifierGroup links — any cached
+      // product that referenced this group is now stale until the next mount.
+      qc.invalidateQueries({ queryKey: ['product'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+    },
   });
 }
 
@@ -79,6 +85,9 @@ export function useModifiers(groupId: string | undefined) {
   });
 }
 
+// Product detail queries include the group's active modifiers nested under
+// modifier_groups — so any CRUD on a modifier needs to bust `['product']`
+// caches or the POS / Product-detail UI may show stale options.
 export function useCreateModifier(groupId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -88,6 +97,7 @@ export function useCreateModifier(groupId: string) {
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId] });
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId, 'modifiers'] });
       qc.invalidateQueries({ queryKey: ['modifier-groups'] });
+      qc.invalidateQueries({ queryKey: ['product'] });
     },
   });
 }
@@ -106,6 +116,7 @@ export function useUpdateModifier(groupId: string) {
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId] });
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId, 'modifiers'] });
       qc.invalidateQueries({ queryKey: ['modifier-groups'] });
+      qc.invalidateQueries({ queryKey: ['product'] });
     },
   });
 }
@@ -118,6 +129,8 @@ export function useDeleteModifier(groupId: string) {
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId] });
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId, 'modifiers'] });
       qc.invalidateQueries({ queryKey: ['modifier-groups'] });
+      // Cascade-deletes any modifier_product_overrides pointing at this modifier.
+      qc.invalidateQueries({ queryKey: ['product'] });
     },
   });
 }

@@ -2,9 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PageLayout } from './components/layout/PageLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
+import { usePreferencesStore } from './store/preferences';
 import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
-import { Placeholder } from './pages/Placeholder';
 import { SuppliesPage } from './pages/inventory/SuppliesPage';
 import { SupplyDetail } from './pages/inventory/SupplyDetail';
 import { SuppliersPage } from './pages/inventory/SuppliersPage';
@@ -39,6 +39,13 @@ const queryClient = new QueryClient({
 });
 
 export default function App() {
+  // Subscribe to display preferences at the root so a change in Settings
+  // (currency, date format) re-renders the whole tree. The `formatMoney` /
+  // `formatDate` helpers read from the store directly on every call — they're
+  // not hooks, so the subscription must live somewhere React can observe.
+  usePreferencesStore((s) => s.currency);
+  usePreferencesStore((s) => s.dateFormat);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

@@ -237,6 +237,214 @@ describe('Phase 9A.2 — per-item tax snapshot on OrderItem', () => {
   });
 });
 
+// ============================================================================
+// Audit gap coverage — tax behavior under modifiers, deactivation, discounts,
+// item removal, and split payments. Orthogonal to the core snapshot tests.
+// ============================================================================
+
+async function seedForAudit(): Promise<Seed & { dairyModifierId: string }> {
+  const base = await seedBaseline();
+
+  // Add a simple ADD modifier that changes line_total — used by several tests
+  // to verify modifiers flow into the tax calculation.
+  const group = await request(app).post('/api/v1/modifier-groups').set(base.auth).send({
+    name: 'Extras',
+    type: 'ADD',
+    max_selection: 3,
+  });
+  expect(group.status).toBe(201);
+  const mod = await request(app)
+    .post(`/api/v1/modifier-groups/${group.body.data.id}/modifiers`)
+    .set(base.auth)
+    .send({ name: 'Premium', extra_price: 500 });
+  expect(mod.status).toBe(201);
+  await request(app)
+    .post(`/api/v1/products/${base.taxedProductId}/modifier-groups`)
+    .set(base.auth)
+    .send({ modifier_group_id: group.body.data.id })
+    .expect(201);
+
+  return { ...base, dairyModifierId: mod.body.data.id as string };
+}
+
+describe('Phase 9A audit — tax responds to modifier price and discount edits', () => {
+  let s: Awaited<ReturnType<typeof seedForAudit>>;
+  beforeEach(async () => {
+    s = await seedForAudit();
+  });
+
+  it('modifier extra_price feeds into line_total and therefore into tax_amount', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+
+    const added = await request(app)
+      .post(`/api/v1/orders/${order.body.data.id}/items`)
+      .set(s.auth)
+      .send({
+        product_id: s.taxedProductId,
+        quantity: 2,
+        modifier_ids: [s.dairyModifierId],
+      })
+      .expect(201);
+
+    // (1000 base + 500 mod) × 2 = 3000 line_total; tax = 3000 × 0.16 = 480.
+    const item = added.body.data.items[0];
+    expect(item.modifiers_price).toBe('500');
+    expect(item.line_total).toBe('3000');
+    expect(item.tax_amount).toBe('480');
+    expect(added.body.data.tax_amount).toBe('480');
+    expect(added.body.data.total).toBe('3480');
+  });
+
+  it('removing an item recalculates the order tax_amount from the surviving lines', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+
+    const first = await request(app)
+      .post(`/api/v1/orders/${order.body.data.id}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 2 }) // 2000 / tax 320
+      .expect(201);
+    const second = await request(app)
+      .post(`/api/v1/orders/${order.body.data.id}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 1 }) // 1000 / tax 160
+      .expect(201);
+    expect(second.body.data.tax_amount).toBe('480');
+
+    const firstItemId = first.body.data.items.find(
+      (i: { quantity: number }) => i.quantity === 2,
+    ).id as string;
+
+    const after = await request(app)
+      .delete(`/api/v1/orders/${order.body.data.id}/items/${firstItemId}`)
+      .set(s.auth)
+      .expect(200);
+    // Only the qty=1 line remains. Tax snaps back to 160.
+    expect(after.body.data.tax_amount).toBe('160');
+    expect(after.body.data.total).toBe('1160');
+  });
+
+  it('applying a discount preserves tax_amount on the items and sets total = subtotal + tax − discount', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 10 }) // 10000 subtotal / tax 1600
+      .expect(201);
+
+    const discounted = await request(app)
+      .patch(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ discount_amount: 2000, discount_reason: 'Loyalty' })
+      .expect(200);
+
+    expect(discounted.body.data.subtotal).toBe('10000');
+    expect(discounted.body.data.tax_amount).toBe('1600');
+    expect(discounted.body.data.discount_amount).toBe('2000');
+    // subtotal + tax - discount = 10000 + 1600 - 2000 = 9600
+    expect(discounted.body.data.total).toBe('9600');
+  });
+
+  it('a discount larger than subtotal + tax clamps the total to zero (never negative)', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 1 }) // 1000 + 160 tax = 1160 gross
+      .expect(201);
+
+    const discounted = await request(app)
+      .patch(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ discount_amount: 5000 })
+      .expect(200);
+
+    expect(discounted.body.data.subtotal).toBe('1000');
+    expect(discounted.body.data.tax_amount).toBe('160');
+    expect(discounted.body.data.total).toBe('0');
+  });
+
+  it('deactivating a tax does NOT rewrite already-added items — their snapshot still carries the original rate', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 1 })
+      .expect(201);
+
+    // Deactivate the tax — policy change, not a retroactive correction.
+    await request(app)
+      .patch(`/api/v1/taxes/${s.ivaTaxId}`)
+      .set(s.auth)
+      .send({ active: false })
+      .expect(200);
+
+    const reread = await request(app)
+      .get(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .expect(200);
+    expect(reread.body.data.tax_amount).toBe('160');
+    expect(reread.body.data.items[0].tax_rate).toBe('16');
+  });
+
+  it('split CASH + CARD payment settles the tax-inclusive total exactly', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.taxedProductId, quantity: 5 }) // 5000 + 800 tax = 5800
+      .expect(201);
+
+    // Tender half in cash (partial, no change), then settle the remainder on card.
+    const cashPay = await request(app)
+      .post(`/api/v1/orders/${orderId}/payments`)
+      .set(s.auth)
+      .send({ method: 'CASH', amount: 3000 });
+    expect(cashPay.status).toBe(201);
+    expect(cashPay.body.data.order.status).toBe('OPEN');
+
+    const cardPay = await request(app)
+      .post(`/api/v1/orders/${orderId}/payments`)
+      .set(s.auth)
+      .send({ method: 'CARD', amount: 2800, reference: 'AUTH-999' });
+    expect(cardPay.status).toBe(201);
+    expect(cardPay.body.data.order.status).toBe('PAID');
+    // Combined payments exactly cover subtotal + tax.
+    expect(cardPay.body.data.order.total).toBe('5800');
+  });
+});
+
 describe('Phase 9A.2 — Tax CRUD endpoints', () => {
   let auth: Record<string, string>;
   beforeEach(async () => {

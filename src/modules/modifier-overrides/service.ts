@@ -1,6 +1,7 @@
 import { ModifierOverrideType, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
+import { normalizeUnit } from '../recipes/cost-engine.js';
 import type { CreateOverrideInput, UpdateOverrideInput } from './schema.js';
 
 const overrideInclude = {
@@ -30,6 +31,58 @@ async function assertModifierExists(modifierId: string): Promise<void> {
   if (!exists) throw new BadRequestError('modifier_id references a non-existent modifier');
 }
 
+// Volume and weight canonical families for cross-family rejection.
+const VOLUME_UNITS = new Set(['ML', 'L', 'FL_OZ']);
+const WEIGHT_UNITS = new Set(['G', 'KG', 'OZ']);
+
+function familyOfNormalized(normalized: 'PIECE' | string): 'volume' | 'weight' | 'piece' {
+  if (normalized === 'PIECE') return 'piece';
+  if (VOLUME_UNITS.has(normalized)) return 'volume';
+  if (WEIGHT_UNITS.has(normalized)) return 'weight';
+  throw new BadRequestError(`Unknown unit family: ${normalized}`);
+}
+
+// FIXED_QTY overrides must use a unit compatible with the modifier's supply.
+// The engine ultimately routes this through convertRecipeQuantityToBase, which
+// rejects cross-family conversions — but that happens at sale time, long after
+// the misconfiguration was saved. Catching it at override-create time turns a
+// silent-until-sale bug into a visible-at-save error.
+async function assertOverrideUnitCompatible(
+  modifierId: string,
+  overrideUnit: string | null | undefined,
+  overrideType: ModifierOverrideType,
+): Promise<void> {
+  if (overrideType !== ModifierOverrideType.FIXED_QTY) return;
+  if (!overrideUnit) return;
+  const modifier = await prisma.modifier.findUnique({
+    where: { id: modifierId },
+    select: {
+      supply: {
+        select: { id: true, name: true, content_unit: true },
+      },
+    },
+  });
+  if (!modifier?.supply) return;
+  if (!modifier.supply.content_unit) {
+    // Piece-type supply: override_unit must also be a piece alias.
+    const normalized = normalizeUnit(overrideUnit);
+    if (normalized !== 'PIECE') {
+      throw new BadRequestError(
+        `Modifier supply "${modifier.supply.name}" is piece-type; override_unit must be a piece unit, got "${overrideUnit}"`,
+      );
+    }
+    return;
+  }
+  const normalized = normalizeUnit(overrideUnit);
+  const overrideFamily = familyOfNormalized(normalized);
+  const supplyFamily = familyOfNormalized(modifier.supply.content_unit);
+  if (overrideFamily !== supplyFamily) {
+    throw new BadRequestError(
+      `override_unit "${overrideUnit}" is ${overrideFamily}; modifier supply "${modifier.supply.name}" is measured in ${supplyFamily} — units must share a family`,
+    );
+  }
+}
+
 export async function listOverrides(productId: string) {
   await assertProductExists(productId);
   return prisma.modifierProductOverride.findMany({
@@ -41,6 +94,11 @@ export async function listOverrides(productId: string) {
 export async function createOverride(productId: string, input: CreateOverrideInput) {
   await assertProductExists(productId);
   await assertModifierExists(input.modifier_id);
+  await assertOverrideUnitCompatible(
+    input.modifier_id,
+    input.override_unit,
+    input.override_type,
+  );
   try {
     return await prisma.modifierProductOverride.create({
       data: {
@@ -107,6 +165,9 @@ export async function updateOverride(
     if (nextRatio != null) {
       throw new BadRequestError('FIXED_QTY overrides must not have override_ratio');
     }
+    // Re-validate unit compatibility on update — a user might be switching
+    // from RATIO to FIXED_QTY or swapping the unit string directly.
+    await assertOverrideUnitCompatible(modifierId, nextUnit, nextType);
   }
 
   return prisma.modifierProductOverride.update({

@@ -34,7 +34,13 @@ export function useUpdateTax() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdateTaxInput }) =>
       updateTax(id, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['taxes'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['taxes'] });
+      // Product detail embeds the Tax row (name + rate). Refresh so the UI
+      // reflects the new rate on subsequent line-add operations — already-paid
+      // orders stay frozen via the per-item tax snapshot on the backend.
+      qc.invalidateQueries({ queryKey: ['product'] });
+    },
   });
 }
 
@@ -42,6 +48,9 @@ export function useDeleteTax() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteTax(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['taxes'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['taxes'] });
+      qc.invalidateQueries({ queryKey: ['product'] });
+    },
   });
 }

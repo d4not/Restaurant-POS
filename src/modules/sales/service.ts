@@ -412,10 +412,30 @@ export async function deductSaleFromInventory(
       // Which recipe supply_ids are overridden by a SWAP modifier on this line?
       // Collect them first so the recipe walker can skip them and hand the
       // captured line to the modifier handler.
+      //
+      // Two SWAP modifiers targeting the same supply on one line would both
+      // substitute the same recipe ingredient and both deduct at their ratio —
+      // effectively drawing the swapped supply twice (e.g. picking both "Almond
+      // Milk" and "Oat Milk" from a max=2 Milk Type group would deduct 2× the
+      // recipe's milk amount). A customer can only drink one milk, so treat
+      // this as a misconfiguration and refuse the sale rather than silently
+      // double-deduct.
       const swappedSupplyIds = new Set<string>();
+      const swapTargetCounts = new Map<string, number>();
       for (const m of modifiers) {
         if (m.group_type === ModifierGroupType.SWAP && m.replaces_supply_id) {
           swappedSupplyIds.add(m.replaces_supply_id);
+          swapTargetCounts.set(
+            m.replaces_supply_id,
+            (swapTargetCounts.get(m.replaces_supply_id) ?? 0) + 1,
+          );
+        }
+      }
+      for (const [targetId, count] of swapTargetCounts) {
+        if (count > 1) {
+          throw new BadRequestError(
+            `Multiple SWAP modifiers on product ${line.product_id} target the same ingredient ${targetId} — only one swap per ingredient is allowed per line`,
+          );
         }
       }
       const swapContext = { replaced: new Map<string, { quantity: Decimal; unit: string; waste_pct: Decimal }>() };
@@ -434,11 +454,35 @@ export async function deductSaleFromInventory(
       // Process every modifier selected for this line.
       for (const modifier of modifiers) {
         if (modifier.group_type === ModifierGroupType.SWAP) {
-          // Informational SWAP ("keep as-is", no supply): nothing to deduct,
-          // but the recipe line it replaces was already skipped. That matches
-          // "no milk" semantics — neither the original nor a replacement is
-          // drawn.
-          if (!modifier.supply_id || !modifier.replaces_supply_id) continue;
+          // A SWAP group without a replaces_supply_id is a data error — the
+          // schema prevents it, but defend against legacy rows and make the
+          // failure loud rather than silent.
+          if (!modifier.replaces_supply_id) {
+            throw new BadRequestError(
+              `SWAP modifier ${modifier.id} is attached to a group with no replaces_supply_id — this group is misconfigured`,
+            );
+          }
+
+          // Whether the SWAP is informational ("No milk", supply_id=null) or
+          // substituting, the recipe MUST contain the replaced ingredient at
+          // the top level. Attaching a SWAP group to a product whose recipe
+          // doesn't use that supply is a misconfiguration we surface loudly
+          // rather than silently letting the modifier do nothing. This also
+          // covers the case where the ingredient lives only inside a nested
+          // preparation — SWAPs intentionally don't reach into sub-recipes
+          // (preparations are stable, not customer-customized).
+          const replacedLine = swapContext.replaced.get(modifier.replaces_supply_id);
+          if (!replacedLine) {
+            throw new BadRequestError(
+              `SWAP modifier ${modifier.id} targets supply ${modifier.replaces_supply_id} but the recipe for product ${line.product_id} has no top-level line using that supply`,
+            );
+          }
+
+          // Informational SWAP ("No milk", no replacement supply): the recipe
+          // line has already been skipped by the walker, so we have nothing to
+          // deduct. That's the whole point — the customer gets the dish
+          // without the swapped ingredient.
+          if (!modifier.supply_id) continue;
 
           const override = overrides.get(modifier.id);
           const supply = await tx.supply.findUnique({
@@ -475,12 +519,6 @@ export async function deductSaleFromInventory(
           // otherwise the modifier's default ratio. The captured recipe line
           // tells us the original qty+unit; we deduct that × ratio of the
           // modifier's supply (converted to base units).
-          const replacedLine = swapContext.replaced.get(modifier.replaces_supply_id);
-          if (!replacedLine) {
-            throw new BadRequestError(
-              `SWAP modifier ${modifier.id} targets supply ${modifier.replaces_supply_id} but the recipe for product ${line.product_id} has no line using that supply`,
-            );
-          }
           const ratio =
             override && override.override_type === ModifierOverrideType.RATIO && override.override_ratio != null
               ? new Decimal(override.override_ratio)
