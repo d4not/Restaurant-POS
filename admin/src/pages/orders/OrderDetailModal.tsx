@@ -1,11 +1,12 @@
+import { useState } from 'react';
 import { Badge, Button, Modal } from '../../components/ui';
-import { useOrder } from '../../hooks/useOrders';
+import { useOrder, useOrderIngredients } from '../../hooks/useOrders';
 import type { Order } from '../../types/operations';
 import {
   orderTypeLabel,
   paymentMethodLabel,
 } from '../../types/operations';
-import { formatDateTime, formatMoney } from '../../utils/format';
+import { formatDateTime, formatMoney, formatNumber } from '../../utils/format';
 import {
   orderStatusTone,
   orderTypeTone,
@@ -292,6 +293,122 @@ function OrderDetailBody({ order }: { order: Order }) {
           <p className="fs-13">{order.notes}</p>
         </div>
       )}
+
+      <IngredientsSection
+        orderId={order.id}
+        orderStatus={order.status}
+        orderTotal={total}
+      />
     </>
+  );
+}
+
+/* ──────────────── Ingredients used ────────────────────── */
+
+function IngredientsSection({
+  orderId,
+  orderStatus,
+  orderTotal,
+}: {
+  orderId: string;
+  orderStatus: Order['status'];
+  orderTotal: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const q = useOrderIngredients(orderId, { enabled: expanded });
+
+  // CANCELLED orders never touched inventory, so there's nothing to show.
+  if (orderStatus === 'CANCELLED') return null;
+
+  const ingredients = q.data?.ingredients ?? [];
+  const totalCost = Number(q.data?.grand_total_cost ?? 0);
+  const margin = orderTotal - totalCost;
+
+  return (
+    <div className="detail-section">
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => setExpanded((v) => !v)}
+        style={{ marginBottom: 12 }}
+      >
+        {expanded ? '▾' : '▸'} Ingredients used
+      </button>
+
+      {!expanded ? null : q.isLoading ? (
+        <div className="loading-block">
+          <span className="spinner" />
+          Loading…
+        </div>
+      ) : q.error ? (
+        <div className="auth-alert">{(q.error as Error).message}</div>
+      ) : orderStatus === 'OPEN' ? (
+        <div className="fs-12 text-muted">
+          Ingredients are deducted only when the order is paid.
+        </div>
+      ) : ingredients.length === 0 ? (
+        <div className="fs-12 text-muted">No ingredient movements recorded.</div>
+      ) : (
+        <>
+          <div className="table-wrap" style={{ background: 'var(--surface)' }}>
+            <div
+              className="table-head"
+              style={{ gridTemplateColumns: '2fr 120px 120px 120px' }}
+            >
+              <div>Supply</div>
+              <div style={{ textAlign: 'right' }}>Quantity</div>
+              <div style={{ textAlign: 'right' }}>Unit cost</div>
+              <div style={{ textAlign: 'right' }}>Total</div>
+            </div>
+            {ingredients.map((row, idx) => (
+              <div
+                key={row.supply_id}
+                className={`table-row ${idx % 2 === 0 ? 'even' : 'odd'}`}
+                style={{
+                  gridTemplateColumns: '2fr 120px 120px 120px',
+                  cursor: 'default',
+                }}
+              >
+                <div className="fw-600 fs-13">{row.supply_name}</div>
+                <div className="fs-13" style={{ textAlign: 'right' }}>
+                  {formatNumber(row.quantity, 4)} {row.unit.toLowerCase()}
+                </div>
+                <div className="fs-12 text-muted" style={{ textAlign: 'right' }}>
+                  {formatMoney(row.unit_cost)}
+                </div>
+                <div className="fw-600 fs-13" style={{ textAlign: 'right' }}>
+                  {formatMoney(row.total_cost)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="detail-grid mt-12">
+            <div
+              className="detail-row"
+              style={{ gridTemplateColumns: '1fr 1fr 1fr' }}
+            >
+              <div className="detail-cell">
+                <div className="dk">Ingredient cost</div>
+                <div className="dv red">−{formatMoney(totalCost)}</div>
+              </div>
+              <div className="detail-cell">
+                <div className="dk">Order total</div>
+                <div className="dv">{formatMoney(orderTotal)}</div>
+              </div>
+              <div className="detail-cell">
+                <div className="dk">Gross profit</div>
+                <div
+                  className="dv"
+                  style={{ color: margin >= 0 ? 'var(--green)' : 'var(--red)' }}
+                >
+                  {formatMoney(margin)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

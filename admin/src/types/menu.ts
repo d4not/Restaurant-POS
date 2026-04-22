@@ -8,6 +8,9 @@
 
 import type { BaseUnit, ContentUnit } from './inventory';
 
+export type ModifierGroupType = 'SWAP' | 'ADD';
+export type ModifierOverrideType = 'RATIO' | 'FIXED_QTY';
+
 export type ProductType = 'PRODUCT' | 'DISH' | 'PREPARATION';
 export const PRODUCT_TYPES: ProductType[] = ['PRODUCT', 'DISH', 'PREPARATION'];
 
@@ -151,6 +154,7 @@ export interface Modifier {
   supply_id: string | null;
   supply_quantity: string | null;
   supply_unit: string | null;
+  ratio: string;
   active: boolean;
   display_order: number;
   created_at: string;
@@ -161,6 +165,8 @@ export interface Modifier {
 export interface ModifierGroup {
   id: string;
   name: string;
+  type: ModifierGroupType;
+  replaces_supply_id: string | null;
   min_selection: number;
   max_selection: number;
   required: boolean;
@@ -168,10 +174,14 @@ export interface ModifierGroup {
   created_at: string;
   updated_at: string;
   modifiers?: Modifier[];
+  replaces_supply?: { id: string; name: string; base_unit: BaseUnit } | null;
+  _count?: { product_links: number };
 }
 
 export interface CreateModifierGroupInput {
   name: string;
+  type?: ModifierGroupType;
+  replaces_supply_id?: string | null;
   min_selection?: number;
   max_selection?: number;
   required?: boolean;
@@ -186,11 +196,57 @@ export interface CreateModifierInput {
   supply_id?: string | null;
   supply_quantity?: number | null;
   supply_unit?: string | null;
+  ratio?: number;
   active?: boolean;
   display_order?: number;
 }
 
 export type UpdateModifierInput = Partial<CreateModifierInput>;
+
+/* ── Modifier Product Overrides ─────────────────────────── */
+
+export interface ModifierProductOverride {
+  id: string;
+  product_id: string;
+  modifier_id: string;
+  override_type: ModifierOverrideType;
+  override_ratio: string | null;
+  override_quantity: string | null;
+  override_unit: string | null;
+  created_at: string;
+  updated_at: string;
+  modifier?: {
+    id: string;
+    name: string;
+    group_id: string;
+    group?: { id: string; name: string; type: ModifierGroupType };
+  };
+  product?: { id: string; name: string };
+}
+
+export interface CreateOverrideInput {
+  modifier_id: string;
+  override_type: ModifierOverrideType;
+  override_ratio?: number | null;
+  override_quantity?: number | null;
+  override_unit?: string | null;
+}
+
+export interface UpdateOverrideInput {
+  override_type?: ModifierOverrideType;
+  override_ratio?: number | null;
+  override_quantity?: number | null;
+  override_unit?: string | null;
+}
+
+export interface LinkedProduct {
+  id: string;
+  name: string;
+  type: ProductType;
+  active: boolean;
+  sell_price: string | null;
+  category: { id: string; name: string } | null;
+}
 
 /* ── Product Modifications (for PRODUCT type) ───────────── */
 

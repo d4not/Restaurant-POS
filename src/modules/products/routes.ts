@@ -14,6 +14,7 @@ import {
   attachModifierGroupSchema,
 } from './schema.js';
 import { productModificationRouter } from '../product-modifications/routes.js';
+import { modifierOverrideRouter } from '../modifier-overrides/routes.js';
 
 const variantParamSchema = z.object({
   id: z.string().uuid(),
@@ -93,3 +94,6 @@ productRouter.delete(
 
 // Nested: /api/v1/products/:id/modifications
 productRouter.use('/:id/modifications', productModificationRouter);
+
+// Nested: /api/v1/products/:id/modifier-overrides
+productRouter.use('/:id/modifier-overrides', modifierOverrideRouter);

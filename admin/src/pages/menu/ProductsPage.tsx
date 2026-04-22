@@ -70,6 +70,12 @@ export function ProductsPage() {
   // If a product has variants, the base product.sell_price is often null and
   // the displayed price becomes a range across its variants.
   const priceDisplay = (p: Product): string => {
+    // PREPARATIONs have no sell_price — show recipe cost so the list still
+    // communicates a meaningful number.
+    if (p.type === 'PREPARATION') {
+      const cost = Number(p.recipe_cost);
+      return cost > 0 ? `${formatMoney(cost)} cost` : '—';
+    }
     if (p.variants && p.variants.length > 0) {
       const prices = p.variants.map((v) => Number(v.sell_price));
       const min = Math.min(...prices);
@@ -140,6 +146,10 @@ export function ProductsPage() {
       sortable: true,
       width: '120px',
       render: (p) => {
+        // Preparations don't have a sell price — food-cost % is undefined.
+        if (p.type === 'PREPARATION') {
+          return <span className="fs-12 text-muted">—</span>;
+        }
         const pct = Number(p.food_cost_pct);
         if (!pct) return <span className="fs-12 text-muted">—</span>;
         // Industry-standard food-cost target for coffee/food is ~30%. Over

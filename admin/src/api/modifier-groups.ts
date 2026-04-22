@@ -3,8 +3,10 @@ import type { Paginated } from '../types/api';
 import type {
   CreateModifierGroupInput,
   CreateModifierInput,
+  LinkedProduct,
   Modifier,
   ModifierGroup,
+  ModifierProductOverride,
   UpdateModifierGroupInput,
   UpdateModifierInput,
 } from '../types/menu';
@@ -69,4 +71,14 @@ export function updateModifier(
 
 export function deleteModifier(groupId: string, modifierId: string) {
   return api.delete<void>(`/modifier-groups/${groupId}/modifiers/${modifierId}`);
+}
+
+/* ── Group-scoped helpers ───────────────────────────────── */
+
+export function listGroupLinkedProducts(groupId: string) {
+  return api.get<LinkedProduct[]>(`/modifier-groups/${groupId}/products`);
+}
+
+export function listGroupOverrides(groupId: string) {
+  return api.get<ModifierProductOverride[]>(`/modifier-groups/${groupId}/overrides`);
 }

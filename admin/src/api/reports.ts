@@ -113,3 +113,45 @@ export function getSupplyMovementsReport(params: {
 }) {
   return api.get<SupplyMovementReport>('/reports/supply-movements', { ...params });
 }
+
+/* ── Product analysis ────────────────────────────────────── */
+
+export interface ProductAnalysisVariantRow {
+  variant_id: string | null;
+  variant_name: string;
+  orders_count: number;
+  total_revenue: string;
+}
+
+export interface ProductAnalysisModifierRow {
+  modifier_id: string;
+  modifier_name: string;
+  times_used: number;
+  extra_revenue: string;
+}
+
+export interface ProductAnalysisIngredientRow {
+  supply_id: string;
+  supply_name: string;
+  total_quantity: string;
+  unit: string;
+  total_cost: string;
+}
+
+export interface ProductAnalysisReport {
+  product_id: string;
+  product_name: string;
+  from: string;
+  to: string;
+  variant_sales: ProductAnalysisVariantRow[];
+  modifier_usage: ProductAnalysisModifierRow[];
+  ingredients_used: ProductAnalysisIngredientRow[];
+}
+
+export function getProductAnalysis(params: {
+  product_id: string;
+  from: string;
+  to: string;
+}) {
+  return api.get<ProductAnalysisReport>('/reports/product-analysis', { ...params });
+}

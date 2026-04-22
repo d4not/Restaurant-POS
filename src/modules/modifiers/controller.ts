@@ -37,6 +37,16 @@ export async function removeGroup(req: Request, res: Response): Promise<void> {
   res.status(204).send();
 }
 
+export async function listLinkedProducts(req: Request, res: Response): Promise<void> {
+  const products = await service.listGroupLinkedProducts(req.params.id as string);
+  res.json({ success: true, data: products });
+}
+
+export async function listOverrides(req: Request, res: Response): Promise<void> {
+  const overrides = await service.listGroupOverrides(req.params.id as string);
+  res.json({ success: true, data: overrides });
+}
+
 export async function createModifier(req: Request, res: Response): Promise<void> {
   const modifier = await service.createModifier(
     req.params.id as string,

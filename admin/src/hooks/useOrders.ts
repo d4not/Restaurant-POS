@@ -9,6 +9,7 @@ import {
   addPayment,
   createOrder,
   getOrder,
+  getOrderIngredients,
   listOrders,
   removeOrderItem,
   updateOrderItem,
@@ -32,6 +33,18 @@ export function useOrder(id: string | undefined) {
     queryKey: ['order', id],
     queryFn: () => getOrder(id as string),
     enabled: !!id,
+  });
+}
+
+export function useOrderIngredients(
+  id: string | undefined,
+  options: { enabled?: boolean } = {},
+) {
+  const enabled = options.enabled !== undefined ? options.enabled : !!id;
+  return useQuery({
+    queryKey: ['order', id, 'ingredients'],
+    queryFn: () => getOrderIngredients(id as string),
+    enabled: !!id && enabled,
   });
 }
 

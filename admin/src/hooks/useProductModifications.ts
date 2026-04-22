@@ -10,11 +10,15 @@ import {
   updateModification,
 } from '../api/product-modifications';
 
-export function useModifications(productId: string | undefined) {
+export function useModifications(
+  productId: string | undefined,
+  options: { enabled?: boolean } = {},
+) {
+  const enabled = options.enabled !== undefined ? options.enabled : !!productId;
   return useQuery({
     queryKey: ['product', productId, 'modifications'],
     queryFn: () => listModifications(productId as string),
-    enabled: !!productId,
+    enabled: !!productId && enabled,
   });
 }
 

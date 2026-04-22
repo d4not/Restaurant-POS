@@ -85,3 +85,22 @@ export interface AddPaymentResponse {
 export function addPayment(orderId: string, input: CreatePaymentInput) {
   return api.post<AddPaymentResponse>(`/orders/${orderId}/payments`, input);
 }
+
+export interface OrderIngredientRow {
+  supply_id: string;
+  supply_name: string;
+  quantity: string;
+  unit: string;
+  unit_cost: string;
+  total_cost: string;
+}
+
+export interface OrderIngredientsResult {
+  order_id: string;
+  ingredients: OrderIngredientRow[];
+  grand_total_cost: string;
+}
+
+export function getOrderIngredients(orderId: string) {
+  return api.get<OrderIngredientsResult>(`/orders/${orderId}/ingredients`);
+}

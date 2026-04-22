@@ -13,12 +13,18 @@ import {
   useModifications,
 } from '../../hooks/useProductModifications';
 import {
+  useDeleteOverride,
+  useModifierOverrides,
+} from '../../hooks/useModifierOverrides';
+import {
   formatMoney,
   formatNumber,
   formatPct,
 } from '../../utils/format';
 import type {
+  Modifier,
   ModifierGroupLink,
+  ModifierProductOverride,
   ProductModification,
   ProductVariant,
 } from '../../types/menu';
@@ -27,12 +33,14 @@ import { ProductFormModal } from './ProductFormModal';
 import { VariantFormModal } from './VariantFormModal';
 import { ModificationFormModal } from './ModificationFormModal';
 import { AttachModifierGroupModal } from './AttachModifierGroupModal';
+import { OverrideFormModal } from './OverrideFormModal';
 import { RecipeEditor } from './RecipeEditor';
 
 export function ProductDetail() {
   const { id = '' } = useParams<{ id: string }>();
   const productQ = useProduct(id);
-  const modsQ = useModifications(id);
+  const modsQ = useModifications(id, { enabled: productQ.data?.type === 'PRODUCT' });
+  const overridesQ = useModifierOverrides(id);
 
   const [editing, setEditing] = useState(false);
   const [variantModal, setVariantModal] = useState<{
@@ -44,6 +52,14 @@ export function ProductDetail() {
     modification: ProductModification | null;
   }>({ open: false, modification: null });
   const [attachOpen, setAttachOpen] = useState(false);
+  const [overrideModal, setOverrideModal] = useState<{
+    open: boolean;
+    modifier: Modifier | null;
+    groupType: 'SWAP' | 'ADD';
+    existing: ModifierProductOverride | null;
+  }>({ open: false, modifier: null, groupType: 'ADD', existing: null });
+
+  const deleteOverride = useDeleteOverride(id);
 
   // For DISH with variants we show a recipe per variant, selected via pill.
   // Default to the first variant once loaded.
@@ -146,7 +162,7 @@ export function ProductDetail() {
     return product.sell_price ? formatMoney(product.sell_price) : '—';
   })();
 
-  const modifications = modsQ.data?.items ?? [];
+  const modifications = modsQ.data ?? [];
 
   const variantColumns: TableColumn<ProductVariant>[] = [
     {
@@ -419,9 +435,27 @@ export function ProductDetail() {
             </Button>
           </div>
           <ModifierGroupList
+            productName={product.name}
             links={product.modifier_groups ?? []}
+            overrides={overridesQ.data ?? []}
             onDetach={onDetachGroup}
             detaching={detachGroup.isPending}
+            onOverride={(mod, groupType, existing) =>
+              setOverrideModal({
+                open: true,
+                modifier: mod,
+                groupType,
+                existing: existing ?? null,
+              })
+            }
+            onDeleteOverride={async (mod) => {
+              if (!confirm(`Remove override for "${mod.name}"?`)) return;
+              try {
+                await deleteOverride.mutateAsync(mod.id);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : 'Delete failed');
+              }
+            }}
           />
         </div>
       )}
@@ -551,6 +585,22 @@ export function ProductDetail() {
         productId={product.id}
         attachedIds={(product.modifier_groups ?? []).map((l) => l.modifier_group_id)}
       />
+      <OverrideFormModal
+        open={overrideModal.open}
+        onClose={() =>
+          setOverrideModal({
+            open: false,
+            modifier: null,
+            groupType: 'ADD',
+            existing: null,
+          })
+        }
+        productId={product.id}
+        productName={product.name}
+        modifier={overrideModal.modifier}
+        groupType={overrideModal.groupType}
+        existingOverride={overrideModal.existing}
+      />
     </>
   );
 }
@@ -558,12 +608,27 @@ export function ProductDetail() {
 /* ───────────────────────────────────────────────────────── */
 
 interface GroupListProps {
+  productName: string;
   links: ModifierGroupLink[];
+  overrides: ModifierProductOverride[];
   onDetach: (link: ModifierGroupLink) => void;
   detaching: boolean;
+  onOverride: (
+    modifier: Modifier,
+    groupType: 'SWAP' | 'ADD',
+    existing?: ModifierProductOverride,
+  ) => void;
+  onDeleteOverride: (modifier: Modifier) => void;
 }
 
-function ModifierGroupList({ links, onDetach, detaching }: GroupListProps) {
+function ModifierGroupList({
+  links,
+  overrides,
+  onDetach,
+  detaching,
+  onOverride,
+  onDeleteOverride,
+}: GroupListProps) {
   if (links.length === 0) {
     return (
       <EmptyState
@@ -572,24 +637,40 @@ function ModifierGroupList({ links, onDetach, detaching }: GroupListProps) {
       />
     );
   }
+  const overrideByModifierId = new Map(overrides.map((o) => [o.modifier_id, o]));
   return (
-    <div className="modifier-group-list">
+    <div className="modifier-group-list" style={{ display: 'grid', gap: 12 }}>
       {links.map((link) => {
         const g = link.modifier_group;
+        const isSwap = g.type === 'SWAP';
         const activeMods = g.modifiers?.filter((m) => m.active) ?? [];
         return (
           <div key={link.id} className="card" style={{ padding: 14 }}>
             <div className="flex-between mb-8">
               <div>
-                <div className="fw-600 fs-13">{g.name}</div>
-                <div className="fs-11 text-muted mt-4 flex gap-8" style={{ alignItems: 'center' }}>
+                <div className="flex gap-8" style={{ alignItems: 'center' }}>
+                  <span className="fw-600 fs-13">{g.name}</span>
+                  {isSwap ? (
+                    <Badge tone="blue">SWAP</Badge>
+                  ) : (
+                    <Badge tone="gray">ADD</Badge>
+                  )}
+                  {g.required && <Badge tone="gold">Required</Badge>}
+                </div>
+                <div
+                  className="fs-11 text-muted mt-4 flex gap-8"
+                  style={{ alignItems: 'center' }}
+                >
                   <span>min {g.min_selection}</span>
                   <span>·</span>
                   <span>max {g.max_selection}</span>
-                  {g.required && (
+                  {g.replaces_supply && (
                     <>
                       <span>·</span>
-                      <Badge tone="gold">Required</Badge>
+                      <span>
+                        Replaces:{' '}
+                        <span className="fw-600">{g.replaces_supply.name}</span>
+                      </span>
                     </>
                   )}
                 </div>
@@ -604,22 +685,76 @@ function ModifierGroupList({ links, onDetach, detaching }: GroupListProps) {
                 Detach
               </button>
             </div>
-            <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
-              {activeMods.length === 0 ? (
-                <span className="fs-12 text-muted">No modifiers in this group.</span>
-              ) : (
-                activeMods.map((m) => (
-                  <Badge key={m.id} tone="gray">
-                    {m.name}
-                    {Number(m.extra_price) > 0 && (
-                      <span style={{ marginLeft: 6 }}>
-                        +{formatMoney(m.extra_price)}
-                      </span>
-                    )}
-                  </Badge>
-                ))
-              )}
-            </div>
+
+            {activeMods.length === 0 ? (
+              <span className="fs-12 text-muted">No modifiers in this group.</span>
+            ) : (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {activeMods.map((m) => {
+                  const override = overrideByModifierId.get(m.id);
+                  return (
+                    <div
+                      key={m.id}
+                      className="flex-between"
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        background: 'var(--bg)',
+                        gap: 12,
+                      }}
+                    >
+                      <div className="flex gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className="fw-600 fs-13">{m.name}</span>
+                        {Number(m.extra_price) > 0 && (
+                          <span className="fs-12 gold">+{formatMoney(m.extra_price)}</span>
+                        )}
+                        {isSwap ? (
+                          <span className="fs-12 text-muted">
+                            ratio{' '}
+                            <span className="fw-600">
+                              {Number(m.ratio ?? 1).toFixed(2)}×
+                            </span>
+                          </span>
+                        ) : m.supply_quantity ? (
+                          <span className="fs-12 text-muted">
+                            {Number(m.supply_quantity)} {m.supply_unit ?? ''}{' '}
+                            {m.supply && <>of {m.supply.name}</>}
+                          </span>
+                        ) : null}
+                        {override && (
+                          <Badge tone="gold">
+                            Custom:{' '}
+                            {override.override_type === 'RATIO'
+                              ? `${Number(override.override_ratio ?? 0).toFixed(2)}×`
+                              : `${Number(override.override_quantity ?? 0)} ${override.override_unit ?? ''}`}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-4">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onOverride(m, g.type, override)}
+                        >
+                          {override ? 'Edit override' : '+ Override'}
+                        </button>
+                        {override && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => onDeleteOverride(m)}
+                            aria-label="Remove override"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

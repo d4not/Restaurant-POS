@@ -1,11 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Card, KPICard, Table } from '../../components/ui';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { Badge, Button, Card, EmptyState, KPICard, Table } from '../../components/ui';
 import type { TableColumn, BadgeTone } from '../../components/ui';
 import { SearchInput } from '../../components/forms/SearchInput';
-import { useProductCostsReport } from '../../hooks/useReports';
+import {
+  useProductAnalysis,
+  useProductCostsReport,
+} from '../../hooks/useReports';
 import type { ProductCostRow } from '../../api/reports';
 import { formatMoney, formatNumber } from '../../utils/format';
+import { daysAgoYMD, toIsoDayEnd, toIsoDayStart, todayYMD } from './date-range';
 
 /**
  * Flattened row — one per product (no variants) OR one per variant (the
@@ -78,6 +91,7 @@ export function ProductCostsReport() {
   const [activeOnly, setActiveOnly] = useState(true);
   const [search, setSearch] = useState('');
   const [bucket, setBucket] = useState<'all' | 'good' | 'watch' | 'bad'>('all');
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const query = useProductCostsReport(activeOnly);
 
@@ -288,7 +302,7 @@ export function ProductCostsReport() {
           columns={columns}
           rows={filtered}
           getRowKey={(r) => r.key}
-          onRowClick={(r) => navigate(`/menu/products/${r.product_id}`)}
+          onRowClick={(r) => setExpandedKey((cur) => (cur === r.key ? null : r.key))}
           isInitialLoad={query.isLoading}
           error={query.error as Error | null}
           emptyMessage={
@@ -303,6 +317,292 @@ export function ProductCostsReport() {
           }
         />
       </Card>
+
+      {expandedKey && (() => {
+        const row = filtered.find((r) => r.key === expandedKey);
+        if (!row) return null;
+        return (
+          <ProductAnalysisPanel
+            key={row.product_id}
+            productId={row.product_id}
+            productName={row.product_name}
+            recipeCost={row.recipe_cost}
+            onClose={() => setExpandedKey(null)}
+            onOpenProduct={() => navigate(`/menu/products/${row.product_id}`)}
+          />
+        );
+      })()}
     </>
+  );
+}
+
+/* ──────────────── Product analysis panel ──────────────── */
+
+interface AnalysisPanelProps {
+  productId: string;
+  productName: string;
+  recipeCost: number;
+  onClose: () => void;
+  onOpenProduct: () => void;
+}
+
+function ProductAnalysisPanel({
+  productId,
+  productName,
+  recipeCost,
+  onClose,
+  onOpenProduct,
+}: AnalysisPanelProps) {
+  const [fromYMD, setFromYMD] = useState(() => daysAgoYMD(30));
+  const [toYMD, setToYMD] = useState(() => todayYMD());
+
+  const from = toIsoDayStart(fromYMD) ?? '';
+  const to = toIsoDayEnd(toYMD) ?? '';
+
+  const q = useProductAnalysis({ product_id: productId, from, to });
+
+  const modifierData = useMemo(
+    () =>
+      (q.data?.modifier_usage ?? [])
+        .slice(0, 5)
+        .map((m) => ({ label: m.modifier_name, value: m.times_used })),
+    [q.data],
+  );
+
+  const variantData = useMemo(
+    () =>
+      (q.data?.variant_sales ?? []).map((v) => ({
+        label: v.variant_name,
+        value: Number(v.total_revenue),
+      })),
+    [q.data],
+  );
+
+  const ingredientsCost = useMemo(() => {
+    return (q.data?.ingredients_used ?? []).reduce(
+      (s, r) => s + Number(r.total_cost),
+      0,
+    );
+  }, [q.data]);
+
+  const modifierRevenue = useMemo(() => {
+    return (q.data?.modifier_usage ?? []).reduce(
+      (s, r) => s + Number(r.extra_revenue),
+      0,
+    );
+  }, [q.data]);
+
+  const totalRevenue = useMemo(() => {
+    return (q.data?.variant_sales ?? []).reduce(
+      (s, r) => s + Number(r.total_revenue),
+      0,
+    );
+  }, [q.data]);
+
+  return (
+    <Card
+      className="mt-16"
+      title={
+        <>
+          Analysis · <span className="text-muted fw-600">{productName}</span>
+        </>
+      }
+      actions={
+        <div className="flex gap-8">
+          <Button variant="ghost" size="sm" onClick={onOpenProduct}>
+            Open product
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            ✕ Close
+          </Button>
+        </div>
+      }
+    >
+      <div className="toolbar" style={{ marginTop: 0, marginBottom: 12 }}>
+        <div className="field" style={{ margin: 0 }}>
+          <label className="fs-11" style={{ marginBottom: 4 }}>From</label>
+          <input
+            type="date"
+            value={fromYMD}
+            onChange={(e) => setFromYMD(e.target.value)}
+          />
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label className="fs-11" style={{ marginBottom: 4 }}>To</label>
+          <input
+            type="date"
+            value={toYMD}
+            onChange={(e) => setToYMD(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {q.isLoading ? (
+        <div className="loading-block">
+          <span className="spinner" />
+          Loading…
+        </div>
+      ) : q.error ? (
+        <EmptyState icon="⚠" message="Couldn't load analysis" sub={(q.error as Error).message} />
+      ) : (
+        <>
+          {/* Cost breakdown KPIs */}
+          <div className="kpi-grid mb-16" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+            <KPICard
+              accent
+              label="Revenue"
+              value={formatMoney(totalRevenue)}
+              sub={`${q.data?.variant_sales.length ?? 0} variant(s) sold`}
+            />
+            <KPICard
+              label="Modifier revenue"
+              value={formatMoney(modifierRevenue)}
+              sub="extra charges"
+            />
+            <KPICard
+              label="Recipe cost"
+              value={formatMoney(recipeCost)}
+              sub="cached per unit"
+            />
+            <KPICard
+              label="Ingredients used"
+              value={formatMoney(ingredientsCost)}
+              valueColor={ingredientsCost > totalRevenue ? 'red' : undefined}
+              sub="from SALE movements"
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <div className="fs-12 fw-600 text-muted mb-8">
+                Variant sales (revenue)
+              </div>
+              {variantData.length === 0 ? (
+                <EmptyState message="No sales in this window" />
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart
+                    data={variantData}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="var(--text3)"
+                      tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                      axisLine={{ stroke: 'var(--border)' }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      stroke="var(--text3)"
+                      tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                      axisLine={{ stroke: 'var(--border)' }}
+                      tickLine={false}
+                      tickFormatter={(v) => formatMoney(Number(v))}
+                      width={90}
+                    />
+                    <Tooltip
+                      cursor={{ fill: 'var(--gold-bg)' }}
+                      contentStyle={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border2)',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: 'var(--text)',
+                      }}
+                      formatter={(v) => [formatMoney(Number(v)), 'Revenue']}
+                    />
+                    <Bar dataKey="value" fill="var(--gold)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div>
+              <div className="fs-12 fw-600 text-muted mb-8">
+                Top modifiers (times used)
+              </div>
+              {modifierData.length === 0 ? (
+                <EmptyState message="No modifiers used" />
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart
+                    data={modifierData}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="var(--text3)"
+                      tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                      axisLine={{ stroke: 'var(--border)' }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      stroke="var(--text3)"
+                      tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                      axisLine={{ stroke: 'var(--border)' }}
+                      tickLine={false}
+                      width={40}
+                    />
+                    <Tooltip
+                      cursor={{ fill: 'var(--gold-bg)' }}
+                      contentStyle={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border2)',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: 'var(--text)',
+                      }}
+                    />
+                    <Bar dataKey="value" fill="var(--green)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Ingredients used detail */}
+          {q.data && q.data.ingredients_used.length > 0 && (
+            <div className="mt-16">
+              <div className="fs-12 fw-600 text-muted mb-8">
+                Ingredients deducted ({q.data.ingredients_used.length})
+              </div>
+              <div className="table-wrap">
+                <div
+                  className="table-head"
+                  style={{ gridTemplateColumns: '2fr 140px 140px 140px' }}
+                >
+                  <div>Supply</div>
+                  <div style={{ textAlign: 'right' }}>Quantity</div>
+                  <div style={{ textAlign: 'right' }}>Unit</div>
+                  <div style={{ textAlign: 'right' }}>Total cost</div>
+                </div>
+                {q.data.ingredients_used.map((ing, i) => (
+                  <div
+                    key={ing.supply_id}
+                    className={`table-row ${i % 2 === 0 ? 'even' : 'odd'}`}
+                    style={{
+                      gridTemplateColumns: '2fr 140px 140px 140px',
+                      cursor: 'default',
+                    }}
+                  >
+                    <div className="fw-600 fs-13">{ing.supply_name}</div>
+                    <div className="fs-13" style={{ textAlign: 'right' }}>
+                      {formatNumber(ing.total_quantity, 4)}
+                    </div>
+                    <div className="fs-12 text-muted" style={{ textAlign: 'right' }}>
+                      {ing.unit.toLowerCase()}
+                    </div>
+                    <div className="fw-600 fs-13" style={{ textAlign: 'right' }}>
+                      {formatMoney(ing.total_cost)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
   );
 }

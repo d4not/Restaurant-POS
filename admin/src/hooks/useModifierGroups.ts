@@ -9,6 +9,8 @@ import {
   deleteModifier,
   deleteModifierGroup,
   getModifierGroup,
+  listGroupLinkedProducts,
+  listGroupOverrides,
   listModifierGroups,
   listModifiers,
   updateModifier,
@@ -117,5 +119,23 @@ export function useDeleteModifier(groupId: string) {
       qc.invalidateQueries({ queryKey: ['modifier-group', groupId, 'modifiers'] });
       qc.invalidateQueries({ queryKey: ['modifier-groups'] });
     },
+  });
+}
+
+/* ── Linked products + overrides (scoped to a group) ────── */
+
+export function useGroupLinkedProducts(groupId: string | undefined) {
+  return useQuery({
+    queryKey: ['modifier-group', groupId, 'products'],
+    queryFn: () => listGroupLinkedProducts(groupId as string),
+    enabled: !!groupId,
+  });
+}
+
+export function useGroupOverrides(groupId: string | undefined) {
+  return useQuery({
+    queryKey: ['modifier-group', groupId, 'overrides'],
+    queryFn: () => listGroupOverrides(groupId as string),
+    enabled: !!groupId,
   });
 }

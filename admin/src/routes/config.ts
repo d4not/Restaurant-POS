@@ -64,8 +64,9 @@ export const NAV: NavEntry[] = [
     label: 'Menu',
     icon: '🍽',
     items: [
-      { id: 'products',   label: 'Products',   path: '/menu/products' },
-      { id: 'categories', label: 'Categories', path: '/menu/categories' },
+      { id: 'products',         label: 'Products',         path: '/menu/products' },
+      { id: 'modifier-groups',  label: 'Modifier Groups',  path: '/menu/modifier-groups' },
+      { id: 'categories',       label: 'Categories',       path: '/menu/categories' },
     ],
   },
   {

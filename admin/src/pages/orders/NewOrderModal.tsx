@@ -15,13 +15,14 @@ import {
 import { useProducts } from '../../hooks/useProducts';
 import { useProduct } from '../../hooks/useProducts';
 import { useModifierGroup } from '../../hooks/useModifierGroups';
+import { useTaxes } from '../../hooks/useTaxes';
 import type {
   Modifier,
   ModifierGroup,
   Product,
   ProductVariant,
 } from '../../types/menu';
-import type { OrderType, PaymentMethod } from '../../types/operations';
+import type { OrderItem, OrderType, PaymentMethod } from '../../types/operations';
 import {
   ORDER_TYPES,
   orderTypeLabel,
@@ -316,6 +317,24 @@ interface BuildStepProps {
 function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
   const orderQ = useOrder(orderId);
   const order = orderQ.data;
+  const taxesQ = useTaxes({ active: true });
+
+  // Tax rate as a decimal (e.g. 0.16 for 16%) keyed by tax_id. Missing tax_id
+  // (null on the product) means tax-exempt → 0.
+  const taxRateById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of taxesQ.data ?? []) {
+      m.set(t.id, Number(t.rate) / 100);
+    }
+    return m;
+  }, [taxesQ.data]);
+
+  const lineTax = (item: OrderItem): number => {
+    const taxId = item.product?.tax_id ?? null;
+    if (!taxId) return 0;
+    const rate = taxRateById.get(taxId) ?? 0;
+    return Math.round(Number(item.line_total) * rate);
+  };
 
   const [search, setSearch] = useState('');
   const productsQ = useProducts({
@@ -421,7 +440,9 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
             </div>
           )}
 
-          {order?.items?.map((item) => (
+          {order?.items?.map((item) => {
+            const tax = lineTax(item);
+            return (
             <div key={item.id} className="cart-line">
               <div className="cart-line-main">
                 <div className="fw-600 fs-13">
@@ -433,6 +454,11 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
                 {item.modifiers && item.modifiers.length > 0 && (
                   <div className="fs-11 text-muted mt-4">
                     {item.modifiers.map((m) => m.name).join(' · ')}
+                  </div>
+                )}
+                {tax > 0 && (
+                  <div className="fs-11 text-muted mt-4">
+                    + tax {formatMoney(tax)}
                   </div>
                 )}
               </div>
@@ -488,7 +514,8 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {order && (

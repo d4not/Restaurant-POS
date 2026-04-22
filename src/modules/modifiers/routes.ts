@@ -50,6 +50,17 @@ modifierGroupRouter.delete(
   asyncHandler(controller.removeGroup),
 );
 
+modifierGroupRouter.get(
+  '/:id/products',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.listLinkedProducts),
+);
+modifierGroupRouter.get(
+  '/:id/overrides',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.listOverrides),
+);
+
 modifierGroupRouter.post(
   '/:id/modifiers',
   validate(uuidParamSchema, 'params'),

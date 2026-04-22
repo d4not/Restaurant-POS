@@ -20,6 +20,9 @@ import { EmployeeDetail } from './pages/staff/EmployeeDetail';
 import { SalesReport } from './pages/reports/SalesReport';
 import { ExpensesReport } from './pages/reports/ExpensesReport';
 import { ProductCostsReport } from './pages/reports/ProductCostsReport';
+import { ModifierGroupsPage } from './pages/menu/ModifierGroupsPage';
+import { ModifierGroupDetail } from './pages/menu/ModifierGroupDetail';
+import { SettingsPage } from './pages/settings/SettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,9 +74,11 @@ export default function App() {
             {/* Menu */}
             <Route path="menu">
               <Route index element={<Navigate to="products" replace />} />
-              <Route path="products"     element={<ProductsPage />} />
-              <Route path="products/:id" element={<ProductDetail />} />
-              <Route path="categories"   element={<CategoriesPage />} />
+              <Route path="products"          element={<ProductsPage />} />
+              <Route path="products/:id"      element={<ProductDetail />} />
+              <Route path="modifier-groups"    element={<ModifierGroupsPage />} />
+              <Route path="modifier-groups/:id" element={<ModifierGroupDetail />} />
+              <Route path="categories"         element={<CategoriesPage />} />
             </Route>
 
             {/* Orders */}
@@ -89,7 +94,7 @@ export default function App() {
             </Route>
 
             {/* Settings */}
-            <Route path="settings" element={<Placeholder title="Settings" description="System settings." />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

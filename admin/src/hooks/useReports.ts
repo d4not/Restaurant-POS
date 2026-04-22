@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  getProductAnalysis,
   getProductCosts,
   getSupplyMovementsReport,
   getVariance,
@@ -34,5 +35,19 @@ export function useSupplyMovementsReport(params: {
     queryKey: ['reports', 'supply-movements', params],
     queryFn: () => getSupplyMovementsReport(params),
     enabled: !!(params.supply_id && params.from && params.to),
+  });
+}
+
+export function useProductAnalysis(params: {
+  product_id: string;
+  from: string;
+  to: string;
+  enabled?: boolean;
+}) {
+  const { enabled, ...query } = params;
+  return useQuery({
+    queryKey: ['reports', 'product-analysis', query],
+    queryFn: () => getProductAnalysis(query),
+    enabled: !!(query.product_id && query.from && query.to) && enabled !== false,
   });
 }

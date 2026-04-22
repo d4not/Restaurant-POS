@@ -1,15 +1,13 @@
 import { api } from './client';
-import type { Paginated } from '../types/api';
 import type {
   CreateModificationInput,
   ProductModification,
   UpdateModificationInput,
 } from '../types/menu';
 
-export function listModifications(productId: string, limit = 100) {
-  return api.get<Paginated<ProductModification>>(
+export function listModifications(productId: string) {
+  return api.get<ProductModification[]>(
     `/products/${productId}/modifications`,
-    { limit },
   );
 }
 

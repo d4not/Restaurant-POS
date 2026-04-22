@@ -1,20 +1,22 @@
 import { format as formatFn, parseISO } from 'date-fns';
 import { enUS } from 'date-fns/locale';
-
-const currency = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'MXN',
-});
+import { usePreferencesStore } from '../store/preferences';
 
 const number = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
-/** Centavos → localized MXN string. Always pass integer centavos, never floats. */
+function currencyFormatter(): Intl.NumberFormat {
+  const code = usePreferencesStore.getState().currency;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: code });
+}
+
+/** Centavos → localized currency string using the user's preferred currency. */
 export function formatMoney(centavos: number | string): string {
   const n = typeof centavos === 'string' ? Number(centavos) : centavos;
-  if (!Number.isFinite(n)) return currency.format(0);
-  return currency.format(n / 100);
+  const fmt = currencyFormatter();
+  if (!Number.isFinite(n)) return fmt.format(0);
+  return fmt.format(n / 100);
 }
 
 export function formatNumber(value: number | string, fractionDigits = 2): string {
@@ -37,8 +39,14 @@ function asDate(input: DateInput): Date {
   return typeof input === 'string' ? parseISO(input) : input;
 }
 
-export function formatDate(input: DateInput, pattern = 'MMM d, yyyy'): string {
-  return formatFn(asDate(input), pattern, { locale: enUS });
+function defaultDatePattern(): string {
+  // date-fns tokens: dd (day), MM (month), yyyy (year).
+  const pref = usePreferencesStore.getState().dateFormat;
+  return pref === 'DD/MM/YYYY' ? 'dd/MM/yyyy' : 'MM/dd/yyyy';
+}
+
+export function formatDate(input: DateInput, pattern?: string): string {
+  return formatFn(asDate(input), pattern ?? defaultDatePattern(), { locale: enUS });
 }
 
 export function formatDateShort(input: DateInput): string {
@@ -46,7 +54,7 @@ export function formatDateShort(input: DateInput): string {
 }
 
 export function formatDateTime(input: DateInput): string {
-  return formatFn(asDate(input), "MMM d, yyyy · HH:mm", { locale: enUS });
+  return formatFn(asDate(input), `${defaultDatePattern()} · HH:mm`, { locale: enUS });
 }
 
 export function formatTopbarDate(date = new Date()): string {

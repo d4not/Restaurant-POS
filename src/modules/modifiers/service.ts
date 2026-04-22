@@ -37,7 +37,11 @@ export async function listModifierGroups(query: ListModifierGroupQuery) {
   const rows = await prisma.modifierGroup.findMany({
     where,
     orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
-    include: { modifiers: { where: { active: true }, orderBy: { display_order: 'asc' } } },
+    include: {
+      modifiers: { where: { active: true }, orderBy: { display_order: 'asc' } },
+      replaces_supply: { select: { id: true, name: true, base_unit: true } },
+      _count: { select: { product_links: true } },
+    },
     ...buildCursorArgs(query),
   });
   return toPageResult(rows, query.limit);
@@ -46,10 +50,53 @@ export async function listModifierGroups(query: ListModifierGroupQuery) {
 export async function getModifierGroup(id: string) {
   const row = await prisma.modifierGroup.findUnique({
     where: { id },
-    include: { modifiers: { orderBy: { display_order: 'asc' } } },
+    include: {
+      modifiers: {
+        orderBy: { display_order: 'asc' },
+        include: { supply: { select: { id: true, name: true, content_unit: true } } },
+      },
+      replaces_supply: { select: { id: true, name: true, base_unit: true } },
+    },
   });
   if (!row) throw new NotFoundError('ModifierGroup');
   return row;
+}
+
+export async function listGroupLinkedProducts(groupId: string) {
+  await assertGroupExists(groupId);
+  const links = await prisma.productModifierGroup.findMany({
+    where: { modifier_group_id: groupId },
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          active: true,
+          sell_price: true,
+          category: { select: { id: true, name: true } },
+        },
+      },
+    },
+  });
+  return links.map((l) => l.product);
+}
+
+export async function listGroupOverrides(groupId: string) {
+  await assertGroupExists(groupId);
+  const modifiers = await prisma.modifier.findMany({
+    where: { group_id: groupId },
+    select: { id: true },
+  });
+  const modifierIds = modifiers.map((m) => m.id);
+  if (modifierIds.length === 0) return [];
+  return prisma.modifierProductOverride.findMany({
+    where: { modifier_id: { in: modifierIds } },
+    include: {
+      product: { select: { id: true, name: true } },
+      modifier: { select: { id: true, name: true } },
+    },
+  });
 }
 
 export async function updateModifierGroup(id: string, input: UpdateModifierGroupInput) {
