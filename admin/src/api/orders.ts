@@ -15,6 +15,8 @@ export interface ListOrdersParams {
   order_type?: OrderType;
   register_id?: string;
   user_id?: string;
+  table_id?: string;
+  zone_id?: string;
   from?: string;
   to?: string;
 }
@@ -34,7 +36,22 @@ export function cancelOrder(id: string) {
 export interface CreateOrderInput {
   register_id: string;
   order_type: OrderType;
+  // Required for DINE_IN orders that use a table; backend rejects table_id on
+  // TAKEOUT.
+  table_id?: string | null;
   notes?: string;
+}
+
+export interface UpdateOrderInput {
+  notes?: string | null;
+  discount_amount?: number;
+  discount_reason?: string | null;
+  order_type?: OrderType;
+  table_id?: string | null;
+}
+
+export function updateOrder(id: string, input: UpdateOrderInput) {
+  return api.patch<Order>(`/orders/${id}`, input);
 }
 
 export function createOrder(input: CreateOrderInput) {

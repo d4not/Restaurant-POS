@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, EmptyState } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { SearchInput } from '../../components/forms/SearchInput';
@@ -16,19 +16,22 @@ import { useProducts } from '../../hooks/useProducts';
 import { useProduct } from '../../hooks/useProducts';
 import { useModifierGroup } from '../../hooks/useModifierGroups';
 import { useRecipe } from '../../hooks/useRecipes';
+import { useTables } from '../../hooks/useTables';
 import type {
   Modifier,
   ModifierGroup,
   Product,
   ProductVariant,
 } from '../../types/menu';
-import type { OrderType, PaymentMethod } from '../../types/operations';
+import type { OrderType, PaymentMethod, Table } from '../../types/operations';
 import {
   ORDER_TYPES,
   orderTypeLabel,
   paymentMethodLabel,
+  tableStatusLabel,
 } from '../../types/operations';
-import { formatMoney } from '../../utils/format';
+import { tableStatusTone } from '../staff/operations-meta';
+import { amountToCentavos, formatMoney, moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -36,16 +39,7 @@ interface Props {
   onCreated?: (orderId: string) => void;
 }
 
-type Step = 'register' | 'build' | 'pay' | 'done';
-
-/** Unit/peso helpers — identical to the ones in OpenShiftModal. */
-function pesosToCentavos(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
-}
+type Step = 'register' | 'setup' | 'build' | 'pay' | 'done';
 
 export function NewOrderModal({ open, onClose, onCreated }: Props) {
   const user = useAuthStore((s) => s.user);
@@ -53,6 +47,7 @@ export function NewOrderModal({ open, onClose, onCreated }: Props) {
   const register = currentRegisterQ.data ?? null;
 
   const [orderType, setOrderType] = useState<OrderType>('DINE_IN');
+  const [tableId, setTableId] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('register');
   const [productPicker, setProductPicker] = useState<Product | null>(null);
@@ -60,50 +55,44 @@ export function NewOrderModal({ open, onClose, onCreated }: Props) {
 
   const createOrderM = useCreateOrder();
 
-  // Ref guards the auto-create effect against React Strict Mode's double
-  // invocation — otherwise we'd post POST /orders twice in dev and the second
-  // (empty) order would stick around on the orders list.
-  const createInitiatedRef = useRef(false);
-
-  // Reset state whenever the modal is reopened.
+  // Reset state whenever the modal is reopened. Skip 'register' if a shift is
+  // already open — the user goes straight to setup (order type + table) before
+  // we POST /orders.
   useEffect(() => {
     if (!open) return;
     setOrderType('DINE_IN');
+    setTableId(null);
     setOrderId(null);
-    setStep(register ? 'build' : 'register');
+    setStep(register ? 'setup' : 'register');
     setProductPicker(null);
     setServerError(null);
-    createInitiatedRef.current = false;
   }, [open, register]);
 
-  // When we move from the register step into build, auto-create the order.
-  useEffect(() => {
-    if (!open || step !== 'build' || orderId || !register) return;
-    if (createInitiatedRef.current) return;
-    createInitiatedRef.current = true;
-    (async () => {
-      try {
-        const order = await createOrderM.mutateAsync({
-          register_id: register.id,
-          order_type: orderType,
-        });
-        setOrderId(order.id);
-      } catch (err) {
-        setServerError(
-          err instanceof Error ? err.message : 'Could not create order',
-        );
-        // Allow retry on next state change if the first attempt failed.
-        createInitiatedRef.current = false;
-      }
-    })();
-    // orderType is snapshot when entering build — changing it after doesn't
-    // retroactively recreate the order.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, step, orderId, register?.id]);
+  const startOrder = async (
+    chosenType: OrderType,
+    chosenTableId: string | null,
+  ): Promise<void> => {
+    if (!register) return;
+    setServerError(null);
+    try {
+      const order = await createOrderM.mutateAsync({
+        register_id: register.id,
+        order_type: chosenType,
+        table_id: chosenType === 'DINE_IN' ? chosenTableId : null,
+      });
+      setOrderId(order.id);
+      setOrderType(chosenType);
+      setTableId(chosenTableId);
+      setStep('build');
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : 'Could not create order');
+    }
+  };
 
   const title = (() => {
     switch (step) {
       case 'register': return 'Open a register to start an order';
+      case 'setup':    return 'New order · order type';
       case 'build':    return 'New order · add items';
       case 'pay':      return 'New order · payment';
       case 'done':     return 'Order complete';
@@ -116,9 +105,9 @@ export function NewOrderModal({ open, onClose, onCreated }: Props) {
     <div
       className="modal-overlay open"
       onClick={() => {
-        // Only allow overlay close on register / done steps — otherwise users
-        // can lose unsaved items.
-        if (step === 'register' || step === 'done') onClose();
+        // Only allow overlay close on safe steps — otherwise users can lose
+        // unsaved items.
+        if (step === 'register' || step === 'setup' || step === 'done') onClose();
       }}
     >
       <div
@@ -149,17 +138,17 @@ export function NewOrderModal({ open, onClose, onCreated }: Props) {
           {step === 'register' && (
             <RegisterStep
               loading={currentRegisterQ.isLoading}
-              onOpened={() => setStep('build')}
-              orderType={orderType}
-              onOrderTypeChange={setOrderType}
+              onOpened={() => setStep('setup')}
             />
           )}
 
-          {step === 'build' && !orderId && (
-            <div className="loading-block">
-              <span className="spinner" />
-              Creating order…
-            </div>
+          {step === 'setup' && register && (
+            <SetupStep
+              defaultOrderType={orderType}
+              defaultTableId={tableId}
+              creating={createOrderM.isPending}
+              onSubmit={startOrder}
+            />
           )}
 
           {step === 'build' && orderId && (
@@ -200,22 +189,15 @@ export function NewOrderModal({ open, onClose, onCreated }: Props) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Step 1 — register check / order type
+   Step 1 — register check (only when no shift is open)
    ───────────────────────────────────────────────────────────── */
 
 interface RegisterStepProps {
   loading: boolean;
-  orderType: OrderType;
-  onOrderTypeChange: (t: OrderType) => void;
   onOpened: () => void;
 }
 
-function RegisterStep({
-  loading,
-  orderType,
-  onOrderTypeChange,
-  onOpened,
-}: RegisterStepProps) {
+function RegisterStep({ loading, onOpened }: RegisterStepProps) {
   const [openingAmount, setOpeningAmount] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -234,7 +216,7 @@ function RegisterStep({
     ev.preventDefault();
     setFormError(null);
     setOpenError(null);
-    const centavos = pesosToCentavos(openingAmount);
+    const centavos = amountToCentavos(openingAmount);
     if (centavos === null) {
       setFormError('Enter a non-negative amount (e.g. 500.00)');
       return;
@@ -262,23 +244,8 @@ function RegisterStep({
           </div>
         )}
 
-        <div className="field">
-          <label htmlFor="order-type">Order type</label>
-          <select
-            id="order-type"
-            value={orderType}
-            onChange={(e) => onOrderTypeChange(e.target.value as OrderType)}
-          >
-            {ORDER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {orderTypeLabel(t)}
-              </option>
-            ))}
-          </select>
-        </div>
-
         <Input
-          label="Opening amount (MXN)"
+          label={moneyLabel('Opening amount')}
           name="opening_amount"
           type="number"
           inputMode="decimal"
@@ -301,6 +268,196 @@ function RegisterStep({
         </Button>
       </form>
     </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Step 2 — order setup: type + table picker (DINE_IN only)
+   ───────────────────────────────────────────────────────────── */
+
+interface SetupStepProps {
+  defaultOrderType: OrderType;
+  defaultTableId: string | null;
+  creating: boolean;
+  onSubmit: (orderType: OrderType, tableId: string | null) => void;
+}
+
+function SetupStep({
+  defaultOrderType,
+  defaultTableId,
+  creating,
+  onSubmit,
+}: SetupStepProps) {
+  const [orderType, setOrderType] = useState<OrderType>(defaultOrderType);
+  const [tableId, setTableId] = useState<string | null>(defaultTableId);
+
+  // Drop the table assignment if the user flips to TAKEOUT — backend rejects
+  // the combination, and we don't want a stale tile lighting up if they flip
+  // back without re-picking.
+  const onTypeChange = (t: OrderType) => {
+    setOrderType(t);
+    if (t !== 'DINE_IN') setTableId(null);
+  };
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+      <div className="picker-section">
+        <div className="picker-section-title">Order type</div>
+        <div className="picker-options">
+          {ORDER_TYPES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={`picker-option${orderType === t ? ' is-selected' : ''}`}
+              onClick={() => onTypeChange(t)}
+            >
+              <span className="picker-option-name">{orderTypeLabel(t)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {orderType === 'DINE_IN' && (
+        <TablePicker selectedId={tableId} onSelect={setTableId} />
+      )}
+
+      <div style={{ marginTop: 20 }}>
+        <Button
+          variant="primary"
+          block
+          size="lg"
+          loading={creating}
+          onClick={() => onSubmit(orderType, tableId)}
+        >
+          {orderType === 'DINE_IN' && tableId
+            ? 'Start order at this table'
+            : orderType === 'DINE_IN'
+              ? 'Start order without a table'
+              : 'Start takeout order'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* Visual table picker grouped by zone. Available tables are the primary
+ * action; OCCUPIED tables remain clickable (group ordering is allowed and
+ * common — second ticket for the same table) but show their badge so the
+ * cashier knows what they're joining. */
+interface TablePickerProps {
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}
+
+function TablePicker({ selectedId, onSelect }: TablePickerProps) {
+  const tablesQ = useTables({ active: true });
+  const tables = useMemo<Table[]>(
+    () => tablesQ.data?.items ?? [],
+    [tablesQ.data],
+  );
+
+  // Group by zone. Backend already orders by zone display_order then number,
+  // so iteration preserves that.
+  const groups = useMemo(() => {
+    const map = new Map<string, { name: string; order: number; items: Table[] }>();
+    for (const t of tables) {
+      const key = t.zone?.id ?? t.zone_id;
+      const name = t.zone?.name ?? 'Unknown zone';
+      const order = t.zone?.display_order ?? 0;
+      const bucket = map.get(key);
+      if (bucket) bucket.items.push(t);
+      else map.set(key, { name, order, items: [t] });
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.name.localeCompare(b.name);
+    });
+  }, [tables]);
+
+  if (tablesQ.isLoading) {
+    return (
+      <div className="picker-section">
+        <div className="loading-block">
+          <span className="spinner" />
+          Loading tables…
+        </div>
+      </div>
+    );
+  }
+
+  if (tables.length === 0) {
+    return (
+      <div className="picker-section">
+        <EmptyState
+          message="No tables configured"
+          sub="Add zones and tables in System → Tables & Zones, or skip table assignment."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="picker-section">
+      <div className="picker-section-title">
+        Pick a table{' '}
+        <span className="text-muted fs-11 fw-600">
+          Optional — you can leave it blank and seat the order later
+        </span>
+      </div>
+
+      {groups.map((g) => (
+        <div key={g.name} className="product-group">
+          <div className="product-group-header">{g.name}</div>
+          <div className="table-tile-grid">
+            {g.items.map((t) => (
+              <TableTile
+                key={t.id}
+                table={t}
+                selected={selectedId === t.id}
+                onClick={() =>
+                  onSelect(selectedId === t.id ? null : t.id)
+                }
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="fs-11 text-muted mt-8">
+        {selectedId
+          ? 'Click the highlighted tile again to clear the selection.'
+          : 'Tip: occupied tables can still receive a second ticket for group orders.'}
+      </div>
+    </div>
+  );
+}
+
+function TableTile({
+  table,
+  selected,
+  onClick,
+}: {
+  table: Table;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const showBadge = table.status !== 'AVAILABLE';
+  return (
+    <button
+      type="button"
+      className={`table-tile${selected ? ' is-selected' : ''} table-tile-${table.status.toLowerCase()}`}
+      onClick={onClick}
+    >
+      <span className="table-tile-number">#{table.number}</span>
+      <span className="table-tile-meta">
+        {table.capacity} seat{table.capacity === 1 ? '' : 's'}
+      </span>
+      {showBadge && (
+        <Badge tone={tableStatusTone(table.status)} className="table-tile-badge">
+          {tableStatusLabel(table.status)}
+        </Badge>
+      )}
+    </button>
   );
 }
 
@@ -410,6 +567,15 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
                 {order.items?.length ?? 0} items · <Badge tone="gold">OPEN</Badge>
               </div>
             )}
+            {order?.table && (
+              <div className="fs-12 mt-4">
+                <span className="text-muted">Seated at </span>
+                <span className="fw-600">
+                  {order.table.zone.name} · Table {order.table.number}
+                </span>
+                <span className="text-muted"> ({order.table.capacity} seats)</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -423,10 +589,10 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
           )}
 
           {order?.items?.map((item) => {
-            // Show the per-line tax snapshot from the backend — don't recompute
-            // from the current tax rate, since that would diverge from
-            // order.tax_amount if the tax row was edited mid-order.
-            const tax = Number(item.tax_amount ?? 0);
+            // Under tax-inclusive pricing, line_total IS what the customer
+            // pays — the line doesn't need to call out "+ tax" since tax is
+            // already in the number. The breakdown lives in the totals row.
+            const taxRate = Number(item.tax_rate ?? 0);
             return (
             <div key={item.id} className="cart-line">
               <div className="cart-line-main">
@@ -441,9 +607,9 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
                     {item.modifiers.map((m) => m.name).join(' · ')}
                   </div>
                 )}
-                {tax > 0 && (
+                {taxRate > 0 && (
                   <div className="fs-11 text-muted mt-4">
-                    + tax {formatMoney(tax)}
+                    incl. tax {taxRate}%
                   </div>
                 )}
               </div>
@@ -505,8 +671,10 @@ function BuildStep({ orderId, onPickProduct, onProceed }: BuildStepProps) {
 
         {order && (
           <div className="new-order-cart-totals">
+            {/* Prices include tax — subtotal is revenue before tax, tax is the
+                portion extracted from total. Subtotal + Tax = Total. */}
             <div className="tot-row">
-              <span>Subtotal</span>
+              <span>Subtotal (before tax)</span>
               <span>{formatMoney(Number(order.subtotal))}</span>
             </div>
             <div className="tot-row">
@@ -954,7 +1122,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
   // Cash-only: auto-calculate change as the user types.
   const changePreview = useMemo(() => {
     if (method !== 'CASH') return null;
-    const centavos = pesosToCentavos(tendered);
+    const centavos = amountToCentavos(tendered);
     if (centavos === null) return null;
     return Math.max(centavos - remaining, 0);
   }, [method, tendered, remaining]);
@@ -966,7 +1134,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
 
     let amount: number;
     if (method === 'CASH') {
-      const c = pesosToCentavos(tendered);
+      const c = amountToCentavos(tendered);
       if (c === null) {
         setFormError('Enter the cash amount the customer handed you');
         return;
@@ -1015,7 +1183,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
       <div className="detail-grid mb-16">
         <div className="detail-row cols-2">
           <div className="detail-cell">
-            <div className="dk">Subtotal</div>
+            <div className="dk">Subtotal (before tax)</div>
             <div className="dv">{formatMoney(Number(order.subtotal))}</div>
           </div>
           <div className="detail-cell">
@@ -1025,7 +1193,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
         </div>
         <div className="detail-row cols-2">
           <div className="detail-cell">
-            <div className="dk">Total</div>
+            <div className="dk">Total (customer pays)</div>
             <div className="dv gold">{formatMoney(total)}</div>
           </div>
           <div className="detail-cell">
@@ -1058,7 +1226,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
       {method === 'CASH' ? (
         <>
           <Input
-            label="Amount tendered (MXN)"
+            label={moneyLabel('Amount tendered')}
             name="tendered"
             type="number"
             inputMode="decimal"
@@ -1076,7 +1244,7 @@ function PayStep({ orderId, onBack, onComplete }: PayStepProps) {
                 <div className="detail-cell">
                   <div className="dk">Tendered</div>
                   <div className="dv">
-                    {formatMoney(pesosToCentavos(tendered) ?? 0)}
+                    {formatMoney(amountToCentavos(tendered) ?? 0)}
                   </div>
                 </div>
                 <div className="detail-cell">

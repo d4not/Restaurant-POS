@@ -1,16 +1,20 @@
 import {
   CashRegisterStatus,
   OrderStatus,
+  OrderType,
   PaymentMethod,
   Prisma,
   ProductType,
   StockMovementType,
+  TableStatus,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import { Decimal } from '../../lib/decimal.js';
 import { deductSaleFromInventory } from '../sales/service.js';
+import { getSetting } from '../settings/service.js';
+import { SETTING_KEYS } from '../settings/schema.js';
 import type {
   AddOrderItemInput,
   CreateOrderInput,
@@ -26,6 +30,15 @@ type PrismaLike = Tx | typeof prisma;
 const orderInclude = {
   register: { select: { id: true, status: true, user_id: true } },
   user: { select: { id: true, name: true } },
+  table: {
+    select: {
+      id: true,
+      number: true,
+      capacity: true,
+      status: true,
+      zone: { select: { id: true, name: true } },
+    },
+  },
   items: {
     orderBy: { created_at: 'asc' },
     include: {
@@ -62,18 +75,40 @@ async function assertOrderOpen(client: PrismaLike, id: string): Promise<void> {
   }
 }
 
-// Round half-up to nearest centavo. Every place that computes tax must use the
-// same rounding so line-level + order-level tax stays internally consistent.
-function computeLineTax(lineTotal: Decimal, taxRate: Decimal | number | string): Decimal {
+/**
+ * Tax-inclusive split for one line. line_total is what the customer pays;
+ * base is the revenue portion and tax is what gets remitted.
+ *
+ *   base = round(line_total / (1 + rate/100))
+ *   tax  = line_total - base
+ *
+ * Deriving tax as the remainder (instead of computing both independently)
+ * guarantees base + tax === line_total even after rounding — the receipt
+ * never shows a 1-centavo gap.
+ */
+function computeTaxInclusive(
+  lineTotal: Decimal,
+  taxRate: Decimal | number | string,
+): { base: Decimal; tax: Decimal } {
   const rate = new Decimal(taxRate);
-  if (rate.isZero()) return new Decimal(0);
-  return lineTotal.mul(rate.div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  if (rate.isZero()) return { base: lineTotal, tax: new Decimal(0) };
+  const divisor = new Decimal(1).add(rate.div(100));
+  const base = lineTotal.div(divisor).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const tax = lineTotal.sub(base);
+  return { base, tax };
 }
 
 /**
- * Recompute subtotal / tax / total from the current set of order_items.
- * Tax is the sum of each item's per-line snapshot (tax_rate × line_total),
- * already stored on the item. Discount is applied to the overall total.
+ * Recompute subtotal / tax / total from the current set of order_items under
+ * tax-inclusive pricing:
+ *
+ *   order.total    = sum(line_totals) - discount   (what the customer pays)
+ *   order.tax      = sum(tax_amounts)              (tax portion extracted)
+ *   order.subtotal = order.total - order.tax       (revenue before tax)
+ *
+ * This inverts the historical tax-added-on-top formula: subtotal is now
+ * LESS than total, not more. Discount is applied to the tax-inclusive
+ * total and does NOT retroactively change the per-line tax snapshots.
  *
  * Must be invoked after every add / update / remove / discount change.
  */
@@ -89,23 +124,27 @@ async function recalculateOrderTotals(tx: Tx, orderId: string): Promise<void> {
     }),
   ]);
 
-  let subtotal = new Decimal(0);
+  let grossTotal = new Decimal(0);
   let taxAmount = new Decimal(0);
 
   for (const item of items) {
-    subtotal = subtotal.add(new Decimal(item.line_total));
+    grossTotal = grossTotal.add(new Decimal(item.line_total));
     taxAmount = taxAmount.add(new Decimal(item.tax_amount));
   }
 
   const discount = new Decimal(order.discount_amount);
-  // total >= 0 always: even if the user sets a discount larger than the subtotal+tax
-  // we clamp to zero so payments can complete without a negative balance.
-  const gross = subtotal.add(taxAmount).sub(discount);
-  const total = gross.isNegative() ? new Decimal(0) : gross;
+  // total >= 0: even if the user sets a discount larger than the gross, clamp
+  // so payments can complete without a negative balance.
+  const afterDiscount = grossTotal.sub(discount);
+  const total = afterDiscount.isNegative() ? new Decimal(0) : afterDiscount;
+  // subtotal is the base (revenue) portion of what the customer actually
+  // pays: total - tax. Computed after the discount clamp so it follows total.
+  const subtotal = total.sub(taxAmount);
+  const subtotalClamped = subtotal.isNegative() ? new Decimal(0) : subtotal;
 
   await tx.order.update({
     where: { id: orderId },
-    data: { subtotal, tax_amount: taxAmount, total },
+    data: { subtotal: subtotalClamped, tax_amount: taxAmount, total },
   });
 }
 
@@ -125,6 +164,54 @@ async function nextOrderNumber(tx: Tx, date: Date): Promise<number> {
   return (latest?.order_number ?? 0) + 1;
 }
 
+/**
+ * Validate a table assignment for a DINE_IN order. RESERVED tables are open
+ * for seating (the host marked them held for a customer who has now arrived);
+ * inactive tables and TAKEOUT-with-table combinations are rejected.
+ */
+async function assertTableAssignable(
+  tx: Tx,
+  tableId: string,
+  orderType: OrderType,
+): Promise<void> {
+  if (orderType !== OrderType.DINE_IN) {
+    throw new BadRequestError('Only DINE_IN orders can be assigned to a table');
+  }
+  const table = await tx.table.findUnique({
+    where: { id: tableId },
+    select: { id: true, active: true, number: true },
+  });
+  if (!table) throw new BadRequestError('table_id references a non-existent table');
+  if (!table.active) {
+    throw new BadRequestError(`Table ${table.number} is inactive`);
+  }
+}
+
+/**
+ * Reflect the table's badge state from the OPEN orders attached to it. Called
+ * after every status transition that could change the count: order create
+ * (set OCCUPIED), pay/cancel/reseat (release if no remaining open orders).
+ *
+ * RESERVED is left alone — it's a manual host-only state. Any other state
+ * (AVAILABLE / OCCUPIED) is recomputed from the current open-order count.
+ */
+async function syncTableStatus(tx: Tx, tableId: string): Promise<void> {
+  const table = await tx.table.findUnique({
+    where: { id: tableId },
+    select: { status: true },
+  });
+  if (!table) return;
+  if (table.status === TableStatus.RESERVED) return;
+
+  const openCount = await tx.order.count({
+    where: { table_id: tableId, status: OrderStatus.OPEN },
+  });
+  const next = openCount > 0 ? TableStatus.OCCUPIED : TableStatus.AVAILABLE;
+  if (next !== table.status) {
+    await tx.table.update({ where: { id: tableId }, data: { status: next } });
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Order CRUD
 // ----------------------------------------------------------------------------
@@ -140,6 +227,10 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
       throw new ConflictError('Cannot create an order while the cash register is closed');
     }
 
+    if (input.table_id) {
+      await assertTableAssignable(tx, input.table_id, input.order_type);
+    }
+
     const date = todayUtc();
 
     // Retry a few times if two concurrent creates race on the same number.
@@ -152,11 +243,15 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
             register_id: input.register_id,
             user_id: userId,
             order_type: input.order_type,
+            table_id: input.table_id ?? null,
             notes: input.notes,
             order_number: orderNumber,
             order_date: date,
           },
         });
+        if (input.table_id) {
+          await syncTableStatus(tx, input.table_id);
+        }
         return loadOrderOrThrow(tx, order.id);
       } catch (err) {
         if (
@@ -179,6 +274,10 @@ export async function listOrders(query: ListOrderQuery) {
     ...(query.register_id ? { register_id: query.register_id } : {}),
     ...(query.user_id ? { user_id: query.user_id } : {}),
     ...(query.order_type ? { order_type: query.order_type } : {}),
+    ...(query.table_id ? { table_id: query.table_id } : {}),
+    // Zone filter relies on the relation — Prisma rewrites this into a join
+    // on tables.zone_id. Cheap given the orders.table_id index.
+    ...(query.zone_id ? { table: { zone_id: query.zone_id } } : {}),
     ...(query.from || query.to
       ? {
           created_at: {
@@ -204,11 +303,25 @@ export async function getOrder(id: string) {
 export async function updateOrder(id: string, input: UpdateOrderInput) {
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, id);
+
+    // Snapshot the current state — we need the old table_id to re-sync its
+    // status if the user reseats, and the order_type so a new table_id is
+    // validated against the correct (possibly just-changed) type.
+    const current = await tx.order.findUniqueOrThrow({
+      where: { id },
+      select: { table_id: true, order_type: true },
+    });
+    const nextOrderType = input.order_type ?? current.order_type;
+    if (input.table_id !== undefined && input.table_id !== null) {
+      await assertTableAssignable(tx, input.table_id, nextOrderType);
+    }
+
     await tx.order.update({
       where: { id },
       data: {
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
         ...(input.order_type !== undefined ? { order_type: input.order_type } : {}),
+        ...(input.table_id !== undefined ? { table_id: input.table_id } : {}),
         ...(input.discount_amount !== undefined
           ? { discount_amount: new Decimal(input.discount_amount) }
           : {}),
@@ -218,12 +331,31 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
     if (input.discount_amount !== undefined) {
       await recalculateOrderTotals(tx, id);
     }
+
+    // Re-sync both the old and new table so badges flip consistently when the
+    // assignment moves (or detaches).
+    if (input.table_id !== undefined) {
+      if (current.table_id && current.table_id !== input.table_id) {
+        await syncTableStatus(tx, current.table_id);
+      }
+      if (input.table_id) {
+        await syncTableStatus(tx, input.table_id);
+      }
+    }
+
     return loadOrderOrThrow(tx, id);
   });
 }
 
 export async function cancelOrder(id: string) {
   return prisma.$transaction(async (tx) => {
+    // Snapshot table_id BEFORE the status flip so we still know which table to
+    // re-sync after the order leaves OPEN.
+    const before = await tx.order.findUnique({
+      where: { id },
+      select: { table_id: true },
+    });
+
     // Atomic OPEN→CANCELLED claim. Any other status (PAID, already CANCELLED)
     // fails the count==0 check and throws a 409.
     const claim = await tx.order.updateMany({
@@ -237,6 +369,9 @@ export async function cancelOrder(id: string) {
         throw new ConflictError('Cannot cancel a paid order');
       }
       throw new ConflictError('Order already cancelled');
+    }
+    if (before?.table_id) {
+      await syncTableStatus(tx, before.table_id);
     }
     return loadOrderOrThrow(tx, id);
   });
@@ -269,6 +404,7 @@ async function resolveOrderLine(
       type: true,
       active: true,
       sell_price: true,
+      tax_id: true,
       tax: { select: { rate: true } },
     },
   });
@@ -302,9 +438,23 @@ async function resolveOrderLine(
     unitPrice = new Decimal(product.sell_price);
   }
 
-  // Snapshot the product's current tax rate onto the line. Products without a
-  // tax_id are tax-exempt (rate stays 0).
-  const taxRate = product.tax ? new Decimal(product.tax.rate) : new Decimal(0);
+  // Snapshot the applicable tax rate onto the line. Precedence:
+  //   1. Product's own tax_id wins (including explicit 0% "Tax Exempt" taxes).
+  //   2. If null, fall back to the default_tax_id setting.
+  //   3. If neither resolves, the line is untaxed.
+  let taxRate = new Decimal(0);
+  if (product.tax) {
+    taxRate = new Decimal(product.tax.rate);
+  } else if (product.tax_id == null) {
+    const defaultTaxId = await getSetting(SETTING_KEYS.DEFAULT_TAX_ID, tx);
+    if (defaultTaxId) {
+      const defaultTax = await tx.tax.findUnique({
+        where: { id: defaultTaxId },
+        select: { rate: true },
+      });
+      if (defaultTax) taxRate = new Decimal(defaultTax.rate);
+    }
+  }
 
   const modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[] = [];
   let modifiersPrice = new Decimal(0);
@@ -341,7 +491,7 @@ export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
     const lineTotal = resolved.unitPrice
       .add(resolved.modifiersPrice)
       .mul(quantity);
-    const taxAmount = computeLineTax(lineTotal, resolved.taxRate);
+    const { base, tax } = computeTaxInclusive(lineTotal, resolved.taxRate);
 
     const item = await tx.orderItem.create({
       data: {
@@ -353,7 +503,8 @@ export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
         modifiers_price: resolved.modifiersPrice,
         line_total: lineTotal,
         tax_rate: resolved.taxRate,
-        tax_amount: taxAmount,
+        tax_amount: tax,
+        base_amount: base,
         notes: input.notes,
       },
     });
@@ -398,7 +549,7 @@ export async function updateOrderItem(
     const lineTotal = new Decimal(existing.unit_price)
       .add(new Decimal(existing.modifiers_price))
       .mul(quantity);
-    const taxAmount = computeLineTax(lineTotal, existing.tax_rate);
+    const { base, tax } = computeTaxInclusive(lineTotal, existing.tax_rate);
 
     await tx.orderItem.update({
       where: { id: itemId },
@@ -406,7 +557,8 @@ export async function updateOrderItem(
         ...(input.quantity !== undefined ? { quantity } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
         line_total: lineTotal,
-        tax_amount: taxAmount,
+        tax_amount: tax,
+        base_amount: base,
       },
     });
 
@@ -458,6 +610,7 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
         status: true,
         total: true,
         register_id: true,
+        table_id: true,
         items: {
           select: {
             product_id: true,
@@ -573,6 +726,13 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
         orderId,
         { pos_register_id: order.register_id, client: tx },
       );
+
+      // Release the table when this order leaves OPEN. syncTableStatus will
+      // leave the badge OCCUPIED if other open orders still share the table
+      // (group ordering: settle one ticket while the rest of the party stays).
+      if (order.table_id) {
+        await syncTableStatus(tx, order.table_id);
+      }
     }
 
     return {

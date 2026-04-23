@@ -98,8 +98,22 @@ function OrderDetailBody({ order }: { order: Order }) {
             <div className="dv">{order.user?.name ?? '—'}</div>
           </div>
           <div className="detail-cell">
-            <div className="dk">Register</div>
-            <div className="dv fs-12 text-muted">{order.register_id.slice(0, 8)}…</div>
+            <div className="dk">Table</div>
+            <div className="dv">
+              {order.table ? (
+                <>
+                  <span className="fw-600">
+                    {order.table.zone.name} · #{order.table.number}
+                  </span>
+                  <span className="text-muted fs-12">
+                    {' '}
+                    ({order.table.capacity} seats)
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted fs-12">—</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -188,13 +202,15 @@ function OrderDetailBody({ order }: { order: Order }) {
         )}
       </div>
 
-      {/* Totals */}
+      {/* Totals — tax-inclusive pricing: total is what the customer pays;
+          subtotal + tax is an internal split that equals total (before any
+          discount). */}
       <div className="detail-section">
         <h3>Totals</h3>
         <div className="detail-grid">
           <div className="detail-row cols-2">
             <div className="detail-cell">
-              <div className="dk">Subtotal</div>
+              <div className="dk">Subtotal (before tax)</div>
               <div className="dv">{formatMoney(subtotal)}</div>
             </div>
             <div className="detail-cell">
@@ -216,7 +232,7 @@ function OrderDetailBody({ order }: { order: Order }) {
           )}
           <div className="detail-row cols-2">
             <div className="detail-cell">
-              <div className="dk">Total</div>
+              <div className="dk">Total (customer pays)</div>
               <div className="dv gold">{formatMoney(total)}</div>
             </div>
             <div className="detail-cell">

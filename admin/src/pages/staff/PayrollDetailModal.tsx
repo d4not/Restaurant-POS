@@ -3,7 +3,7 @@ import { Badge, Button, Modal } from '../../components/ui';
 import { usePayrollPeriod, useUpdatePayroll } from '../../hooks/usePayroll';
 import type { PayrollPeriod, PayrollStatus } from '../../types/staff';
 import { attendanceStatusLabel, payrollStatusLabel } from '../../types/staff';
-import { formatDate, formatMoney } from '../../utils/format';
+import { amountToCentavos, formatDate, formatMoney } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -17,14 +17,6 @@ function payrollStatusTone(s: PayrollStatus) {
     case 'APPROVED': return 'blue' as const;
     case 'PAID':     return 'green' as const;
   }
-}
-
-function pesosToCentavos(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
 }
 
 export function PayrollDetailModal({ open, onClose, payrollId }: Props) {
@@ -79,7 +71,7 @@ function PayrollDetailBody({ period }: { period: PayrollPeriod }) {
 
   const saveDraft = async () => {
     setSaveError(null);
-    const bonus = pesosToCentavos(bonusInput);
+    const bonus = amountToCentavos(bonusInput);
     if (bonus === null) {
       setSaveError('Bonus must be a non-negative number');
       return;

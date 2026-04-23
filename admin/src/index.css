@@ -974,6 +974,50 @@ input.search-box:focus { border-color: var(--gold); }
 }
 .product-tile-meta { font-size: 12px; color: var(--gold); font-weight: 600; }
 
+/* Floor-plan tile picker — used by NewOrderModal's TableSetupStep. Tighter
+ * than product tiles since the content is just a table number + capacity. */
+.table-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.table-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  min-height: 70px;
+  gap: 4px;
+  transition: all 0.12s;
+}
+.table-tile:hover { border-color: var(--gold); background: #fef8ef; }
+.table-tile.is-selected {
+  border-color: var(--gold);
+  background: #fef0d8;
+  box-shadow: 0 0 0 2px rgba(201,164,92,0.25);
+}
+.table-tile-number { font-size: 16px; font-weight: 700; color: var(--text); }
+.table-tile-meta   { font-size: 11px; color: var(--text3); }
+.table-tile-badge  {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 9px !important;
+  padding: 1px 6px !important;
+  letter-spacing: 0;
+}
+.table-tile-occupied { background: #faf3eb; }
+.table-tile-reserved { background: #faf6ed; }
+
 .new-order-cart {
   display: flex;
   flex-direction: column;
@@ -1227,20 +1271,28 @@ input.search-box:focus { border-color: var(--gold); }
 .product-name-input:focus { border-color: var(--gold); background: var(--surface); }
 
 /* ── "UNSAVED CHANGES" BANNER ────────────────────────────── */
-/* Rendered at the top of the page in normal document flow so it can't be
-   hidden by overflow or positioning quirks. Prominent gold accent so it reads
-   as "action needed" at a glance. */
+/* Sticky to the top of the scrolling content area so editing the recipe /
+   variants further down the page keeps the Save/Discard buttons in view.
+   `.content` (the scroll parent) has `padding: 24px`, so top: 0 keeps the
+   banner flush with the viewport top once it's stuck. The opaque cream tint
+   and shadow make it clearly distinct from the content scrolling behind. */
 .save-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: var(--gold-bg);
+  /* Opaque background — blending the gold tint over the page cream without
+     bleed-through. Swapping `--gold-bg` (12% alpha) for a near-solid tone so
+     the content scrolling underneath stays fully hidden. */
+  background: #f4e5c2;
   border: 1px solid var(--gold);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 14px rgba(44, 36, 32, 0.12);
 }
 .save-bar-msg {
   font-size: 13px;

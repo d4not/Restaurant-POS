@@ -4,6 +4,7 @@ import { Badge, Button, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { SearchInput } from '../../components/forms/SearchInput';
 import { useOrders } from '../../hooks/useOrders';
+import { useZones } from '../../hooks/useZones';
 import type { Order, OrderStatus, OrderType } from '../../types/operations';
 import {
   ORDER_STATUSES,
@@ -38,9 +39,13 @@ export function OrdersPage() {
 
   const [status, setStatus] = useState<OrderStatus | ''>('');
   const [orderType, setOrderType] = useState<OrderType | ''>('');
+  const [zoneId, setZoneId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [search, setSearch] = useState('');
+
+  const zonesQ = useZones({ active: true });
+  const zones = zonesQ.data?.items ?? [];
 
   // Detail modal is driven by ?id=<uuid> so shift-detail links can deep-link.
   const selectedId = urlParams.get('id');
@@ -57,10 +62,11 @@ export function OrdersPage() {
     () => ({
       status: (status || undefined) as OrderStatus | undefined,
       order_type: (orderType || undefined) as OrderType | undefined,
+      zone_id: zoneId || undefined,
       from: toIsoDayStart(from),
       to: toIsoDayEnd(to),
     }),
-    [status, orderType, from, to],
+    [status, orderType, zoneId, from, to],
   );
 
   const query = useOrders(filters);
@@ -106,6 +112,22 @@ export function OrdersPage() {
           {orderTypeLabel(o.order_type)}
         </Badge>
       ),
+    },
+    {
+      key: 'table',
+      header: 'Table',
+      width: '160px',
+      render: (o) => {
+        if (!o.table) {
+          return <span className="fs-12 text-muted">—</span>;
+        }
+        return (
+          <span className="fs-13">
+            <span className="fw-600">#{o.table.number}</span>
+            <span className="text-muted"> · {o.table.zone.name}</span>
+          </span>
+        );
+      },
     },
     {
       key: 'cashier',
@@ -163,13 +185,14 @@ export function OrdersPage() {
   const clearAll = () => {
     setStatus('');
     setOrderType('');
+    setZoneId('');
     setFrom('');
     setTo('');
     setSearch('');
   };
 
   const hasActiveFilters =
-    !!(status || orderType || from || to || search);
+    !!(status || orderType || zoneId || from || to || search);
 
   return (
     <>
@@ -234,6 +257,29 @@ export function OrdersPage() {
             {ORDER_TYPES.map((t) => (
               <option key={t} value={t}>
                 {orderTypeLabel(t)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 200px', minWidth: 180 }}>
+          <label
+            className="fs-11 text-muted"
+            style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
+          >
+            Zone
+          </label>
+          <select
+            className="search-box"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            style={{ cursor: 'pointer' }}
+            disabled={zonesQ.isLoading}
+          >
+            <option value="">All zones</option>
+            {zones.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name}
               </option>
             ))}
           </select>

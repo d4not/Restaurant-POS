@@ -18,10 +18,13 @@ import {
   useModifierOverrides,
 } from '../../hooks/useModifierOverrides';
 import { useProductCategories } from '../../hooks/useProductCategories';
+import { useSettings } from '../../hooks/useSettings';
+import { useTaxes } from '../../hooks/useTaxes';
 import {
   formatMoney,
   formatNumber,
   formatPct,
+  moneyLabel,
 } from '../../utils/format';
 import type {
   Modifier,
@@ -79,6 +82,26 @@ export function ProductDetail() {
       categoriesQ.data?.items.map((c) => ({ value: c.id, label: c.name })) ?? [],
     [categoriesQ.data],
   );
+
+  const taxesQ = useTaxes({ active: true });
+  const settingsQ = useSettings();
+  const taxOptions = useMemo(() => {
+    const taxes = taxesQ.data ?? [];
+    const defaultTaxId = settingsQ.data?.default_tax_id ?? '';
+    const defaultTax = defaultTaxId
+      ? taxes.find((t) => t.id === defaultTaxId)
+      : null;
+    const defaultLabel = defaultTax
+      ? `Default (${defaultTax.name} — ${Number(defaultTax.rate).toFixed(2)}%)`
+      : 'Default (no tax)';
+    return [
+      { value: '', label: defaultLabel },
+      ...taxes.map((t) => ({
+        value: t.id,
+        label: `${t.name} — ${Number(t.rate).toFixed(2)}%`,
+      })),
+    ];
+  }, [taxesQ.data, settingsQ.data]);
 
   const product = productQ.data;
 
@@ -171,6 +194,9 @@ export function ProductDetail() {
     }
     if (form.allow_discount !== original.allow_discount) {
       payload.allow_discount = form.allow_discount;
+    }
+    if (form.tax_id !== original.tax_id) {
+      payload.tax_id = form.tax_id || null;
     }
     if (form.active !== original.active) payload.active = form.active;
 
@@ -529,7 +555,7 @@ export function ProductDetail() {
 
             {!isPrep && (
               <div className="field">
-                <label htmlFor="product-sell-price">Sell price (MXN)</label>
+                <label htmlFor="product-sell-price">{moneyLabel('Sell price')}</label>
                 <input
                   id="product-sell-price"
                   type="number"
@@ -559,6 +585,27 @@ export function ProductDetail() {
                 placeholder="optional"
               />
             </div>
+
+            {!isPrep && (
+              <div className="field">
+                <label htmlFor="product-tax">Tax</label>
+                <select
+                  id="product-tax"
+                  value={form.tax_id}
+                  onChange={(e) => setField('tax_id', e.target.value)}
+                  disabled={taxesQ.isLoading || settingsQ.isLoading}
+                >
+                  {taxOptions.map((opt) => (
+                    <option key={opt.value || 'default'} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="fs-11 text-muted mt-4">
+                  Price includes tax. Tax is calculated internally.
+                </div>
+              </div>
+            )}
 
             {!isPrep && (
               <div className="field">
@@ -899,6 +946,8 @@ interface HeaderFormState {
   category_id: string;
   sell_price: string;
   barcode: string;
+  // '' means "use the default tax from settings" (persisted as null).
+  tax_id: string;
   icon_color: string;
   sold_by_weight: boolean;
   allow_discount: boolean;
@@ -913,6 +962,7 @@ function buildFormState(p: Product): HeaderFormState {
     category_id: p.category_id ?? '',
     sell_price: p.sell_price ? String(Number(p.sell_price) / 100) : '',
     barcode: p.barcode ?? '',
+    tax_id: p.tax_id ?? '',
     icon_color: p.icon_color ?? '',
     sold_by_weight: p.sold_by_weight,
     allow_discount: p.allow_discount,

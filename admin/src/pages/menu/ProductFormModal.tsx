@@ -7,7 +7,10 @@ import {
   useUpdateProduct,
 } from '../../hooks/useProducts';
 import { useProductCategories } from '../../hooks/useProductCategories';
+import { useSettings } from '../../hooks/useSettings';
 import { useSupplies } from '../../hooks/useSupplies';
+import { useTaxes } from '../../hooks/useTaxes';
+import { moneyLabel } from '../../utils/format';
 import { productTypeHint, productTypeTone } from './product-meta';
 import {
   PRODUCT_TYPES,
@@ -35,6 +38,10 @@ interface FormState {
   sell_price: string;
   barcode: string;
   supply_id: string;
+  // '' means "use the default_tax_id from settings" (stored as tax_id=null on
+  // the server). Any other value is a specific tax id (including the "Tax
+  // Exempt" 0% row, which is just a regular tax with rate 0).
+  tax_id: string;
   icon_color: string;
   sold_by_weight: boolean;
   allow_discount: boolean;
@@ -48,6 +55,7 @@ const EMPTY: FormState = {
   sell_price: '',
   barcode: '',
   supply_id: '',
+  tax_id: '',
   icon_color: '',
   sold_by_weight: false,
   allow_discount: true,
@@ -62,6 +70,7 @@ function fromProduct(p: Product): FormState {
     sell_price: p.sell_price ? String(Number(p.sell_price) / 100) : '',
     barcode: p.barcode ?? '',
     supply_id: p.supply_id ?? '',
+    tax_id: p.tax_id ?? '',
     icon_color: p.icon_color ?? '',
     sold_by_weight: p.sold_by_weight,
     allow_discount: p.allow_discount,
@@ -87,6 +96,8 @@ export function ProductFormModal({
 
   const categoriesQ = useProductCategories();
   const suppliesQ = useSupplies({ active: true });
+  const taxesQ = useTaxes({ active: true });
+  const settingsQ = useSettings();
   const createM = useCreateProduct();
   const updateM = useUpdateProduct();
 
@@ -113,6 +124,29 @@ export function ProductFormModal({
       [],
     [categoriesQ.data],
   );
+
+  // Tax dropdown: first option is "Default (<resolved tax>)" which means
+  // "leave tax_id null and let the setting drive it". Then every active tax,
+  // labelled with its rate — a "Tax Exempt" row is just a regular 0% tax in
+  // this system (no boolean flag), so a shop that wants exempt selects it
+  // from the list like any other tax.
+  const taxOptions = useMemo(() => {
+    const taxes = taxesQ.data ?? [];
+    const defaultTaxId = settingsQ.data?.default_tax_id ?? '';
+    const defaultTax = defaultTaxId
+      ? taxes.find((t) => t.id === defaultTaxId)
+      : null;
+    const defaultLabel = defaultTax
+      ? `Default (${defaultTax.name} — ${Number(defaultTax.rate).toFixed(2)}%)`
+      : 'Default (no tax)';
+    return [
+      { value: '', label: defaultLabel },
+      ...taxes.map((t) => ({
+        value: t.id,
+        label: `${t.name} — ${Number(t.rate).toFixed(2)}%`,
+      })),
+    ];
+  }, [taxesQ.data, settingsQ.data]);
 
   const isPrep = form.type === 'PREPARATION';
 
@@ -154,6 +188,8 @@ export function ProductFormModal({
       sell_price: isPrep ? null : sell_price,
       barcode: form.barcode.trim() || null,
       supply_id: form.type === 'PRODUCT' ? form.supply_id || null : null,
+      // tax_id='' means "use the default tax from settings" → persist null.
+      tax_id: isPrep ? null : form.tax_id || null,
       icon_color: isPrep ? null : form.icon_color.trim() || null,
       sold_by_weight: isPrep ? false : form.sold_by_weight,
       allow_discount: form.allow_discount,
@@ -286,7 +322,7 @@ export function ProductFormModal({
               disabled={categoriesQ.isLoading}
             />
             <Input
-              label="Sell price (MXN)"
+              label={moneyLabel('Sell price')}
               name="sell_price"
               type="number"
               step="0.01"
@@ -332,6 +368,23 @@ export function ProductFormModal({
             options={supplyOptions}
             disabled={suppliesQ.isLoading}
           />
+        )}
+
+        {!isPrep && (
+          <>
+            <Select
+              label="Tax"
+              name="tax_id"
+              value={form.tax_id}
+              onValueChange={(v) => set('tax_id', v)}
+              options={taxOptions}
+              disabled={taxesQ.isLoading || settingsQ.isLoading}
+            />
+            <div className="fs-11 text-muted" style={{ marginTop: -8, marginBottom: 12 }}>
+              Price includes tax. Tax is calculated internally — the customer
+              pays the sell price, and the system extracts the tax portion.
+            </div>
+          </>
         )}
 
         <div className="flex gap-16" style={{ flexWrap: 'wrap' }}>

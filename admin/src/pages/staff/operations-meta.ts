@@ -5,6 +5,7 @@ import type {
   OrderStatus,
   OrderType,
   PaymentMethod,
+  TableStatus,
 } from '../../types/operations';
 
 export function orderStatusTone(status: OrderStatus): BadgeTone {
@@ -32,6 +33,16 @@ export function paymentMethodTone(method: PaymentMethod): BadgeTone {
     case 'CASH':     return 'gold';
     case 'CARD':     return 'blue';
     case 'TRANSFER': return 'gray';
+  }
+}
+
+// Table status badge palette: green = ready, red = busy, gold = host-reserved.
+// (gold reads as the warm "yellow" the spec asked for in this design system.)
+export function tableStatusTone(status: TableStatus): BadgeTone {
+  switch (status) {
+    case 'AVAILABLE': return 'green';
+    case 'OCCUPIED':  return 'red';
+    case 'RESERVED':  return 'gold';
   }
 }
 

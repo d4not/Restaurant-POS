@@ -45,6 +45,15 @@ export function SalesReport() {
   /* ── Aggregations ─────────────────────────────────────── */
 
   const totalSales = orders.reduce((sum, o) => sum + Number(o.total), 0);
+  // Tax-inclusive pricing: total is what the customer paid, subtotal is the
+  // revenue portion, tax_amount is the tax extracted from the total. For
+  // SAT / accounting reporting we need those broken out clearly.
+  const totalRevenue = orders.reduce((sum, o) => sum + Number(o.subtotal), 0);
+  const totalTax = orders.reduce((sum, o) => sum + Number(o.tax_amount), 0);
+  const totalDiscounts = orders.reduce(
+    (sum, o) => sum + Number(o.discount_amount),
+    0,
+  );
   const count = orders.length;
   const avgTicket = count > 0 ? totalSales / count : 0;
 
@@ -179,6 +188,19 @@ export function SalesReport() {
           sub={query.isLoading ? 'Loading…' : `${count} paid order${count === 1 ? '' : 's'}`}
         />
         <KPICard
+          label="Revenue (before tax)"
+          value={formatMoney(totalRevenue)}
+          sub="For P&L reporting"
+        />
+        <KPICard
+          label="Tax collected"
+          value={formatMoney(totalTax)}
+          sub="For SAT / remittance"
+        />
+      </div>
+
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        <KPICard
           label="Orders"
           value={count}
           sub="Paid orders only"
@@ -215,31 +237,28 @@ export function SalesReport() {
         </Card>
 
         <Card title="Summary">
+          {/* Prices include tax. Customer pays Total; revenue + tax = total
+              (before discount). Kept here for a quick sanity cross-check —
+              the KPIs above carry the accountant-friendly numbers. */}
           <div className="detail-grid">
             <div className="detail-row cols-2">
               <div className="detail-cell">
-                <div className="dk">Gross</div>
-                <div className="dv">{formatMoney(totalSales)}</div>
+                <div className="dk">Revenue (before tax)</div>
+                <div className="dv">{formatMoney(totalRevenue)}</div>
               </div>
               <div className="detail-cell">
-                <div className="dk">Discounts</div>
-                <div className="dv red">
-                  −{formatMoney(orders.reduce((s, o) => s + Number(o.discount_amount), 0))}
-                </div>
+                <div className="dk">Tax collected</div>
+                <div className="dv">{formatMoney(totalTax)}</div>
               </div>
             </div>
             <div className="detail-row cols-2">
               <div className="detail-cell">
-                <div className="dk">Tax collected</div>
-                <div className="dv">
-                  {formatMoney(orders.reduce((s, o) => s + Number(o.tax_amount), 0))}
-                </div>
+                <div className="dk">Discounts</div>
+                <div className="dv red">−{formatMoney(totalDiscounts)}</div>
               </div>
               <div className="detail-cell">
-                <div className="dk">Subtotal</div>
-                <div className="dv">
-                  {formatMoney(orders.reduce((s, o) => s + Number(o.subtotal), 0))}
-                </div>
+                <div className="dk">Total (customer paid)</div>
+                <div className="dv gold">{formatMoney(totalSales)}</div>
               </div>
             </div>
           </div>

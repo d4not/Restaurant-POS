@@ -17,6 +17,25 @@ function currencyFormatter(): Intl.NumberFormat {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: code });
 }
 
+/** Currency code of the active preference (e.g. "MXN", "USD"). */
+export function currencyCode(): string {
+  return usePreferencesStore.getState().currency;
+}
+
+/** "Label (CUR)" suffix for form labels that take a monetary value. */
+export function moneyLabel(base: string): string {
+  return `${base} (${currencyCode()})`;
+}
+
+/** Parse a user-entered amount (e.g. "500.00") into integer centavos. */
+export function amountToCentavos(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.round(num * 100);
+}
+
 /** Centavos → localized currency string using the user's preferred currency. */
 export function formatMoney(centavos: number | string): string {
   const n = typeof centavos === 'string' ? Number(centavos) : centavos;

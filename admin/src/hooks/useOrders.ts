@@ -12,8 +12,10 @@ import {
   getOrderIngredients,
   listOrders,
   removeOrderItem,
+  updateOrder,
   updateOrderItem,
   type ListOrdersParams,
+  type UpdateOrderInput,
 } from '../api/orders';
 
 const LIMIT = 50;
@@ -57,7 +59,27 @@ export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createOrder,
-    onSuccess: () => invalidateOrders(qc),
+    onSuccess: (data) => {
+      invalidateOrders(qc, data.id);
+      // A new order with a table_id flips the table OCCUPIED — refresh the
+      // tables cache so the picker doesn't keep showing it as available.
+      if (data.table_id) {
+        qc.invalidateQueries({ queryKey: ['tables'] });
+      }
+    },
+  });
+}
+
+export function useUpdateOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateOrderInput }) =>
+      updateOrder(id, input),
+    onSuccess: (data) => {
+      invalidateOrders(qc, data.id);
+      // table_id changes can flip statuses on both old and new tables.
+      qc.invalidateQueries({ queryKey: ['tables'] });
+    },
   });
 }
 
@@ -115,6 +137,18 @@ export function useAddPayment() {
       // A successful payment changes register expected_amount, so refresh it.
       qc.invalidateQueries({ queryKey: ['registers'] });
       qc.invalidateQueries({ queryKey: ['register', result.order.register_id] });
+      // When the payment tips the order into PAID, the backend deducts stock
+      // and writes SALE movements. Refresh anything that surfaces that data.
+      if (result.deduction) {
+        qc.invalidateQueries({ queryKey: ['supplies'] });
+        qc.invalidateQueries({ queryKey: ['supply'] });
+        qc.invalidateQueries({ queryKey: ['movements'] });
+        qc.invalidateQueries({ queryKey: ['alerts', 'low-stock'] });
+      }
+      // Settling the order may have released its table back to AVAILABLE.
+      if (result.order.table_id) {
+        qc.invalidateQueries({ queryKey: ['tables'] });
+      }
     },
   });
 }

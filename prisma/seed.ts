@@ -1,5 +1,5 @@
 /**
- * Café seed — populates the full scenario described in SPEC.md §"Seed data for
+ * Cafe seed — populates the full scenario described in SPEC.md §"Seed data for
  * testing". Designed to be re-runnable: truncates the operational tables first,
  * then creates supplies, suppliers, storages, products, recipes, preparations,
  * modifiers, purchases (which exercise WAC + stock upsert), and a handful of
@@ -47,9 +47,12 @@ const TRUNCATE_TABLES = [
   'suppliers',
   'deduction_rules',
   'storages',
+  'settings',
   'taxes',
   'payroll_periods',
   'attendance',
+  'tables',
+  'zones',
   'users',
 ];
 
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
   // --------------------------------------------------------------------------
   const admin = await prisma.user.create({
     data: {
-      name: 'Café Admin',
+      name: 'Cafe Admin',
       email: 'admin@pos.local',
       pin: '1234',
       // Dev-only credentials — admin@pos.local / admin123. Rotate in prod.
@@ -78,26 +81,60 @@ async function main(): Promise<void> {
 
   const supplier = await prisma.supplier.create({
     data: {
-      name: 'Distribuidora Café del Norte',
-      contact_name: 'María García',
-      phone: '+52 81 1234 5678',
-      email: 'ventas@cafenorte.mx',
+      name: 'Northside Coffee Distribution',
+      contact_name: 'Maria Garcia',
+      phone: '+1 555 123 4567',
+      email: 'sales@northsidecoffee.local',
       credit_days: 30,
     },
   });
 
-  const [bodega, barra] = await Promise.all([
-    prisma.storage.create({ data: { name: 'Bodega', address: 'Almacén trasero' } }),
-    prisma.storage.create({ data: { name: 'Barra', address: 'Estación de bar' } }),
+  const [warehouse, bar] = await Promise.all([
+    prisma.storage.create({ data: { name: 'Warehouse', address: 'Back storage room' } }),
+    prisma.storage.create({ data: { name: 'Bar', address: 'Front bar station' } }),
   ]);
 
-  // A default deduction rule: anything sold lands against Barra. Tests and the
-  // deduction engine treat the null/null row as the fallback.
-  await prisma.deductionRule.create({
-    data: { station_id: null, pos_register_id: null, storage_id: barra.id },
+  // Floor plan: two zones (Indoor + Terrace) with consecutive table numbers
+  // so the dine-in flow has somewhere to seat customers out of the box.
+  const indoorZone = await prisma.zone.create({
+    data: { name: 'Indoor', display_order: 1 },
+  });
+  const terraceZone = await prisma.zone.create({
+    data: { name: 'Terrace', display_order: 2 },
+  });
+  await prisma.table.createMany({
+    data: [
+      { zone_id: indoorZone.id, number: 1, capacity: 2 },
+      { zone_id: indoorZone.id, number: 2, capacity: 2 },
+      { zone_id: indoorZone.id, number: 3, capacity: 4 },
+      { zone_id: indoorZone.id, number: 4, capacity: 4 },
+      { zone_id: indoorZone.id, number: 5, capacity: 6 },
+      { zone_id: indoorZone.id, number: 6, capacity: 6 },
+      { zone_id: terraceZone.id, number: 7, capacity: 2 },
+      { zone_id: terraceZone.id, number: 8, capacity: 2 },
+      { zone_id: terraceZone.id, number: 9, capacity: 4 },
+      { zone_id: terraceZone.id, number: 10, capacity: 4 },
+    ],
   });
 
+  // A default deduction rule: anything sold lands against the bar. Tests and
+  // the deduction engine treat the null/null row as the fallback.
+  await prisma.deductionRule.create({
+    data: { station_id: null, pos_register_id: null, storage_id: bar.id },
+  });
+
+  // IVA 16% is the default tax. Prices throughout the menu are tax-INCLUSIVE:
+  // the system extracts the tax portion from each line_total rather than adding
+  // it on top. A second "Tax Exempt" row lets cashiers mark individual
+  // products as untaxed without wiring up tax_id=null everywhere.
   const tax = await prisma.tax.create({ data: { name: 'IVA 16%', rate: 16 } });
+  await prisma.tax.create({ data: { name: 'Tax Exempt', rate: 0 } });
+
+  // Register the default tax in settings so Products without their own tax_id
+  // still pick up the 16% automatically at order time.
+  await prisma.setting.create({
+    data: { key: 'default_tax_id', value: tax.id },
+  });
 
   // --------------------------------------------------------------------------
   // Supply categories + supplies
@@ -200,17 +237,17 @@ async function main(): Promise<void> {
     storage_id: string;
     min_stock: number;
   }> = [
-    { supply_id: milk.id, storage_id: barra.id, min_stock: 3 },
-    { supply_id: almond.id, storage_id: barra.id, min_stock: 2 },
-    { supply_id: espresso.id, storage_id: barra.id, min_stock: 1 },
-    { supply_id: cup8.id, storage_id: barra.id, min_stock: 50 },
-    { supply_id: cup12.id, storage_id: barra.id, min_stock: 50 },
+    { supply_id: milk.id, storage_id: bar.id, min_stock: 3 },
+    { supply_id: almond.id, storage_id: bar.id, min_stock: 2 },
+    { supply_id: espresso.id, storage_id: bar.id, min_stock: 1 },
+    { supply_id: cup8.id, storage_id: bar.id, min_stock: 50 },
+    { supply_id: cup12.id, storage_id: bar.id, min_stock: 50 },
     // 16oz cups land at 78 after sales — min 80 intentionally triggers a low-stock alert
-    { supply_id: cup16.id, storage_id: barra.id, min_stock: 80 },
-    { supply_id: water.id, storage_id: barra.id, min_stock: 20 },
-    { supply_id: milk.id, storage_id: bodega.id, min_stock: 10 },
-    { supply_id: espresso.id, storage_id: bodega.id, min_stock: 3 },
-    { supply_id: sugar.id, storage_id: bodega.id, min_stock: 2 },
+    { supply_id: cup16.id, storage_id: bar.id, min_stock: 80 },
+    { supply_id: water.id, storage_id: bar.id, min_stock: 20 },
+    { supply_id: milk.id, storage_id: warehouse.id, min_stock: 10 },
+    { supply_id: espresso.id, storage_id: warehouse.id, min_stock: 3 },
+    { supply_id: sugar.id, storage_id: warehouse.id, min_stock: 2 },
   ];
   for (const row of seedStocks) {
     await prisma.storageStock.upsert({
@@ -288,9 +325,9 @@ async function main(): Promise<void> {
     await confirmPurchase(purchase.id);
   }
 
-  // Initial Bodega load — bulk buys into the warehouse.
+  // Initial warehouse load — bulk buys into the back storage.
   await buyAndConfirm(
-    bodega.id,
+    warehouse.id,
     [
       // 4 cases × 6 bottles × 3500c per bottle → 24 bottles of whole milk
       { supply_id: milk.id, packaging_id: milkCase.id, package_quantity: 4, price_per_package: 21000 },
@@ -316,9 +353,9 @@ async function main(): Promise<void> {
     '2026-04-10T09:00:00Z',
   );
 
-  // Restock directly to Barra so the bar has front-of-house inventory.
+  // Restock directly to the bar so it has front-of-house inventory.
   await buyAndConfirm(
-    barra.id,
+    bar.id,
     [
       { supply_id: milk.id, package_quantity: 6, price_per_package: 3600 },
       { supply_id: almond.id, package_quantity: 4, price_per_package: 5700 },
@@ -683,7 +720,7 @@ async function main(): Promise<void> {
 
   // --------------------------------------------------------------------------
   // Sample sales — a handful of orders so reports have SALE movements to
-  // aggregate. Each sale fires deductSaleFromInventory against the Barra rule.
+  // aggregate. Each sale fires deductSaleFromInventory against the bar rule.
   // --------------------------------------------------------------------------
   async function variantIdOf(productName: string, variantName: string): Promise<string> {
     const v = await prisma.productVariant.findFirstOrThrow({
@@ -774,7 +811,7 @@ async function main(): Promise<void> {
   // non-zero delta between theoretical (recipe-only) and actual usage.
   const writeOff = await prisma.writeOff.create({
     data: {
-      storage_id: barra.id,
+      storage_id: bar.id,
       supply_id: espresso.id,
       quantity: 0.05,
       reason: 'SPILLED',
@@ -784,7 +821,7 @@ async function main(): Promise<void> {
     },
   });
   await prisma.storageStock.update({
-    where: { supply_id_storage_id: { supply_id: espresso.id, storage_id: barra.id } },
+    where: { supply_id_storage_id: { supply_id: espresso.id, storage_id: bar.id } },
     data: { quantity: { decrement: 0.05 } },
   });
   const espressoSupply = await prisma.supply.findUniqueOrThrow({
@@ -794,7 +831,7 @@ async function main(): Promise<void> {
   await prisma.stockMovement.create({
     data: {
       supply_id: espresso.id,
-      storage_id: barra.id,
+      storage_id: bar.id,
       type: 'WRITE_OFF',
       quantity: -0.05,
       reference_type: 'WriteOff',
@@ -814,7 +851,7 @@ async function main(): Promise<void> {
   const [sofia, carlos, lucia] = await Promise.all([
     prisma.user.create({
       data: {
-        name: 'Sofía Hernández',
+        name: 'Sofia Hernandez',
         email: 'sofia@pos.local',
         pin: '2001',
         password_hash: baristaHash,
@@ -822,7 +859,7 @@ async function main(): Promise<void> {
         weekly_salary: 600000,
         hire_date: new Date('2025-06-15T00:00:00Z'),
         position: 'Barista',
-        phone: '+52 81 2000 1001',
+        phone: '+1 555 200 1001',
       },
     }),
     prisma.user.create({
@@ -834,21 +871,21 @@ async function main(): Promise<void> {
         role: 'CASHIER',
         weekly_salary: 550000,
         hire_date: new Date('2025-09-01T00:00:00Z'),
-        position: 'Cajero',
-        phone: '+52 81 2000 1002',
+        position: 'Cashier',
+        phone: '+1 555 200 1002',
       },
     }),
     prisma.user.create({
       data: {
-        name: 'Lucía Ramírez',
+        name: 'Lucia Ramirez',
         email: 'lucia@pos.local',
         pin: '2003',
         password_hash: baristaHash,
         role: 'MANAGER',
         weekly_salary: 900000,
         hire_date: new Date('2024-11-10T00:00:00Z'),
-        position: 'Gerente',
-        phone: '+52 81 2000 1003',
+        position: 'Manager',
+        phone: '+1 555 200 1003',
       },
     }),
   ]);
@@ -868,7 +905,7 @@ async function main(): Promise<void> {
   }
 
   const attendanceRecords: Prisma.AttendanceCreateManyInput[] = [];
-  // Sofía: perfect week Mon–Sat, day off Sunday.
+  // Sofia: perfect week Mon–Sat, day off Sunday.
   for (let i = 0; i < 6; i++) {
     attendanceRecords.push({
       user_id: sofia.id,
@@ -905,7 +942,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // Lucía: sick day paid (Tue), otherwise present.
+  // Lucia: sick day paid (Tue), otherwise present.
   const luciaStatuses: Array<{ offset: number; status: 'PRESENT' | 'LATE' | 'ABSENT' | 'DAY_OFF'; is_paid?: boolean; reason?: string }> = [
     { offset: 0, status: 'PRESENT' },
     { offset: 1, status: 'ABSENT', is_paid: true, reason: 'Sick' },
@@ -930,10 +967,11 @@ async function main(): Promise<void> {
 
   console.log('Seed complete.');
   console.log(`  Supplier: ${supplier.name}`);
-  console.log(`  Storages: ${bodega.name}, ${barra.name}`);
+  console.log(`  Storages: ${warehouse.name}, ${bar.name}`);
+  console.log(`  Zones: ${indoorZone.name} (tables 1-6), ${terraceZone.name} (tables 7-10)`);
   console.log('  Products: Latte ×3, Cappuccino ×3, Americano ×2, Mocha ×3, Bottled Water');
   console.log('  Preparations: Simple Syrup, Mocha Sauce');
-  console.log('  Purchases: 2 confirmed (Bodega + Barra) — WAC and stock populated');
+  console.log('  Purchases: 2 confirmed (Warehouse + Bar) — WAC and stock populated');
   console.log('  Sales: 4 sample orders — SALE movements written for variance reports');
   console.log(`  Employees: ${sofia.name}, ${carlos.name}, ${lucia.name}`);
   console.log(`  Attendance: ${attendanceRecords.length} records for week of ${weekStart.toISOString().slice(0, 10)}`);

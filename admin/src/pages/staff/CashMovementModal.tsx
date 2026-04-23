@@ -3,6 +3,7 @@ import { Button, Modal } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { useCreateCashMovement } from '../../hooks/useRegisters';
 import type { CashMovementType } from '../../types/operations';
+import { moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -10,7 +11,8 @@ interface Props {
   registerId: string;
 }
 
-function pesosToCentavos(value: string): number | null {
+/** Cash movements require a strictly positive amount (zero is meaningless). */
+function positiveAmountToCentavos(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const num = Number(trimmed);
@@ -38,7 +40,7 @@ export function CashMovementModal({ open, onClose, registerId }: Props) {
 
   const validate = () => {
     const e: typeof errors = {};
-    if (pesosToCentavos(amount) === null) e.amount = 'Enter a positive amount';
+    if (positiveAmountToCentavos(amount) === null) e.amount = 'Enter a positive amount';
     if (!reason.trim()) e.reason = 'Reason is required';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -54,7 +56,7 @@ export function CashMovementModal({ open, onClose, registerId }: Props) {
         registerId,
         input: {
           type,
-          amount: pesosToCentavos(amount)!,
+          amount: positiveAmountToCentavos(amount)!,
           reason: reason.trim(),
         },
       });
@@ -117,7 +119,7 @@ export function CashMovementModal({ open, onClose, registerId }: Props) {
         </div>
 
         <Input
-          label="Amount (MXN)"
+          label={moneyLabel('Amount')}
           name="amount"
           type="number"
           inputMode="decimal"

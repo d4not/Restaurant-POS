@@ -27,6 +27,7 @@ import { ProductCostsReport } from './pages/reports/ProductCostsReport';
 import { ModifierGroupsPage } from './pages/menu/ModifierGroupsPage';
 import { ModifierGroupDetail } from './pages/menu/ModifierGroupDetail';
 import { SettingsPage } from './pages/settings/SettingsPage';
+import { TablesZonesPage } from './pages/system/TablesZonesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -106,6 +107,11 @@ export default function App() {
               <Route path="employees/:id"      element={<EmployeeDetail />} />
               <Route path="cash-registers"     element={<CashRegistersPage />} />
               <Route path="cash-registers/:id" element={<ShiftDetail />} />
+            </Route>
+
+            {/* System */}
+            <Route path="system">
+              <Route path="tables-zones" element={<TablesZonesPage />} />
             </Route>
 
             {/* Settings */}

@@ -3,20 +3,12 @@ import { Button, Modal } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { useCloseRegister } from '../../hooks/useRegisters';
 import type { CashRegister } from '../../types/operations';
-import { formatMoney } from '../../utils/format';
+import { amountToCentavos, formatMoney, moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   register: CashRegister;
-}
-
-function pesosToCentavos(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
 }
 
 export function CloseShiftModal({ open, onClose, register }: Props) {
@@ -39,7 +31,7 @@ export function CloseShiftModal({ open, onClose, register }: Props) {
 
   // Live difference preview as the user types the counted amount.
   const preview = useMemo(() => {
-    const centavos = pesosToCentavos(actualAmount);
+    const centavos = amountToCentavos(actualAmount);
     if (centavos === null) return null;
     return { actual: centavos, diff: centavos - expectedCentavos };
   }, [actualAmount, expectedCentavos]);
@@ -49,7 +41,7 @@ export function CloseShiftModal({ open, onClose, register }: Props) {
     setError(null);
     setServerError(null);
 
-    const centavos = pesosToCentavos(actualAmount);
+    const centavos = amountToCentavos(actualAmount);
     if (centavos === null) {
       setError('Enter the amount you physically counted (e.g. 2350.00)');
       return;
@@ -119,7 +111,7 @@ export function CloseShiftModal({ open, onClose, register }: Props) {
         </p>
 
         <Input
-          label="Actual amount counted (MXN)"
+          label={moneyLabel('Actual amount counted')}
           name="actual_amount"
           type="number"
           inputMode="decimal"

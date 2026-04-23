@@ -130,6 +130,12 @@ enum PayrollStatus {
   PAID
 }
 
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
@@ -180,6 +186,21 @@ model Tax {
   products Product[]
 
   @@map("taxes")
+}
+
+// Generic key/value store for singleton configuration. The initial use is
+// "default_tax_id" (which tax applies to a product when its own tax_id is null)
+// — prices are tax-inclusive, so the default tax drives the base/tax split on
+// products that don't override it. value is a string; modules that need
+// typed access parse it on read.
+model Setting {
+  id         String   @id @default(uuid()) @db.Uuid
+  key        String   @unique
+  value      String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("settings")
 }
 
 // ============================================================================
@@ -819,6 +840,11 @@ model Order {
   order_number    Int
   status          OrderStatus @default(OPEN)
   order_type      OrderType
+  // Optional dine-in table assignment. Multiple OPEN orders on the same table
+  // are permitted (group ordering); the table is freed only after the LAST
+  // open order is PAID or CANCELLED. ON DELETE SET NULL so deleting the table
+  // doesn't lose order history.
+  table_id        String?     @db.Uuid
   subtotal        Decimal     @default(0) @db.Decimal(14, 0)
   tax_amount      Decimal     @default(0) @db.Decimal(14, 0)
   discount_amount Decimal     @default(0) @db.Decimal(14, 0)
@@ -834,6 +860,7 @@ model Order {
 
   register CashRegister @relation(fields: [register_id], references: [id])
   user     User         @relation(fields: [user_id], references: [id])
+  table    Table?       @relation(fields: [table_id], references: [id])
   items    OrderItem[]
   payments Payment[]
 
@@ -842,6 +869,7 @@ model Order {
   @@index([user_id])
   @@index([status])
   @@index([order_type])
+  @@index([table_id])
   @@index([created_at])
   @@map("orders")
 }
@@ -857,10 +885,15 @@ model OrderItem {
   line_total      Decimal  @db.Decimal(14, 0)
   // Per-item tax snapshot. tax_rate is captured from the product's linked Tax
   // at the moment the item is added — later edits to the tax row don't rewrite
-  // historical orders. tax_amount = line_total × tax_rate / 100, rounded to
-  // the nearest centavo. Both default to 0 for tax-exempt products.
+  // historical orders. Prices are tax-INCLUSIVE: line_total is what the
+  // customer pays for the line; base_amount is the revenue portion and
+  // tax_amount is the tax portion extracted out of line_total.
+  //   base_amount = round(line_total / (1 + tax_rate/100))
+  //   tax_amount  = line_total - base_amount
+  // All default to 0 for tax-exempt products (base_amount = line_total).
   tax_rate        Decimal  @default(0) @db.Decimal(6, 2)
   tax_amount      Decimal  @default(0) @db.Decimal(14, 0)
+  base_amount     Decimal  @default(0) @db.Decimal(14, 0)
   notes           String?
   created_at      DateTime @default(now())
 
@@ -962,4 +995,45 @@ model PayrollPeriod {
   @@index([status])
   @@index([week_start])
   @@map("payroll_periods")
+}
+
+// ============================================================================
+// Phase 10 — Zones & Tables (dine-in floor management)
+// ============================================================================
+
+model Zone {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  display_order Int      @default(0)
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  tables Table[]
+
+  @@map("zones")
+}
+
+model Table {
+  id         String      @id @default(uuid()) @db.Uuid
+  zone_id    String      @db.Uuid
+  // Display number within the zone — e.g. "Table 3" in the Terrace.
+  // Uniqueness is per-zone so two zones can each have a "1".
+  number     Int
+  capacity   Int         @default(2)
+  // Set to OCCUPIED on the first order created against the table; reverted to
+  // AVAILABLE only when no OPEN orders remain (so group orders share a table
+  // without flipping the badge between settles). RESERVED is set manually.
+  status     TableStatus @default(AVAILABLE)
+  active     Boolean     @default(true)
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+
+  zone   Zone    @relation(fields: [zone_id], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([zone_id, number])
+  @@index([zone_id])
+  @@index([status])
+  @@map("tables")
 }

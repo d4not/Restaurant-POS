@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { Select } from '../../components/forms/Select';
@@ -9,6 +9,7 @@ import {
   useTaxes,
   useUpdateTax,
 } from '../../hooks/useTaxes';
+import { useSettings, useUpdateSettings } from '../../hooks/useSettings';
 import {
   usePreferencesStore,
   type Currency,
@@ -31,8 +32,114 @@ export function SettingsPage() {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <DisplayPreferencesCard />
+      <DefaultTaxCard />
       <TaxConfigurationCard />
     </div>
+  );
+}
+
+/* ───────────────── Default tax (tax-inclusive pricing) ───── */
+
+// Separate card because the concept (which tax applies to products that don't
+// override it) and the action (persisting one key in /api/v1/settings) are
+// distinct from the Tax CRUD below. Explaining tax-inclusive pricing in plain
+// language up-front saves a round of questions from accounting.
+function DefaultTaxCard() {
+  const taxesQ = useTaxes({ active: true });
+  const settingsQ = useSettings();
+  const updateSettingsM = useUpdateSettings();
+
+  const [selected, setSelected] = useState<string>('');
+  const [saveState, setSaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Sync local state when the settings query first loads. We intentionally do
+  // NOT clobber local edits on every refetch — only on the initial fill.
+  useEffect(() => {
+    if (!settingsQ.data) return;
+    if (saveState !== 'idle' && saveState !== 'saved') return;
+    const current = settingsQ.data.default_tax_id ?? '';
+    setSelected(current);
+  }, [settingsQ.data, saveState]);
+
+  const options = useMemo(() => {
+    const taxes = taxesQ.data ?? [];
+    return [
+      { value: '', label: 'No default (products untaxed unless set individually)' },
+      ...taxes.map((t) => ({
+        value: t.id,
+        label: `${t.name} — ${Number(t.rate).toFixed(2)}%`,
+      })),
+    ];
+  }, [taxesQ.data]);
+
+  const current = settingsQ.data?.default_tax_id ?? '';
+  const dirty = selected !== current;
+
+  const onSave = async () => {
+    setSaveState('saving');
+    setErrorMsg(null);
+    try {
+      await updateSettingsM.mutateAsync({ default_tax_id: selected });
+      setSaveState('saved');
+      // Reset the banner after a short beat so repeated edits re-arm it.
+      setTimeout(() => setSaveState('idle'), 1500);
+    } catch (err) {
+      setSaveState('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
+  return (
+    <Card title="Default tax">
+      <p className="fs-12 text-muted mb-12">
+        Prices in the menu <strong>include tax</strong>. The system extracts the
+        tax portion automatically: a $50 product with IVA 16% gives $43.10 in
+        revenue and $6.90 in tax. The default tax applies to any product that
+        doesn't set its own.
+      </p>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr auto',
+          gap: 12,
+          alignItems: 'end',
+        }}
+      >
+        <Select
+          label="Default tax"
+          options={options}
+          value={selected}
+          onValueChange={(v) => {
+            setSelected(v);
+            setSaveState('idle');
+            setErrorMsg(null);
+          }}
+          disabled={settingsQ.isLoading || taxesQ.isLoading}
+        />
+        <Button
+          variant="primary"
+          onClick={onSave}
+          loading={saveState === 'saving'}
+          disabled={!dirty || settingsQ.isLoading}
+        >
+          Save
+        </Button>
+      </div>
+
+      {saveState === 'saved' && (
+        <div className="fs-11 mt-8" style={{ color: 'var(--green)' }}>
+          Saved — new order lines will use this tax when a product doesn't
+          override it.
+        </div>
+      )}
+      {saveState === 'error' && errorMsg && (
+        <div className="auth-alert mt-8">{errorMsg}</div>
+      )}
+    </Card>
   );
 }
 

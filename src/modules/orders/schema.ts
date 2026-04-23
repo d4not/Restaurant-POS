@@ -5,6 +5,9 @@ export const createOrderSchema = z
   .object({
     register_id: z.string().uuid(),
     order_type: z.nativeEnum(OrderType),
+    // Optional table assignment. Only meaningful for DINE_IN orders — TAKEOUT
+    // with a table_id is rejected at the service level.
+    table_id: z.string().uuid().nullable().optional(),
     notes: z.string().max(2000).optional(),
   })
   .strict();
@@ -15,6 +18,8 @@ export const updateOrderSchema = z
     discount_amount: z.number().int().nonnegative().optional(),
     discount_reason: z.string().max(500).nullable().optional(),
     order_type: z.nativeEnum(OrderType).optional(),
+    // Pass null to detach the order from its table; pass a UUID to reseat it.
+    table_id: z.string().uuid().nullable().optional(),
   })
   .strict();
 
@@ -25,6 +30,8 @@ export const listOrderQuerySchema = z.object({
   register_id: z.string().uuid().optional(),
   user_id: z.string().uuid().optional(),
   order_type: z.nativeEnum(OrderType).optional(),
+  table_id: z.string().uuid().optional(),
+  zone_id: z.string().uuid().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
 });

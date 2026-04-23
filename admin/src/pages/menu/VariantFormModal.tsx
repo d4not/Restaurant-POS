@@ -6,6 +6,7 @@ import {
   useUpdateVariant,
 } from '../../hooks/useProducts';
 import type { ProductVariant } from '../../types/menu';
+import { moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -140,7 +141,7 @@ export function VariantFormModal({ open, onClose, productId, variant }: Props) {
 
         <div className="section-grid-2">
           <Input
-            label="Sell price (MXN)"
+            label={moneyLabel('Sell price')}
             name="sell_price"
             type="number"
             step="0.01"

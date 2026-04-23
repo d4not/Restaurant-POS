@@ -7,6 +7,7 @@ import { prisma } from '../src/lib/prisma.js';
 const TRUNCATE_TABLES = [
   'users',
   'taxes',
+  'settings',
   'supply_categories',
   'supplies',
   'suppliers',
@@ -41,6 +42,8 @@ const TRUNCATE_TABLES = [
   'payments',
   'attendance',
   'payroll_periods',
+  'tables',
+  'zones',
 ];
 
 beforeEach(async () => {

@@ -1,8 +1,9 @@
 import express, { type Express } from 'express';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { pinoHttp } from 'pino-http';
+import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { supplyCategoryRouter } from './modules/supply-categories/routes.js';
@@ -29,13 +30,29 @@ import { employeeRouter } from './modules/employees/routes.js';
 import { attendanceRouter } from './modules/attendance/routes.js';
 import { payrollRouter } from './modules/payroll/routes.js';
 import { taxRouter } from './modules/taxes/routes.js';
+import { settingsRouter } from './modules/settings/routes.js';
+import { zoneRouter } from './modules/zones/routes.js';
+import { tableRouter } from './modules/tables/routes.js';
+
+// Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
+// every origin, which is fine for the local-first default and for setups where
+// a same-origin reverse proxy handles CORS. When set, only the listed origins
+// are allowed and credentials are permitted for cookie-authenticated flows.
+function buildCorsOptions(): CorsOptions {
+  const raw = env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+  if (raw.length === 0) return {};
+  return {
+    origin: raw,
+    credentials: true,
+  };
+}
 
 export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
   app.use(helmet());
-  app.use(cors());
+  app.use(cors(buildCorsOptions()));
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(pinoHttp({ logger }));
@@ -78,6 +95,9 @@ export function createApp(): Express {
   app.use('/api/v1/attendance', attendanceRouter);
   app.use('/api/v1/payroll', payrollRouter);
   app.use('/api/v1/taxes', taxRouter);
+  app.use('/api/v1/settings', settingsRouter);
+  app.use('/api/v1/zones', zoneRouter);
+  app.use('/api/v1/tables', tableRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

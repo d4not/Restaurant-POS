@@ -2,19 +2,11 @@ import { useEffect, useState } from 'react';
 import { Button, Modal } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { useOpenRegister } from '../../hooks/useRegisters';
+import { amountToCentavos, moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-}
-
-/** UI input is pesos (e.g. "500.00"); we convert to integer centavos on submit. */
-function pesosToCentavos(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
 }
 
 export function OpenShiftModal({ open, onClose }: Props) {
@@ -38,7 +30,7 @@ export function OpenShiftModal({ open, onClose }: Props) {
     setError(null);
     setServerError(null);
 
-    const centavos = pesosToCentavos(openingAmount);
+    const centavos = amountToCentavos(openingAmount);
     if (centavos === null) {
       setError('Enter a non-negative amount (e.g. 500.00)');
       return;
@@ -86,7 +78,7 @@ export function OpenShiftModal({ open, onClose }: Props) {
           Orders and cash movements can only be recorded while the shift is open.
         </p>
         <Input
-          label="Opening amount (MXN)"
+          label={moneyLabel('Opening amount')}
           name="opening_amount"
           type="number"
           inputMode="decimal"

@@ -15,6 +15,17 @@ export const ORDER_STATUSES: OrderStatus[] = ['OPEN', 'PAID', 'CANCELLED'];
 export type OrderType = 'DINE_IN' | 'TAKEOUT';
 export const ORDER_TYPES: OrderType[] = ['DINE_IN', 'TAKEOUT'];
 
+export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED';
+export const TABLE_STATUSES: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED'];
+
+export function tableStatusLabel(s: TableStatus): string {
+  switch (s) {
+    case 'AVAILABLE': return 'Available';
+    case 'OCCUPIED':  return 'Occupied';
+    case 'RESERVED':  return 'Reserved';
+  }
+}
+
 export type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER';
 export const PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'CARD', 'TRANSFER'];
 
@@ -112,9 +123,12 @@ export interface OrderItem {
   modifiers_price: string;
   line_total: string;
   // Tax snapshot captured at add-time — never recomputed from the current
-  // Tax row, so historical orders stay stable across rate changes.
+  // Tax row, so historical orders stay stable across rate changes. Prices are
+  // tax-INCLUSIVE: line_total is what the customer pays; base_amount is the
+  // revenue portion and tax_amount is the tax portion extracted out.
   tax_rate: string;
   tax_amount: string;
+  base_amount: string;
   notes: string | null;
   created_at: string;
   product?: {
@@ -144,6 +158,7 @@ export interface Order {
   order_number: number;
   status: OrderStatus;
   order_type: OrderType;
+  table_id: string | null;
   subtotal: string;
   tax_amount: string;
   discount_amount: string;
@@ -156,6 +171,42 @@ export interface Order {
   updated_at: string;
   register?: { id: string; status: CashRegisterStatus; user_id: string };
   user?: { id: string; name: string };
+  table?: {
+    id: string;
+    number: number;
+    capacity: number;
+    status: TableStatus;
+    zone: { id: string; name: string };
+  } | null;
   items?: OrderItem[];
   payments?: Payment[];
+}
+
+/* ── Zones & Tables ──────────────────────────────────────── */
+
+export interface Zone {
+  id: string;
+  name: string;
+  display_order: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZoneWithTables extends Zone {
+  tables: Table[];
+}
+
+export interface Table {
+  id: string;
+  zone_id: string;
+  number: number;
+  capacity: number;
+  status: TableStatus;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Embedded by GET /tables and GET /tables/:id, not by GET /zones?include_tables
+  // (which already has the parent zone in the response shape).
+  zone?: { id: string; name: string; display_order: number };
 }

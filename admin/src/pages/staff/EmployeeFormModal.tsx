@@ -4,6 +4,7 @@ import { Input } from '../../components/forms/Input';
 import { useCreateEmployee, useUpdateEmployee } from '../../hooks/useEmployees';
 import type { Employee } from '../../types/staff';
 import type { UserRole } from '../../types/api';
+import { amountToCentavos, moneyLabel } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -13,14 +14,6 @@ interface Props {
 }
 
 const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'];
-
-function pesosToCentavos(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
-}
 
 interface FormState {
   name: string;
@@ -101,7 +94,7 @@ export function EmployeeFormModal({ open, onClose, employee }: Props) {
       if (state.pin && !/^\d{4,6}$/.test(state.pin)) errs.pin = '4–6 digits';
       if (state.password && state.password.length < 6) errs.password = 'Min 6 chars';
     }
-    const salaryCents = pesosToCentavos(state.weeklySalary);
+    const salaryCents = amountToCentavos(state.weeklySalary);
     if (salaryCents === null) errs.weeklySalary = 'Enter a non-negative amount';
 
     if (Object.keys(errs).length > 0) {
@@ -238,7 +231,7 @@ export function EmployeeFormModal({ open, onClose, employee }: Props) {
 
         <div className="form-grid-2">
           <Input
-            label="Weekly salary (MXN)"
+            label={moneyLabel('Weekly salary')}
             name="weeklySalary"
             type="number"
             inputMode="decimal"
