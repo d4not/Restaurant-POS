@@ -6,6 +6,7 @@ import type {
   CreateOrderInput,
   CreatePaymentInput,
   ListOrderQuery,
+  RequestAttentionInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
 } from './schema.js';
@@ -50,6 +51,7 @@ export async function addItem(req: Request, res: Response): Promise<void> {
   const order = await service.addOrderItem(
     req.params.id as string,
     req.body as AddOrderItemInput,
+    currentUserId(req),
   );
   res.status(201).json({ success: true, data: order });
 }
@@ -82,4 +84,27 @@ export async function addPayment(req: Request, res: Response): Promise<void> {
 export async function ingredients(req: Request, res: Response): Promise<void> {
   const result = await service.getOrderIngredients(req.params.id as string);
   res.json({ success: true, data: result });
+}
+
+export async function sendToKitchen(req: Request, res: Response): Promise<void> {
+  const result = await service.sendToKitchen(req.params.id as string);
+  res.json({ success: true, data: result });
+}
+
+export async function active(_req: Request, res: Response): Promise<void> {
+  const orders = await service.listActiveOrders();
+  res.json({ success: true, data: orders });
+}
+
+export async function flagAttention(req: Request, res: Response): Promise<void> {
+  const order = await service.flagOrderForAttention(
+    req.params.id as string,
+    req.body as RequestAttentionInput,
+  );
+  res.json({ success: true, data: order });
+}
+
+export async function clearAttention(req: Request, res: Response): Promise<void> {
+  const order = await service.clearOrderAttention(req.params.id as string);
+  res.json({ success: true, data: order });
 }

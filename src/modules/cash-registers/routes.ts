@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import { uuidParamSchema } from '../../lib/schemas.js';
 import * as controller from './controller.js';
@@ -16,7 +16,15 @@ export const cashRegisterRouter = Router();
 
 cashRegisterRouter.use(requireAuth);
 
-cashRegisterRouter.post('/', validate(openRegisterSchema), asyncHandler(controller.open));
+// Opening, closing, and moving cash are cashier/admin-only — waiters and
+// baristas can still read register state (their orders need an open register)
+// but not mutate it.
+cashRegisterRouter.post(
+  '/',
+  requireRole('CASHIER', 'MANAGER', 'ADMIN'),
+  validate(openRegisterSchema),
+  asyncHandler(controller.open),
+);
 cashRegisterRouter.get(
   '/',
   validate(listRegisterQuerySchema, 'query'),
@@ -29,6 +37,7 @@ cashRegisterRouter.get(
 );
 cashRegisterRouter.post(
   '/:id/close',
+  requireRole('CASHIER', 'MANAGER', 'ADMIN'),
   validate(uuidParamSchema, 'params'),
   validate(closeRegisterSchema),
   asyncHandler(controller.close),
@@ -36,6 +45,7 @@ cashRegisterRouter.post(
 
 cashRegisterRouter.post(
   '/:id/cash-movements',
+  requireRole('CASHIER', 'MANAGER', 'ADMIN'),
   validate(uuidParamSchema, 'params'),
   validate(createCashMovementSchema),
   asyncHandler(controller.addCashMovement),

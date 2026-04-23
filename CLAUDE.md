@@ -2,8 +2,10 @@
 
 ## Project Structure
 - `/src` — Backend (Express API)
-- `/admin` — Frontend (React admin panel)
+- `/admin` — Frontend admin panel (React + Vite)
+- `/terminal` — POS terminal (Electron + React)
 - `/prisma` — Database schema and migrations
+- `/docs` — Specifications and design references
 
 ---
 
@@ -13,7 +15,7 @@
 - Node.js 20+ with TypeScript (strict mode)
 - Express.js + Zod validation
 - PostgreSQL 16 + Prisma ORM
-- Auth: JWT (access + refresh tokens)
+- Auth: JWT with PIN login (terminal) and email/password login (admin)
 - Testing: Vitest + Supertest
 
 ### Commands
@@ -27,7 +29,6 @@
 ### Architecture
 - `src/modules/<module>/` — each module has: routes.ts, controller.ts, service.ts, schema.ts
 - Business logic in service.ts, never in controllers
-- All database queries through Prisma, raw SQL only for complex aggregations
 - Transactions for any operation that modifies multiple tables
 - Error handling: custom AppError classes, caught by global error middleware
 
@@ -36,63 +37,69 @@
 - File naming: kebab-case
 - All monetary values as integers in centavos — NEVER floats
 - Use decimal.js for all arithmetic (costs, quantities, conversions)
+- Prices are TAX-INCLUSIVE: base = price / (1 + rate/100), tax = price - base
 - Dates stored as UTC
 - snake_case for all DB tables and columns
-- Soft delete with deleted_at where applicable
 
 ### API Conventions
 - RESTful: /api/v1/<resource>
 - Response: { success: boolean, data?: T, error?: { message, code } }
 - Pagination: cursor-based with ?cursor=&limit=
-- HTTP codes: 200, 201, 400, 401, 404, 422, 500
+- HTTP codes: 200, 201, 400, 401, 403, 404, 409, 422, 500
 
 ---
 
-## Frontend (admin panel)
+## Admin Panel (/admin)
 
 ### Stack
 - React 18+ with TypeScript (strict mode)
-- Vite for build/dev
-- React Router v6
-- TanStack Query for API state
-- Zustand for client state (auth, UI)
-- Recharts for charts
+- Vite, React Router v6, TanStack Query, Zustand, Recharts
 
 ### Commands
 - `cd admin && npm run dev` — start dev server
 - `cd admin && npm run build` — production build
 
-### Design System
-- YOU MUST use the CSS classes and variables from @mockup-styles.css — do not invent new design tokens
+### Design
+- YOU MUST use the CSS classes and variables from @docs/mockup-style.css
 - Fonts: Playfair Display (headings), DM Sans (body)
-- Warm color palette: cream bg (#f5f0e8), dark brown sidebar (#1e1108), gold accent (#c8922a)
-- See @mockup.html for HTML structure reference
-- No UI frameworks (no Tailwind, no MUI) — custom CSS only, matching the existing design system
+- Warm light theme: cream bg, dark brown sidebar, gold accent
+- No UI frameworks (no Tailwind, no MUI)
 
-### Architecture
-- `admin/src/api/` — API client + endpoint functions
-- `admin/src/components/` — reusable UI (layout/, ui/, forms/, charts/)
-- `admin/src/pages/` — one component per route
-- `admin/src/hooks/` — custom hooks wrapping TanStack Query
-- `admin/src/store/` — Zustand stores
-- `admin/src/types/` — TypeScript types matching API responses
-- `admin/src/utils/` — formatCurrency, formatDate, etc.
+---
 
-### Code Rules
-- All API calls through TanStack Query (useQuery/useMutation)
-- Invalidate related queries on mutations
-- Loading and error states on every data-fetching component
-- Forms: controlled components with local state, validate before submit
+## POS Terminal (/terminal)
+
+### Stack
+- Electron 30+ (main process)
+- React + TypeScript + Vite (renderer)
+- node-thermal-printer for ESC/POS printing
+- TanStack Query, Zustand
+
+### Commands
+- `cd terminal && npm run dev` — start Electron in dev mode
+- `cd terminal && npm run build` — package Electron app
+
+### Design
+- DARK warm theme — NOT the same as admin panel
+- Large touch targets (48px+ buttons, 56px+ primary actions)
+- Minimal navigation, full-screen task focus
+- Touch-first: no hover-dependent interactions
+- PIN login with numpad
+
+### Printing
+- Electron main process handles ESC/POS via IPC
+- Two printers: receipt printer (bar) + kitchen printer (kitchen)
+- Renderer calls: window.electron.printKitchen(data), window.electron.printReceipt(data)
 
 ---
 
 ## IMPORTANT
 - Read @docs/SPEC.md for ALL backend business logic
-- Read @docs/FRONTEND-SPEC.md for ALL frontend page specifications
-- See @docs/mockup-style.css for the CSS design system
-- See @docs/mockup.html for the HTML structure reference
+- Read @docs/FRONTEND-SPEC.md for admin panel pages
+- Read @docs/TERMINAL-SPEC.md for POS terminal specification
 - Never use floating point for money
 - Always wrap multi-table writes in Prisma transactions
-- Always validate request input with Zod before processing
-- Inventory operations MUST update stock AND log the movement in a single transaction
-- Frontend MUST use the existing CSS design system — no generic/blue UI
+- Inventory operations MUST update stock AND log movement in a single transaction
+- Prices are TAX-INCLUSIVE — never add tax on top
+- Modifier groups: SWAP replaces recipe ingredients, ADD stacks on top
+- Recipe modifier lines link to a modifier_group_id, not a specific supply

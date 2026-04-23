@@ -890,6 +890,22 @@ async function main(): Promise<void> {
     }),
   ]);
 
+  // One waiter user so the terminal's waiter flows are smoke-testable out of
+  // the seed. Kept outside the attendance loop below — not every role needs
+  // to participate in the payroll demo.
+  await prisma.user.create({
+    data: {
+      name: 'Andrea Valdez',
+      email: 'andrea@pos.local',
+      pin: '2004',
+      password_hash: baristaHash,
+      role: 'WAITER',
+      hire_date: new Date('2025-10-05T00:00:00Z'),
+      position: 'Waiter',
+      phone: '+1 555 200 1004',
+    },
+  });
+
   // Pick the Monday on/before today as week_start for attendance seed.
   const today = new Date();
   const utcMidnight = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));

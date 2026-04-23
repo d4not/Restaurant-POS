@@ -20,6 +20,7 @@ import type {
   CreateOrderInput,
   CreatePaymentInput,
   ListOrderQuery,
+  RequestAttentionInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
 } from './schema.js';
@@ -45,6 +46,7 @@ const orderInclude = {
       product: { select: { id: true, name: true, type: true, tax_id: true, station_id: true } },
       variant: { select: { id: true, name: true } },
       modifiers: true,
+      added_by_user: { select: { id: true, name: true } },
     },
   },
   payments: { orderBy: { created_at: 'asc' } },
@@ -483,7 +485,11 @@ async function resolveOrderLine(
   return { productId: product.id, variantId, unitPrice, modifiersPrice, taxRate, modifierRows };
 }
 
-export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
+export async function addOrderItem(
+  orderId: string,
+  input: AddOrderItemInput,
+  userId?: string,
+) {
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, orderId);
     const quantity = input.quantity ?? 1;
@@ -506,6 +512,7 @@ export async function addOrderItem(orderId: string, input: AddOrderItemInput) {
         tax_amount: tax,
         base_amount: base,
         notes: input.notes,
+        added_by: userId ?? null,
       },
     });
 
@@ -811,4 +818,159 @@ export async function getOrderIngredients(orderId: string): Promise<OrderIngredi
     ingredients,
     grand_total_cost: grandTotal.toString(),
   };
+}
+
+// ----------------------------------------------------------------------------
+// Kitchen routing — terminal "Send to Kitchen" flow
+// ----------------------------------------------------------------------------
+
+export interface SendToKitchenResult {
+  order_id: string;
+  printed_at: Date;
+  printed_count: number;
+  // The newly-marked items, with everything the renderer needs to render the
+  // comanda. Reads from the same orderItem table, so prices/notes/modifiers
+  // are exactly what was sent (later edits to the menu don't rewrite them).
+  items: Array<{
+    id: string;
+    quantity: number;
+    notes: string | null;
+    sent_at: Date | null;
+    product: { id: string; name: string; type: string; station_id: string | null };
+    variant: { id: string; name: string } | null;
+    modifiers: Array<{ id: string; name: string }>;
+  }>;
+  order: Awaited<ReturnType<typeof loadOrderOrThrow>>;
+}
+
+/**
+ * Mark every unsent item on an OPEN order as sent_to_kitchen=true and return
+ * just those items (so the terminal can hand them to the kitchen printer).
+ *
+ * Idempotent in spirit: running it twice on a stable order returns an empty
+ * `items` list the second time and prints nothing — only newly-added items
+ * fire on subsequent calls. Cancelled / paid orders are rejected since there's
+ * nothing meaningful to print after the order leaves OPEN.
+ */
+export async function sendToKitchen(orderId: string): Promise<SendToKitchenResult> {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, status: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.status !== OrderStatus.OPEN) {
+      throw new ConflictError(
+        `Order is ${order.status.toLowerCase()} — cannot send to kitchen`,
+      );
+    }
+
+    // Snapshot the IDs of items still pending so we can mark + return only
+    // those. Using two queries (find then update) keeps the result set
+    // deterministic even if a concurrent add lands between the two — the new
+    // item simply waits for the next send.
+    const pending = await tx.orderItem.findMany({
+      where: { order_id: orderId, sent_to_kitchen: false },
+      orderBy: { created_at: 'asc' },
+      select: { id: true },
+    });
+
+    const printedAt = new Date();
+    if (pending.length > 0) {
+      await tx.orderItem.updateMany({
+        where: { id: { in: pending.map((p) => p.id) } },
+        data: { sent_to_kitchen: true, sent_at: printedAt },
+      });
+    }
+
+    // Re-fetch the items with their relations so the renderer doesn't have to
+    // do a second round-trip.
+    const items = pending.length
+      ? await tx.orderItem.findMany({
+          where: { id: { in: pending.map((p) => p.id) } },
+          orderBy: { created_at: 'asc' },
+          select: {
+            id: true,
+            quantity: true,
+            notes: true,
+            sent_at: true,
+            product: {
+              select: { id: true, name: true, type: true, station_id: true },
+            },
+            variant: { select: { id: true, name: true } },
+            modifiers: { select: { id: true, name: true } },
+          },
+        })
+      : [];
+
+    const fullOrder = await loadOrderOrThrow(tx, orderId);
+
+    return {
+      order_id: orderId,
+      printed_at: printedAt,
+      printed_count: items.length,
+      items,
+      order: fullOrder,
+    };
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Active orders — terminal polling endpoint
+// ----------------------------------------------------------------------------
+
+/**
+ * Return every OPEN order with its full nested payload. No pagination — the
+ * terminal needs the full list to decide which tables/cards to highlight, and
+ * the count is bounded by the café's seating (rarely > 30 at a time).
+ *
+ * Ordered by created_at asc so the cashier's queue reads top-down by age.
+ */
+export async function listActiveOrders() {
+  return prisma.order.findMany({
+    where: { status: OrderStatus.OPEN },
+    orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+    include: orderInclude,
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Request Edit — waiter flags, cashier clears
+// ----------------------------------------------------------------------------
+
+/**
+ * Waiter-side: flip needs_attention=true on an OPEN order. Idempotent — calling
+ * twice just overwrites the reason. Reason may be null/empty (the badge alone
+ * is enough to signal the cashier); we store whatever was passed for context.
+ */
+export async function flagOrderForAttention(orderId: string, input: RequestAttentionInput) {
+  return prisma.$transaction(async (tx) => {
+    await assertOrderOpen(tx, orderId);
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        needs_attention: true,
+        attention_reason: input.reason?.trim() ? input.reason.trim() : null,
+      },
+    });
+    return loadOrderOrThrow(tx, orderId);
+  });
+}
+
+/**
+ * Cashier-side: clear the attention flag and wipe the reason. Works on any
+ * status so a cashier can also dismiss a flag on an already-paid order that
+ * accidentally stayed flagged.
+ */
+export async function clearOrderAttention(orderId: string) {
+  const exists = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true },
+  });
+  if (!exists) throw new NotFoundError('Order');
+  return prisma.order.update({
+    where: { id: orderId },
+    data: { needs_attention: false, attention_reason: null },
+    include: orderInclude,
+  });
 }

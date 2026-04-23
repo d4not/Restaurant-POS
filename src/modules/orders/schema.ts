@@ -61,9 +61,18 @@ export const createPaymentSchema = z
   })
   .strict();
 
+// Waiter flips needs_attention=true with an optional reason; cashier flips it
+// back to false (reason is cleared server-side).
+export const requestAttentionSchema = z
+  .object({
+    reason: z.string().max(500).nullable().optional(),
+  })
+  .strict();
+
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
 export type ListOrderQuery = z.infer<typeof listOrderQuerySchema>;
 export type AddOrderItemInput = z.infer<typeof addOrderItemSchema>;
 export type UpdateOrderItemInput = z.infer<typeof updateOrderItemSchema>;
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
+export type RequestAttentionInput = z.infer<typeof requestAttentionSchema>;

@@ -33,6 +33,7 @@ import { taxRouter } from './modules/taxes/routes.js';
 import { settingsRouter } from './modules/settings/routes.js';
 import { zoneRouter } from './modules/zones/routes.js';
 import { tableRouter } from './modules/tables/routes.js';
+import { floorRouter } from './modules/floors/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -98,6 +99,7 @@ export function createApp(): Express {
   app.use('/api/v1/settings', settingsRouter);
   app.use('/api/v1/zones', zoneRouter);
   app.use('/api/v1/tables', tableRouter);
+  app.use('/api/v1/floors', floorRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

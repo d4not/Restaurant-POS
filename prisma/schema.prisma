@@ -78,6 +78,7 @@ enum UserRole {
   MANAGER
   CASHIER
   BARISTA
+  WAITER
 }
 
 enum CashRegisterStatus {
@@ -166,6 +167,7 @@ model User {
   cash_registers    CashRegister[]
   cash_movements    CashMovement[]
   orders            Order[]
+  order_items_added OrderItem[]         @relation("OrderItemAddedBy")
   attendance        Attendance[]        @relation("AttendanceEmployee")
   attendance_logs   Attendance[]        @relation("AttendanceRecorder")
   payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
@@ -855,6 +857,12 @@ model Order {
   // Keeps the daily-reset order_number unique — two orders on the same date
   // cannot share the same number. Date stored at midnight UTC.
   order_date      DateTime    @db.Date
+  // Waiter-to-cashier "Request Edit" flag. Waiters can't delete items or apply
+  // discounts; when they need one, they flip this flag with an optional reason
+  // so the cashier's OrdersList highlights the order. The cashier clears it
+  // after resolving.
+  needs_attention  Boolean    @default(false)
+  attention_reason String?
   created_at      DateTime    @default(now())
   updated_at      DateTime    @updatedAt
 
@@ -895,16 +903,29 @@ model OrderItem {
   tax_amount      Decimal  @default(0) @db.Decimal(14, 0)
   base_amount     Decimal  @default(0) @db.Decimal(14, 0)
   notes           String?
+  // Kitchen routing — set when the cashier/waiter fires the order to the
+  // kitchen printer. Once true, the item is not reprinted on subsequent
+  // "Send to Kitchen" actions (only newly-added items go through). sent_at
+  // is null until the first send and stays put through later edits.
+  sent_to_kitchen Boolean  @default(false)
+  sent_at         DateTime?
+  // The waiter/cashier who put this line on the ticket. Optional so
+  // pre-existing items (added by the admin panel before terminal rollout)
+  // and seeded test orders don't violate the constraint.
+  added_by        String?  @db.Uuid
   created_at      DateTime @default(now())
 
-  order     Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product   Product             @relation(fields: [product_id], references: [id])
-  variant   ProductVariant?     @relation(fields: [variant_id], references: [id])
-  modifiers OrderItemModifier[]
+  order      Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product    Product             @relation(fields: [product_id], references: [id])
+  variant    ProductVariant?     @relation(fields: [variant_id], references: [id])
+  added_by_user User?            @relation("OrderItemAddedBy", fields: [added_by], references: [id])
+  modifiers  OrderItemModifier[]
 
   @@index([order_id])
   @@index([product_id])
   @@index([variant_id])
+  @@index([added_by])
+  @@index([order_id, sent_to_kitchen])
   @@map("order_items")
 }
 
