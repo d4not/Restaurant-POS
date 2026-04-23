@@ -197,12 +197,21 @@ export interface ZoneWithTables extends Zone {
   tables: Table[];
 }
 
+export type TableShape = 'TABLE_RECT' | 'TABLE_CIRCLE';
+
 export interface Table {
   id: string;
   zone_id: string;
   number: number;
   capacity: number;
   status: TableStatus;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  shape: TableShape;
+  label: string | null;
+  rotation: number;
   active: boolean;
   created_at: string;
   updated_at: string;

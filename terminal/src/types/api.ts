@@ -34,12 +34,20 @@ export interface LoginResponse {
 }
 
 export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED';
+export type TableShape = 'TABLE_RECT' | 'TABLE_CIRCLE';
 
 export interface FloorTable {
   id: string;
   number: number;
   capacity: number;
   status: TableStatus;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  shape: TableShape;
+  label: string | null;
+  rotation: number;
   open_order_count: number;
   current_order: {
     id: string;
@@ -51,11 +59,23 @@ export interface FloorTable {
   } | null;
 }
 
+export interface FloorZoneLabel {
+  id: string;
+  text: string;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  font_size: number;
+  rotation: number;
+}
+
 export interface FloorZone {
   id: string;
   name: string;
   display_order: number;
   tables: FloorTable[];
+  labels: FloorZoneLabel[];
 }
 
 export type OrderStatus = 'OPEN' | 'PAID' | 'CANCELLED';

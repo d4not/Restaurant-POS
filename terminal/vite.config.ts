@@ -31,7 +31,9 @@ export default defineConfig({
               // CommonJS keeps Electron's preload sandbox happy across
               // versions — ESM preload requires the contextBridge bootstrap to
               // be configured per-window, and we don't need that yet.
-              output: { format: 'cjs', entryFileNames: '[name].js' },
+              // Emit as .cjs so Node ignores package.json "type": "module"
+              // and loads the file as CommonJS.
+              output: { format: 'cjs', entryFileNames: '[name].cjs' },
               external: ['electron'],
             },
           },

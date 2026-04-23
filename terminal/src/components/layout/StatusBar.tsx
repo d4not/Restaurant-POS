@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../../store/session';
 
 // Format HH:MM in the user's locale, 24-hour. Updated every 30s — second-level
@@ -20,13 +20,15 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function tabClass({ isActive }: { isActive: boolean }): string {
+  return 'statusbar-tab' + (isActive ? ' active' : '');
+}
+
 export function StatusBar() {
   const navigate = useNavigate();
   const user = useSessionStore((s) => s.user);
   const logout = useSessionStore((s) => s.logout);
   const clock = useClock();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   // The Lock action drops the session and bounces to the PIN screen. Per spec
   // this is treated the same as logout for now — when we add the "lock screen
@@ -36,19 +38,6 @@ export function StatusBar() {
     navigate('/login', { replace: true });
   }
 
-  // Close the menu when clicking outside. A simple outside-click listener is
-  // enough for a single dropdown — a full Popover primitive would be
-  // overkill.
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handler(ev: MouseEvent) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(ev.target as Node)) setMenuOpen(false);
-    }
-    window.addEventListener('mousedown', handler);
-    return () => window.removeEventListener('mousedown', handler);
-  }, [menuOpen]);
-
   if (!user) return null;
 
   const canManageRegister =
@@ -57,76 +46,41 @@ export function StatusBar() {
   return (
     <header className="statusbar">
       <div className="brand">Restaurant POS</div>
-      <div className="spacer" />
-      <div className="clock">{clock}</div>
-      <div className="user">
-        <div className="avatar">{initials(user.name)}</div>
-        <div className="meta">
-          <div className="name">{user.name}</div>
-          <div className="role">{user.role}</div>
-        </div>
-      </div>
 
-      <div className="sb-menu-wrap" ref={menuRef}>
-        <button
-          type="button"
-          className="sb-menu-btn"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="Open menu"
-        >
-          ⋮
-        </button>
-        {menuOpen && (
-          <div className="sb-menu" role="menu">
-            <button
-              type="button"
-              className="sb-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                navigate('/floor');
-              }}
-            >
-              ⌂ Floor Plan
-            </button>
-            <button
-              type="button"
-              className="sb-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                navigate('/orders');
-              }}
-            >
-              📋 Active Orders
-            </button>
-            {canManageRegister && (
-              <button
-                type="button"
-                className="sb-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  navigate('/register');
-                }}
-              >
-                💰 Cash Register
-              </button>
-            )}
-            <button
-              type="button"
-              className="sb-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                navigate('/settings/printer');
-              }}
-            >
-              🖨 Printer Settings
-            </button>
-          </div>
+      <nav className="statusbar-tabs" aria-label="Primary">
+        <NavLink to="/floor" className={tabClass}>
+          <span className="tab-icon" aria-hidden="true">⌂</span>
+          <span>Floor Plan</span>
+        </NavLink>
+        <NavLink to="/orders" className={tabClass}>
+          <span className="tab-icon" aria-hidden="true">📋</span>
+          <span>Active Orders</span>
+        </NavLink>
+        {canManageRegister && (
+          <NavLink to="/register" className={tabClass}>
+            <span className="tab-icon" aria-hidden="true">💰</span>
+            <span>Cash Register</span>
+          </NavLink>
         )}
-      </div>
+        <NavLink to="/settings/printer" className={tabClass}>
+          <span className="tab-icon" aria-hidden="true">🖨</span>
+          <span>Printer Settings</span>
+        </NavLink>
+      </nav>
 
-      <button type="button" className="btn btn-ghost" onClick={lock}>
-        Lock
-      </button>
+      <div className="statusbar-right">
+        <div className="clock">{clock}</div>
+        <div className="user">
+          <div className="avatar">{initials(user.name)}</div>
+          <div className="meta">
+            <div className="name">{user.name}</div>
+            <div className="role">{user.role}</div>
+          </div>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={lock}>
+          Lock
+        </button>
+      </div>
     </header>
   );
 }

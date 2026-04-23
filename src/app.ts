@@ -32,6 +32,7 @@ import { payrollRouter } from './modules/payroll/routes.js';
 import { taxRouter } from './modules/taxes/routes.js';
 import { settingsRouter } from './modules/settings/routes.js';
 import { zoneRouter } from './modules/zones/routes.js';
+import { zoneLabelRouter } from './modules/zone-labels/routes.js';
 import { tableRouter } from './modules/tables/routes.js';
 import { floorRouter } from './modules/floors/routes.js';
 
@@ -98,6 +99,7 @@ export function createApp(): Express {
   app.use('/api/v1/taxes', taxRouter);
   app.use('/api/v1/settings', settingsRouter);
   app.use('/api/v1/zones', zoneRouter);
+  app.use('/api/v1/zone-labels', zoneLabelRouter);
   app.use('/api/v1/tables', tableRouter);
   app.use('/api/v1/floors', floorRouter);
 

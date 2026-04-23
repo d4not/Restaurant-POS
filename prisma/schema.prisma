@@ -137,6 +137,11 @@ enum TableStatus {
   RESERVED
 }
 
+enum TableShape {
+  TABLE_RECT
+  TABLE_CIRCLE
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
@@ -1030,7 +1035,10 @@ model Zone {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
-  tables Table[]
+  tables       Table[]
+  // Floor-canvas free-floating text labels scoped to this zone. Cascade delete
+  // so wiping a zone doesn't leave orphaned labels on the canvas.
+  zone_labels  ZoneLabel[]
 
   @@map("zones")
 }
@@ -1046,6 +1054,18 @@ model Table {
   // AVAILABLE only when no OPEN orders remain (so group orders share a table
   // without flipping the badge between settles). RESERVED is set manually.
   status     TableStatus @default(AVAILABLE)
+  // Floor-plan visual state. pos_x/pos_y are pixel coordinates within the
+  // canvas container; width/height are the rendered box size. shape controls
+  // the render primitive (rounded rect vs circle). label overrides the numeric
+  // display when the restaurant uses named tables (e.g. "Patio 3"). rotation
+  // lets long rectangles sit flush against walls at arbitrary angles.
+  pos_x      Int         @default(0)
+  pos_y      Int         @default(0)
+  width      Int         @default(120)
+  height     Int         @default(120)
+  shape      TableShape  @default(TABLE_RECT)
+  label      String?
+  rotation   Int         @default(0)
   active     Boolean     @default(true)
   created_at DateTime    @default(now())
   updated_at DateTime    @updatedAt
@@ -1057,4 +1077,28 @@ model Table {
   @@index([zone_id])
   @@index([status])
   @@map("tables")
+}
+
+// Free-floating text labels rendered on the floor canvas. Unlike zone NAMES
+// (stored on Zone itself and used as the tab label in the old grid view), these
+// are decorative on-canvas elements: room names, wall markers, decorative
+// hints ("High Bar", "Patio"). Positioned absolutely in the same coordinate
+// space as Table. Cascade delete with Zone.
+model ZoneLabel {
+  id         String   @id @default(uuid()) @db.Uuid
+  zone_id    String   @db.Uuid
+  text       String
+  pos_x      Int      @default(0)
+  pos_y      Int      @default(0)
+  width      Int      @default(200)
+  height     Int      @default(48)
+  font_size  Int      @default(24)
+  rotation   Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  zone Zone @relation(fields: [zone_id], references: [id], onDelete: Cascade)
+
+  @@index([zone_id])
+  @@map("zone_labels")
 }

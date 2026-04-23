@@ -1,4 +1,4 @@
-import { OrderStatus, TableStatus } from '@prisma/client';
+import { OrderStatus, TableShape, TableStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 
 /**
@@ -11,12 +11,23 @@ import { prisma } from '../../lib/prisma.js';
  * common in cafés — the badge cares about how long the party has been seated,
  * not the most recent ticket). `open_order_count` lets the renderer say
  * "+2 more" when several tickets are stacked.
+ *
+ * Layout fields (pos_x/pos_y/width/height/shape/rotation/label) drive the
+ * visual-canvas floor plan: absolute-positioned table boxes with a saved
+ * shape + rotation. Free-floating text annotations live in `labels`.
  */
 export interface FloorTableSummary {
   id: string;
   number: number;
   capacity: number;
   status: TableStatus;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  shape: TableShape;
+  label: string | null;
+  rotation: number;
   open_order_count: number;
   current_order: {
     id: string;
@@ -28,11 +39,23 @@ export interface FloorTableSummary {
   } | null;
 }
 
+export interface FloorZoneLabelSummary {
+  id: string;
+  text: string;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  font_size: number;
+  rotation: number;
+}
+
 export interface FloorZoneSummary {
   id: string;
   name: string;
   display_order: number;
   tables: FloorTableSummary[];
+  labels: FloorZoneLabelSummary[];
 }
 
 /**
@@ -63,6 +86,9 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
           },
         },
       },
+      zone_labels: {
+        orderBy: { created_at: 'asc' },
+      },
     },
   });
 
@@ -78,6 +104,13 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
         number: table.number,
         capacity: table.capacity,
         status: table.status,
+        pos_x: table.pos_x,
+        pos_y: table.pos_y,
+        width: table.width,
+        height: table.height,
+        shape: table.shape,
+        label: table.label,
+        rotation: table.rotation,
         open_order_count: openOrders.length,
         current_order: head
           ? {
@@ -91,5 +124,15 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
           : null,
       };
     }),
+    labels: zone.zone_labels.map((label) => ({
+      id: label.id,
+      text: label.text,
+      pos_x: label.pos_x,
+      pos_y: label.pos_y,
+      width: label.width,
+      height: label.height,
+      font_size: label.font_size,
+      rotation: label.rotation,
+    })),
   }));
 }

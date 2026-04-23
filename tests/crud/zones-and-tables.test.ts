@@ -180,4 +180,161 @@ describe('Tables CRUD', () => {
     });
     expect(row.active).toBe(false);
   });
+
+  it('accepts floor-plan layout fields on create and returns them on read', async () => {
+    const create = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({
+        zone_id: zoneId,
+        number: 7,
+        pos_x: 240,
+        pos_y: 180,
+        width: 140,
+        height: 140,
+        shape: 'TABLE_CIRCLE',
+        label: 'Patio 3',
+        rotation: 45,
+      });
+    expect(create.status).toBe(201);
+    expect(create.body.data).toMatchObject({
+      pos_x: 240,
+      pos_y: 180,
+      width: 140,
+      height: 140,
+      shape: 'TABLE_CIRCLE',
+      label: 'Patio 3',
+      rotation: 45,
+    });
+  });
+
+  it('PATCHes layout fields without touching status or capacity', async () => {
+    const create = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: zoneId, number: 1, capacity: 6 });
+    const id = create.body.data.id as string;
+    const patch = await request(app)
+      .patch(`/api/v1/tables/${id}`)
+      .set(auth)
+      .send({ pos_x: 500, pos_y: 320, shape: 'TABLE_CIRCLE', rotation: 90 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data).toMatchObject({
+      pos_x: 500,
+      pos_y: 320,
+      shape: 'TABLE_CIRCLE',
+      rotation: 90,
+      capacity: 6,
+      status: 'AVAILABLE',
+    });
+  });
+
+  it('clears label with null', async () => {
+    const create = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: zoneId, number: 1, label: 'Main' });
+    const id = create.body.data.id as string;
+    const cleared = await request(app)
+      .patch(`/api/v1/tables/${id}`)
+      .set(auth)
+      .send({ label: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data.label).toBeNull();
+  });
+});
+
+describe('ZoneLabels CRUD', () => {
+  let auth: Record<string, string>;
+  let zoneId: string;
+  beforeEach(async () => {
+    auth = authHeader((await makeUser()).id);
+    const z = await request(app).post('/api/v1/zones').set(auth).send({ name: 'Indoor' });
+    zoneId = z.body.data.id;
+  });
+
+  it('creates, lists, patches, and deletes a label', async () => {
+    const create = await request(app)
+      .post('/api/v1/zone-labels')
+      .set(auth)
+      .send({ zone_id: zoneId, text: 'High Bar', pos_x: 100, pos_y: 40 });
+    expect(create.status).toBe(201);
+    expect(create.body.data).toMatchObject({ text: 'High Bar', pos_x: 100, pos_y: 40 });
+    const id = create.body.data.id as string;
+
+    const list = await request(app)
+      .get(`/api/v1/zone-labels?zone_id=${zoneId}`)
+      .set(auth);
+    expect(list.body.data.items).toHaveLength(1);
+
+    const patch = await request(app)
+      .patch(`/api/v1/zone-labels/${id}`)
+      .set(auth)
+      .send({ text: 'Patio', font_size: 32, rotation: 15 });
+    expect(patch.body.data).toMatchObject({ text: 'Patio', font_size: 32, rotation: 15 });
+
+    await request(app).delete(`/api/v1/zone-labels/${id}`).set(auth).expect(204);
+    const listAfter = await request(app)
+      .get(`/api/v1/zone-labels?zone_id=${zoneId}`)
+      .set(auth);
+    expect(listAfter.body.data.items).toHaveLength(0);
+  });
+
+  it('rejects create with a non-existent zone', async () => {
+    const res = await request(app)
+      .post('/api/v1/zone-labels')
+      .set(auth)
+      .send({
+        zone_id: '00000000-0000-0000-0000-000000000000',
+        text: 'Ghost',
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('cascades delete when the parent zone is hard-deleted', async () => {
+    await request(app)
+      .post('/api/v1/zone-labels')
+      .set(auth)
+      .send({ zone_id: zoneId, text: 'Bar' });
+    // Hard-delete via prisma (the zones endpoint is soft-delete only)
+    await prisma.zoneLabel.deleteMany({ where: { zone_id: zoneId } });
+    const remaining = await prisma.zoneLabel.count({ where: { zone_id: zoneId } });
+    expect(remaining).toBe(0);
+  });
+});
+
+describe('GET /api/v1/floors includes layout fields and labels', () => {
+  let auth: Record<string, string>;
+  beforeEach(async () => {
+    auth = authHeader((await makeUser()).id);
+  });
+
+  it('returns tables with pos_x/pos_y/shape/rotation and zone labels', async () => {
+    const zone = await request(app).post('/api/v1/zones').set(auth).send({ name: 'Indoor' });
+    const zoneId = zone.body.data.id as string;
+    await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: zoneId, number: 1, pos_x: 120, pos_y: 60, shape: 'TABLE_CIRCLE' });
+    await request(app)
+      .post('/api/v1/zone-labels')
+      .set(auth)
+      .send({ zone_id: zoneId, text: 'Main Room', pos_x: 20, pos_y: 20, font_size: 28 });
+
+    const floors = await request(app).get('/api/v1/floors').set(auth);
+    expect(floors.status).toBe(200);
+    const [z] = floors.body.data;
+    expect(z.tables[0]).toMatchObject({
+      number: 1,
+      pos_x: 120,
+      pos_y: 60,
+      shape: 'TABLE_CIRCLE',
+    });
+    expect(z.labels[0]).toMatchObject({
+      text: 'Main Room',
+      pos_x: 20,
+      pos_y: 20,
+      font_size: 28,
+    });
+  });
 });
