@@ -87,8 +87,10 @@
 ---
 
 ## IMPORTANT
-- Read @SPEC.md for ALL backend business logic
-- Read @FRONTEND-SPEC.md for ALL frontend page specifications
+- Read @docs/SPEC.md for ALL backend business logic
+- Read @docs/FRONTEND-SPEC.md for ALL frontend page specifications
+- See @docs/mockup-style.css for the CSS design system
+- See @docs/mockup.html for the HTML structure reference
 - Never use floating point for money
 - Always wrap multi-table writes in Prisma transactions
 - Always validate request input with Zod before processing
