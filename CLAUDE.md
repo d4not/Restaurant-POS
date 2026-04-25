@@ -80,15 +80,24 @@
 - `cd terminal && npm run build` — package Electron app
 
 ### Design
-- DARK warm theme — NOT the same as admin panel
-- Large touch targets (48px+ buttons, 56px+ primary actions)
-- Minimal navigation, full-screen task focus
-- Touch-first: no hover-dependent interactions
-- PIN login with numpad
+- YOU MUST match the design in @docs/pos-terminal-design.html — this is the authoritative reference
+- SAME warm light theme as admin panel — NOT dark theme
+- CSS variables: --bg (#f5f0e8), --sidebar (#2c2420), --gold (#c9a45c), --green (#4a8c5c), --red (#c45040)
+- Fonts: Playfair Display (headings), DM Sans (body)
+- Top bar: dark brown (#2c2420), 72px height, center nav tabs, right status area
+- Touch targets: 44px+ height minimum
+- Time-based color coding: green <10min, gold 10-25min, red 25+min
+
+### Key Screens (from wireframe)
+- **Active Orders**: zone-grouped collapsible rows, expandable inline, footer summary bar
+- **Floor Plan**: visual table canvas with positioned elements, edit mode for drag/resize
+- **Table Detail**: 3-column layout (categories+products | ticket | payment)
+- **Order History**: searchable completed orders list
+- **Settings**: modal with left nav sections (general, printers, users)
 
 ### Printing
 - Electron main process handles ESC/POS via IPC
-- Two printers: receipt printer (bar) + kitchen printer (kitchen)
+- Two printers: receipt + kitchen
 - Renderer calls: window.electron.printKitchen(data), window.electron.printReceipt(data)
 
 ---
@@ -97,9 +106,11 @@
 - Read @docs/SPEC.md for ALL backend business logic
 - Read @docs/FRONTEND-SPEC.md for admin panel pages
 - Read @docs/TERMINAL-SPEC.md for POS terminal specification
+- Read @docs/pos-terminal-design.html for terminal design reference — the wireframe is the source of truth
 - Never use floating point for money
 - Always wrap multi-table writes in Prisma transactions
 - Inventory operations MUST update stock AND log movement in a single transaction
 - Prices are TAX-INCLUSIVE — never add tax on top
 - Modifier groups: SWAP replaces recipe ingredients, ADD stacks on top
 - Recipe modifier lines link to a modifier_group_id, not a specific supply
+- ALL UI text in English
