@@ -35,6 +35,7 @@ import { zoneRouter } from './modules/zones/routes.js';
 import { zoneLabelRouter } from './modules/zone-labels/routes.js';
 import { tableRouter } from './modules/tables/routes.js';
 import { floorRouter } from './modules/floors/routes.js';
+import { suggestionRouter } from './modules/suggestions/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -59,15 +60,20 @@ export function createApp(): Express {
   app.use(express.urlencoded({ extended: true }));
   app.use(pinoHttp({ logger }));
 
-  app.use(
-    '/api/',
-    rateLimit({
-      windowMs: 60_000,
-      limit: 300,
-      standardHeaders: 'draft-7',
-      legacyHeaders: false,
-    }),
-  );
+  // Rate limiter is skipped under NODE_ENV=test — Vitest fans out hundreds of
+  // requests per suite (each test seeds purchases, opens registers, etc.) and
+  // tripping 429s would just be noise. Production keeps the 300/min cap.
+  if (env.NODE_ENV !== 'test') {
+    app.use(
+      '/api/',
+      rateLimit({
+        windowMs: 60_000,
+        limit: 300,
+        standardHeaders: 'draft-7',
+        legacyHeaders: false,
+      }),
+    );
+  }
 
   app.get('/health', (_req, res) => {
     res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });
@@ -102,6 +108,7 @@ export function createApp(): Express {
   app.use('/api/v1/zone-labels', zoneLabelRouter);
   app.use('/api/v1/tables', tableRouter);
   app.use('/api/v1/floors', floorRouter);
+  app.use('/api/v1/suggestions', suggestionRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

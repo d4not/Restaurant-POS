@@ -138,10 +138,24 @@ export function OrdersPage() {
     {
       key: 'items',
       header: 'Items',
-      width: '90px',
+      width: '110px',
       render: (o) => {
-        const count = (o.items ?? []).reduce((sum, i) => sum + i.quantity, 0);
-        return <span className="fs-13">{count}</span>;
+        // Count only non-voided items so the column matches what the customer
+        // actually paid for. Voided rows are tombstones on the order — they
+        // contribute zero to totals and shouldn't bump the displayed count.
+        const live = (o.items ?? []).filter((i) => !i.voided_at);
+        const removed = (o.items ?? []).length - live.length;
+        const count = live.reduce((sum, i) => sum + i.quantity, 0);
+        return (
+          <span className="fs-13">
+            {count}
+            {removed > 0 && (
+              <span className="text-red fs-11" style={{ marginLeft: 6 }}>
+                −{removed} removed
+              </span>
+            )}
+          </span>
+        );
       },
     },
     {

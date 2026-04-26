@@ -17,13 +17,49 @@ import { getSetting } from '../settings/service.js';
 import { SETTING_KEYS } from '../settings/schema.js';
 import type {
   AddOrderItemInput,
+  CancelOrderInput,
   CreateOrderInput,
   CreatePaymentInput,
   ListOrderQuery,
+  RemoveOrderItemInput,
   RequestAttentionInput,
+  RestoreOrderItemInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
 } from './schema.js';
+import { ForbiddenError } from '../../lib/errors.js';
+
+/**
+ * Re-authenticate ANY active CASHIER/MANAGER/ADMIN by PIN — used to gate
+ * destructive actions on items that have already left the workspace (sent to
+ * kitchen, the comanda was printed, or the order is being voided). The flow
+ * is "waiter clicks → cashier walks over and types their PIN to approve",
+ * so the PIN is matched against the cashier ring rather than the JWT user.
+ *
+ * Returns the approving user's id so the caller can record it in audit fields.
+ */
+async function authorizeCashierPin(pin: string | undefined): Promise<string> {
+  if (!pin) throw new ForbiddenError('Cashier PIN required');
+  const matches = await prisma.user.findMany({
+    where: {
+      pin,
+      active: true,
+      role: { in: ['CASHIER', 'MANAGER', 'ADMIN'] },
+    },
+    take: 2,
+    select: { id: true },
+  });
+  if (matches.length === 0) {
+    throw new ForbiddenError('Incorrect PIN');
+  }
+  if (matches.length > 1) {
+    // Two cashiers sharing a PIN can't approve — admin needs to fix the dupes.
+    throw new ConflictError(
+      'PIN is shared by multiple active users — ask an admin to assign unique PINs',
+    );
+  }
+  return matches[0].id;
+}
 
 type Tx = Prisma.TransactionClient;
 type PrismaLike = Tx | typeof prisma;
@@ -31,6 +67,9 @@ type PrismaLike = Tx | typeof prisma;
 const orderInclude = {
   register: { select: { id: true, status: true, user_id: true } },
   user: { select: { id: true, name: true } },
+  // cancelled_by is null for OPEN/PAID orders. The admin timeline surfaces
+  // who pulled the trigger when the order was voided.
+  cancelled_by: { select: { id: true, name: true } },
   table: {
     select: {
       id: true,
@@ -41,12 +80,15 @@ const orderInclude = {
     },
   },
   items: {
-    orderBy: { created_at: 'asc' },
+    // Sort active lines first, then voided lines at the bottom — the cashier
+    // sees the live ticket up top with the struck-through history below.
+    orderBy: [{ voided_at: 'asc' }, { created_at: 'asc' }],
     include: {
       product: { select: { id: true, name: true, type: true, tax_id: true, station_id: true } },
       variant: { select: { id: true, name: true } },
       modifiers: true,
       added_by_user: { select: { id: true, name: true } },
+      voided_by_user: { select: { id: true, name: true } },
     },
   },
   payments: { orderBy: { created_at: 'asc' } },
@@ -120,8 +162,10 @@ async function recalculateOrderTotals(tx: Tx, orderId: string): Promise<void> {
       where: { id: orderId },
       select: { discount_amount: true },
     }),
+    // Voided lines are kept on the ticket for audit + Restore but contribute
+    // zero to subtotal/tax/total — same convention as a hard-deleted line.
     tx.orderItem.findMany({
-      where: { order_id: orderId },
+      where: { order_id: orderId, voided_at: null },
       select: { line_total: true, tax_amount: true },
     }),
   ]);
@@ -349,7 +393,40 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
   });
 }
 
-export async function cancelOrder(id: string) {
+export async function cancelOrder(
+  id: string,
+  currentUserId: string,
+  input: CancelOrderInput,
+) {
+  // Decide BEFORE opening a transaction whether this cancel needs cashier
+  // approval. The rule: if any line on the order has been sent to the kitchen
+  // we've made a promise to the kitchen, and voiding requires a written
+  // reason + a cashier+'s PIN. Untouched orders (no items, or all items
+  // unsent) are a no-friction cancel — waiters can void their own mistakes.
+  // Voided lines no longer represent a live kitchen promise (the comanda
+  // either already showed the void, or will on the next send) so they don't
+  // count toward the "needs cashier approval" gate.
+  const sentItems = await prisma.orderItem.count({
+    where: { order_id: id, sent_to_kitchen: true, voided_at: null },
+  });
+  const requiresApproval = sentItems > 0;
+
+  let approverId: string | null = null;
+  let cancelReason: string | null = null;
+
+  if (requiresApproval) {
+    if (!input.reason || input.reason.trim().length < 5) {
+      throw new ForbiddenError('Reason required (5+ characters)');
+    }
+    approverId = await authorizeCashierPin(input.pin);
+    cancelReason = input.reason.trim();
+  } else {
+    // Even on the free path we keep whatever reason the waiter typed so the
+    // audit trail isn't completely silent. Skip the PIN check.
+    cancelReason = input.reason?.trim() || null;
+    approverId = currentUserId;
+  }
+
   return prisma.$transaction(async (tx) => {
     // Snapshot table_id BEFORE the status flip so we still know which table to
     // re-sync after the order leaves OPEN.
@@ -362,7 +439,12 @@ export async function cancelOrder(id: string) {
     // fails the count==0 check and throws a 409.
     const claim = await tx.order.updateMany({
       where: { id, status: OrderStatus.OPEN },
-      data: { status: OrderStatus.CANCELLED },
+      data: {
+        status: OrderStatus.CANCELLED,
+        cancel_reason: cancelReason,
+        cancelled_by_user_id: approverId,
+        cancelled_at: new Date(),
+      },
     });
     if (claim.count === 0) {
       const existing = await tx.order.findUnique({ where: { id }, select: { status: true } });
@@ -494,37 +576,89 @@ export async function addOrderItem(
     await assertOrderOpen(tx, orderId);
     const quantity = input.quantity ?? 1;
     const resolved = await resolveOrderLine(tx, input);
-    const lineTotal = resolved.unitPrice
-      .add(resolved.modifiersPrice)
-      .mul(quantity);
-    const { base, tax } = computeTaxInclusive(lineTotal, resolved.taxRate);
 
-    const item = await tx.orderItem.create({
-      data: {
+    // Merge into an existing UNSENT line with the exact same shape (product /
+    // variant / modifier set / notes) so repeated taps of the same drink show
+    // up as a single "3× Bottled Water" instead of three separate 1× rows.
+    // We never merge into a sent_to_kitchen=true line — once the comanda is
+    // out, additions are a separate batch and need their own row so the
+    // kitchen sees the new ticket.
+    const incomingModIds = (resolved.modifierRows.map((m) => m.modifier_id))
+      .slice()
+      .sort();
+    const incomingNotes = input.notes ?? null;
+
+    const candidates = await tx.orderItem.findMany({
+      where: {
         order_id: orderId,
         product_id: resolved.productId,
         variant_id: resolved.variantId,
-        quantity,
-        unit_price: resolved.unitPrice,
-        modifiers_price: resolved.modifiersPrice,
-        line_total: lineTotal,
-        tax_rate: resolved.taxRate,
-        tax_amount: tax,
-        base_amount: base,
-        notes: input.notes,
-        added_by: userId ?? null,
+        sent_to_kitchen: false,
+        // Never merge into a voided line — it's struck-through on the ticket
+        // and the cashier expects the new tap to show up as a fresh row.
+        voided_at: null,
+        notes: incomingNotes,
       },
+      include: { modifiers: { select: { modifier_id: true } } },
     });
 
-    if (resolved.modifierRows.length > 0) {
-      await tx.orderItemModifier.createMany({
-        data: resolved.modifierRows.map((m) => ({
-          order_item_id: item.id,
-          modifier_id: m.modifier_id,
-          name: m.name,
-          extra_price: m.extra_price,
-        })),
+    const match = candidates.find((c) => {
+      const cmIds = c.modifiers.map((m) => m.modifier_id).slice().sort();
+      if (cmIds.length !== incomingModIds.length) return false;
+      for (let i = 0; i < cmIds.length; i++) {
+        if (cmIds[i] !== incomingModIds[i]) return false;
+      }
+      return true;
+    });
+
+    if (match) {
+      const newQty = match.quantity + quantity;
+      const newLineTotal = resolved.unitPrice
+        .add(resolved.modifiersPrice)
+        .mul(newQty);
+      const { base, tax } = computeTaxInclusive(newLineTotal, resolved.taxRate);
+      await tx.orderItem.update({
+        where: { id: match.id },
+        data: {
+          quantity: newQty,
+          line_total: newLineTotal,
+          tax_amount: tax,
+          base_amount: base,
+        },
       });
+    } else {
+      const lineTotal = resolved.unitPrice
+        .add(resolved.modifiersPrice)
+        .mul(quantity);
+      const { base, tax } = computeTaxInclusive(lineTotal, resolved.taxRate);
+
+      const item = await tx.orderItem.create({
+        data: {
+          order_id: orderId,
+          product_id: resolved.productId,
+          variant_id: resolved.variantId,
+          quantity,
+          unit_price: resolved.unitPrice,
+          modifiers_price: resolved.modifiersPrice,
+          line_total: lineTotal,
+          tax_rate: resolved.taxRate,
+          tax_amount: tax,
+          base_amount: base,
+          notes: input.notes,
+          added_by: userId ?? null,
+        },
+      });
+
+      if (resolved.modifierRows.length > 0) {
+        await tx.orderItemModifier.createMany({
+          data: resolved.modifierRows.map((m) => ({
+            order_item_id: item.id,
+            modifier_id: m.modifier_id,
+            name: m.name,
+            extra_price: m.extra_price,
+          })),
+        });
+      }
     }
 
     await recalculateOrderTotals(tx, orderId);
@@ -532,11 +666,107 @@ export async function addOrderItem(
   });
 }
 
+/**
+ * Re-resolve the price of an order line given a (possibly new) variant and
+ * modifier set. Mirrors the validation in resolveOrderLine but reuses the
+ * snapshot tax_rate and product_id from the existing line — the customer is
+ * editing one ticket row, not adding a different product.
+ */
+async function resolveItemEdit(
+  tx: Tx,
+  productId: string,
+  variantId: string | null,
+  modifierIds: string[],
+): Promise<{
+  variantId: string | null;
+  unitPrice: Decimal;
+  modifiersPrice: Decimal;
+  modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[];
+}> {
+  const product = await tx.product.findFirst({
+    where: { id: productId, deleted_at: null },
+    select: { id: true, type: true, active: true, sell_price: true },
+  });
+  if (!product) throw new NotFoundError('Product');
+  if (!product.active) throw new BadRequestError('Product is inactive');
+
+  let unitPrice: Decimal;
+  if (variantId) {
+    if (product.type !== ProductType.DISH) {
+      throw new BadRequestError('Only DISH products have variants');
+    }
+    const variant = await tx.productVariant.findUnique({
+      where: { id: variantId },
+      select: { id: true, product_id: true, sell_price: true, active: true },
+    });
+    if (!variant || variant.product_id !== productId) {
+      throw new NotFoundError('ProductVariant');
+    }
+    if (!variant.active) throw new BadRequestError('Variant is inactive');
+    unitPrice = new Decimal(variant.sell_price);
+  } else {
+    if (product.sell_price == null) {
+      throw new BadRequestError('Product has no sell_price — cannot reprice line');
+    }
+    unitPrice = new Decimal(product.sell_price);
+  }
+
+  const modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[] = [];
+  let modifiersPrice = new Decimal(0);
+  if (modifierIds.length) {
+    const modifiers = await tx.modifier.findMany({
+      where: { id: { in: modifierIds } },
+      select: { id: true, name: true, extra_price: true, active: true },
+    });
+    if (modifiers.length !== modifierIds.length) {
+      const found = new Set(modifiers.map((m) => m.id));
+      const missing = modifierIds.find((id) => !found.has(id));
+      throw new NotFoundError(`Modifier ${missing}`);
+    }
+    for (const id of modifierIds) {
+      const m = modifiers.find((x) => x.id === id)!;
+      if (!m.active) throw new BadRequestError(`Modifier ${id} is inactive`);
+      const extra = new Decimal(m.extra_price);
+      modifierRows.push({ modifier_id: m.id, name: m.name, extra_price: extra });
+      modifiersPrice = modifiersPrice.add(extra);
+    }
+  }
+
+  return { variantId, unitPrice, modifiersPrice, modifierRows };
+}
+
 export async function updateOrderItem(
   orderId: string,
   itemId: string,
   input: UpdateOrderItemInput,
 ) {
+  // Sent-to-kitchen items represent a real promise to the kitchen — quantity
+  // edits and other tweaks need a fresh PIN check before touching the line.
+  // Notes-only edits are also gated since the kitchen may have already worked
+  // off the printed comanda. The PIN is matched against any active cashier+
+  // (waiter→cashier authorization), not the JWT user.
+  //
+  // Voided lines are read-only here — the cashier must Restore them first
+  // before any edit. This keeps the audit trail honest: a voided line stays
+  // exactly as it was at the moment it was voided.
+  const preflight = await prisma.orderItem.findUnique({
+    where: { id: itemId },
+    select: {
+      sent_to_kitchen: true,
+      order_id: true,
+      voided_at: true,
+    },
+  });
+  if (!preflight || preflight.order_id !== orderId) {
+    throw new NotFoundError('OrderItem');
+  }
+  if (preflight.voided_at != null) {
+    throw new ConflictError('Voided items cannot be edited — restore the item first');
+  }
+  if (preflight.sent_to_kitchen) {
+    await authorizeCashierPin(input.pin);
+  }
+
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, orderId);
     const existing = await tx.orderItem.findUnique({
@@ -544,18 +774,49 @@ export async function updateOrderItem(
       select: {
         id: true,
         order_id: true,
+        product_id: true,
+        variant_id: true,
         quantity: true,
         unit_price: true,
         modifiers_price: true,
         tax_rate: true,
+        modifiers: { select: { modifier_id: true } },
       },
     });
     if (!existing || existing.order_id !== orderId) throw new NotFoundError('OrderItem');
 
+    // Re-price + replace modifiers iff the caller actually sent shape changes.
+    // Notes/qty-only edits skip the re-resolve so they don't pay for an extra
+    // round-trip and don't accidentally re-validate a now-inactive variant.
+    const reshape = input.variant_id !== undefined || input.modifier_ids !== undefined;
+
+    let unitPrice = new Decimal(existing.unit_price);
+    let modifiersPrice = new Decimal(existing.modifiers_price);
+    let nextVariantId = existing.variant_id;
+    let nextModifierRows: { modifier_id: string; name: string; extra_price: Decimal }[] | null =
+      null;
+
+    if (reshape) {
+      const targetVariantId =
+        input.variant_id !== undefined ? input.variant_id : existing.variant_id;
+      const targetModifierIds =
+        input.modifier_ids !== undefined
+          ? input.modifier_ids
+          : existing.modifiers.map((m) => m.modifier_id);
+      const resolved = await resolveItemEdit(
+        tx,
+        existing.product_id,
+        targetVariantId,
+        targetModifierIds,
+      );
+      unitPrice = resolved.unitPrice;
+      modifiersPrice = resolved.modifiersPrice;
+      nextVariantId = resolved.variantId;
+      nextModifierRows = resolved.modifierRows;
+    }
+
     const quantity = input.quantity ?? existing.quantity;
-    const lineTotal = new Decimal(existing.unit_price)
-      .add(new Decimal(existing.modifiers_price))
-      .mul(quantity);
+    const lineTotal = unitPrice.add(modifiersPrice).mul(quantity);
     const { base, tax } = computeTaxInclusive(lineTotal, existing.tax_rate);
 
     await tx.orderItem.update({
@@ -563,26 +824,174 @@ export async function updateOrderItem(
       data: {
         ...(input.quantity !== undefined ? { quantity } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        ...(reshape
+          ? {
+              variant_id: nextVariantId,
+              unit_price: unitPrice,
+              modifiers_price: modifiersPrice,
+            }
+          : {}),
         line_total: lineTotal,
         tax_amount: tax,
         base_amount: base,
       },
     });
 
+    if (nextModifierRows) {
+      // Wipe + reinsert is the simplest correct operation; OrderItemModifier
+      // has no FK references pointing at it (the cascading is one-way) so a
+      // delete-many followed by createMany inside the same transaction is
+      // both atomic and cheap (modifier counts per line are tiny).
+      await tx.orderItemModifier.deleteMany({ where: { order_item_id: itemId } });
+      if (nextModifierRows.length > 0) {
+        await tx.orderItemModifier.createMany({
+          data: nextModifierRows.map((m) => ({
+            order_item_id: itemId,
+            modifier_id: m.modifier_id,
+            name: m.name,
+            extra_price: m.extra_price,
+          })),
+        });
+      }
+    }
+
     await recalculateOrderTotals(tx, orderId);
     return loadOrderOrThrow(tx, orderId);
   });
 }
 
-export async function removeOrderItem(orderId: string, itemId: string) {
+/**
+ * Remove an order line. Two paths depending on whether the line ever made it
+ * to the kitchen:
+ *   • Unsent line → hard delete. No audit trail needed because the kitchen
+ *     never knew it existed.
+ *   • Sent line   → soft-delete (void). The row stays on the ticket struck
+ *     through with a Restore option, totals/inventory ignore it, and the
+ *     next Send to Kitchen prints a "REMOVED" notification so the cooks know
+ *     to drop it. Voided lines store voided_by / void_reason for the audit
+ *     log; restoring re-runs the same flow in reverse.
+ *
+ * The PIN check is required for either path on a sent line — the same gate
+ * that protects qty-edits / notes on sent items.
+ */
+export async function removeOrderItem(
+  orderId: string,
+  itemId: string,
+  input: RemoveOrderItemInput,
+) {
+  const preflight = await prisma.orderItem.findUnique({
+    where: { id: itemId },
+    select: { sent_to_kitchen: true, order_id: true, voided_at: true },
+  });
+  if (!preflight || preflight.order_id !== orderId) {
+    throw new NotFoundError('OrderItem');
+  }
+  if (preflight.voided_at != null) {
+    throw new ConflictError('Item is already voided');
+  }
+  let approverId: string | null = null;
+  if (preflight.sent_to_kitchen) {
+    approverId = await authorizeCashierPin(input.pin);
+  }
+
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, orderId);
     const existing = await tx.orderItem.findUnique({
       where: { id: itemId },
-      select: { id: true, order_id: true },
+      select: { id: true, order_id: true, sent_to_kitchen: true, voided_at: true },
     });
     if (!existing || existing.order_id !== orderId) throw new NotFoundError('OrderItem');
-    await tx.orderItem.delete({ where: { id: itemId } });
+    if (existing.voided_at != null) {
+      throw new ConflictError('Item is already voided');
+    }
+
+    if (existing.sent_to_kitchen) {
+      // Soft delete — preserve the line as a tombstone the cashier can
+      // restore and the kitchen comanda can announce.
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: {
+          voided_at: new Date(),
+          voided_by: approverId,
+          void_reason: input.reason ?? null,
+          // void_printed_at stays null so the next Send to Kitchen catches it
+          // and prints the REMOVE notification.
+          void_printed_at: null,
+        },
+      });
+    } else {
+      // Free-cancel path for unsent items — same as before. No audit row
+      // because the kitchen has no expectation to disappoint.
+      await tx.orderItem.delete({ where: { id: itemId } });
+    }
+
+    await recalculateOrderTotals(tx, orderId);
+    return loadOrderOrThrow(tx, orderId);
+  });
+}
+
+/**
+ * Reverse a soft-delete. Two sub-paths:
+ *   • Void was never printed → just clear the void fields and the line is
+ *     back on the ticket as it was. No kitchen comms needed because the
+ *     kitchen was never told it was gone.
+ *   • Void was already printed → the kitchen has tossed (or never started)
+ *     the item, so restoring it is effectively re-ordering. We clear the
+ *     void fields AND reset sent_to_kitchen / sent_at / void_printed_at so
+ *     the line shows up as a fresh pending item that the cashier must Send
+ *     to Kitchen again.
+ *
+ * Either path requires cashier PIN — the original void was a privileged
+ * action and so is the undo.
+ */
+export async function restoreOrderItem(
+  orderId: string,
+  itemId: string,
+  input: RestoreOrderItemInput,
+) {
+  const preflight = await prisma.orderItem.findUnique({
+    where: { id: itemId },
+    select: { order_id: true, voided_at: true, void_printed_at: true },
+  });
+  if (!preflight || preflight.order_id !== orderId) {
+    throw new NotFoundError('OrderItem');
+  }
+  if (preflight.voided_at == null) {
+    throw new ConflictError('Item is not voided');
+  }
+  await authorizeCashierPin(input.pin);
+  const wasPrinted = preflight.void_printed_at != null;
+
+  return prisma.$transaction(async (tx) => {
+    await assertOrderOpen(tx, orderId);
+    const existing = await tx.orderItem.findUnique({
+      where: { id: itemId },
+      select: {
+        id: true,
+        order_id: true,
+        voided_at: true,
+        void_printed_at: true,
+      },
+    });
+    if (!existing || existing.order_id !== orderId) throw new NotFoundError('OrderItem');
+    if (existing.voided_at == null) {
+      throw new ConflictError('Item is not voided');
+    }
+
+    await tx.orderItem.update({
+      where: { id: itemId },
+      data: {
+        voided_at: null,
+        voided_by: null,
+        void_reason: null,
+        void_printed_at: null,
+        // If the kitchen was already told the item was removed, the only safe
+        // way to restore it is to treat it as a fresh order — reset the sent
+        // state so the next Send to Kitchen reprints it as new.
+        ...(wasPrinted ? { sent_to_kitchen: false, sent_at: null } : {}),
+      },
+    });
+
     await recalculateOrderTotals(tx, orderId);
     return loadOrderOrThrow(tx, orderId);
   });
@@ -608,7 +1017,7 @@ export async function removeOrderItem(orderId: string, itemId: string) {
  *  - Any method: amount may NOT exceed remaining for non-CASH (overpay is only
  *    allowed on cash, since that's how change works in real life)
  */
-export async function addPayment(orderId: string, input: CreatePaymentInput) {
+export async function addPayment(orderId: string, input: CreatePaymentInput, userId: string) {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
@@ -618,7 +1027,11 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
         total: true,
         register_id: true,
         table_id: true,
+        // Voided lines are excluded from the deduction set and the empty check
+        // — the customer isn't paying for them and we shouldn't draw inventory
+        // for items the kitchen never made.
         items: {
+          where: { voided_at: null },
           select: {
             product_id: true,
             variant_id: true,
@@ -640,14 +1053,34 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
       throw new BadRequestError('Cannot pay for an order with no items');
     }
 
-    // Register must still be OPEN when the tender is rung up — this also
-    // prevents settling an order whose register has been closed out of band.
-    const register = await tx.cashRegister.findUnique({
+    // The order may have been opened during a previous shift whose register
+    // is now closed. In that case the cashier on the new shift should still
+    // be able to settle it — we re-anchor the order to whichever register
+    // *they* currently have open and route the cash delta there. If the user
+    // has no open register we still refuse, since payment events without an
+    // open drawer can't be reconciled.
+    const originalRegister = await tx.cashRegister.findUnique({
       where: { id: order.register_id },
       select: { id: true, status: true },
     });
-    if (!register || register.status !== CashRegisterStatus.OPEN) {
-      throw new ConflictError('Cash register must be OPEN to record a payment');
+    let activeRegisterId = order.register_id;
+    if (!originalRegister || originalRegister.status !== CashRegisterStatus.OPEN) {
+      const fallback = await tx.cashRegister.findFirst({
+        where: { user_id: userId, status: CashRegisterStatus.OPEN },
+        select: { id: true },
+      });
+      if (!fallback) {
+        throw new ConflictError(
+          "The order's original register is closed and you have no open register — open one before settling.",
+        );
+      }
+      activeRegisterId = fallback.id;
+      // Re-anchor the order so the close-shift recomputation, sales reports,
+      // and deduction rules all see the cashier who actually settled it.
+      await tx.order.update({
+        where: { id: orderId },
+        data: { register_id: activeRegisterId },
+      });
     }
 
     const total = new Decimal(order.total);
@@ -704,7 +1137,7 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
       const cashDelta = amount.sub(changeAmount);
       if (!cashDelta.isZero()) {
         await tx.cashRegister.update({
-          where: { id: order.register_id },
+          where: { id: activeRegisterId },
           data: { expected_amount: { increment: cashDelta } },
         });
       }
@@ -731,7 +1164,7 @@ export async function addPayment(orderId: string, input: CreatePaymentInput) {
         })),
         null, // no station concept in Phase 7 — deduction rule falls back to register or last-purchase
         orderId,
-        { pos_register_id: order.register_id, client: tx },
+        { pos_register_id: activeRegisterId, client: tx },
       );
 
       // Release the table when this order leaves OPEN. syncTableStatus will
@@ -824,33 +1257,73 @@ export async function getOrderIngredients(orderId: string): Promise<OrderIngredi
 // Kitchen routing — terminal "Send to Kitchen" flow
 // ----------------------------------------------------------------------------
 
+export interface SendToKitchenItem {
+  id: string;
+  quantity: number;
+  notes: string | null;
+  sent_at: Date | null;
+  product: { id: string; name: string; type: string; station_id: string | null };
+  variant: { id: string; name: string } | null;
+  modifiers: Array<{ id: string; name: string }>;
+}
+
+export interface SendToKitchenVoidedItem extends SendToKitchenItem {
+  voided_at: Date | null;
+  void_reason: string | null;
+}
+
 export interface SendToKitchenResult {
   order_id: string;
   printed_at: Date;
+  // Total kitchen-bound rows on this print (active items + voided tombstones
+  // when in correction mode, or just the newly-added rows on first print).
+  // Drives the renderer's "did anything actually print?" check.
   printed_count: number;
-  // The newly-marked items, with everything the renderer needs to render the
-  // comanda. Reads from the same orderItem table, so prices/notes/modifiers
-  // are exactly what was sent (later edits to the menu don't rewrite them).
-  items: Array<{
-    id: string;
-    quantity: number;
-    notes: string | null;
-    sent_at: Date | null;
-    product: { id: string; name: string; type: string; station_id: string | null };
-    variant: { id: string; name: string } | null;
-    modifiers: Array<{ id: string; name: string }>;
-  }>;
+  // True when this is a CORRECTION ticket — the kitchen has seen a comanda
+  // for this order before, and the renderer should print "REPLACES PREVIOUS
+  // TICKET" so the cocina swaps their slip. False on the first print of an
+  // order. Drives both the header text and the "should I show all items vs
+  // only new ones?" decision.
+  is_correction: boolean;
+  // What to print as active rows:
+  //   • First print:   only the brand-new items
+  //   • Correction:    the full snapshot of currently-active items so the
+  //                    kitchen has a self-contained ticket they can swap in.
+  //                    Items with sent_at == printed_at are "newly added" in
+  //                    this batch and the renderer flags them with [NEW].
+  items: SendToKitchenItem[];
+  // Voided tombstones to print struck-through. Always the full set of voids
+  // on the order (correction mode), so the kitchen always has the complete
+  // "what NOT to make" list on a single ticket. Empty on the first print
+  // (an order can't have voids before it has ever been sent).
+  voided_items: SendToKitchenVoidedItem[];
   order: Awaited<ReturnType<typeof loadOrderOrThrow>>;
 }
 
 /**
- * Mark every unsent item on an OPEN order as sent_to_kitchen=true and return
- * just those items (so the terminal can hand them to the kitchen printer).
+ * Send the order's current state to the kitchen printer.
  *
- * Idempotent in spirit: running it twice on a stable order returns an empty
- * `items` list the second time and prints nothing — only newly-added items
- * fire on subsequent calls. Cancelled / paid orders are rejected since there's
- * nothing meaningful to print after the order leaves OPEN.
+ * Two flavors of comanda:
+ *   • First print     — there is no prior comanda. Header reads "KITCHEN
+ *                       ORDER", body lists only the newly-added items.
+ *   • Correction      — a prior comanda exists. Header reads "KITCHEN
+ *                       CORRECTION — Replaces previous ticket" and the body
+ *                       contains the FULL current snapshot: every active
+ *                       item plus every voided tombstone. The cocina trashes
+ *                       their old slip and replaces it with this one.
+ *
+ * Newly-added items in correction mode (sent_at stamped in this transaction)
+ * are flagged via sent_at == printed_at so the renderer can highlight them
+ * with a [NEW] marker — easy for the cooks to spot what changed.
+ *
+ * Skips the print entirely when there are no pending changes (no unsent
+ * items AND no unprinted voids); returns printed_count=0 and the renderer
+ * silently no-ops. Cancelled/paid orders are rejected since the kitchen
+ * shouldn't get any more notifications after the order leaves OPEN.
+ *
+ * Side effects (in one transaction):
+ *   • Unsent active items   → sent_to_kitchen=true, sent_at=now
+ *   • Unprinted voided rows → void_printed_at=now
  */
 export async function sendToKitchen(orderId: string): Promise<SendToKitchenResult> {
   return prisma.$transaction(async (tx) => {
@@ -865,51 +1338,136 @@ export async function sendToKitchen(orderId: string): Promise<SendToKitchenResul
       );
     }
 
-    // Snapshot the IDs of items still pending so we can mark + return only
-    // those. Using two queries (find then update) keeps the result set
-    // deterministic even if a concurrent add lands between the two — the new
-    // item simply waits for the next send.
+    const sendItemSelect = {
+      id: true,
+      quantity: true,
+      notes: true,
+      sent_at: true,
+      product: {
+        select: { id: true, name: true, type: true, station_id: true },
+      },
+      variant: { select: { id: true, name: true } },
+      modifiers: { select: { id: true, name: true } },
+    } as const;
+
+    // Snapshot ids first so update-then-fetch returns exactly the rows we
+    // claimed; concurrent adds/voids land in the next send instead of
+    // mutating this batch mid-flight.
     const pending = await tx.orderItem.findMany({
-      where: { order_id: orderId, sent_to_kitchen: false },
+      where: { order_id: orderId, sent_to_kitchen: false, voided_at: null },
       orderBy: { created_at: 'asc' },
+      select: { id: true },
+    });
+    const pendingVoids = await tx.orderItem.findMany({
+      where: {
+        order_id: orderId,
+        sent_to_kitchen: true,
+        voided_at: { not: null },
+        void_printed_at: null,
+      },
+      orderBy: { voided_at: 'asc' },
       select: { id: true },
     });
 
     const printedAt = new Date();
+
+    // Nothing changed since the last comanda → silent no-op. The frontend
+    // gates the printer call on printed_count > 0 so the cashier won't burn
+    // paper on a redundant send.
+    if (pending.length === 0 && pendingVoids.length === 0) {
+      return {
+        order_id: orderId,
+        printed_at: printedAt,
+        printed_count: 0,
+        is_correction: false,
+        items: [],
+        voided_items: [],
+        order: await loadOrderOrThrow(tx, orderId),
+      };
+    }
+
+    // "Was a comanda ever printed for this order?" — drives the CORRECTION vs
+    // first-print decision. Looks at items present BEFORE we stamp the new
+    // sent_at / void_printed_at below, since items being marked in this
+    // transaction don't count as "previously printed".
+    const wasEverPrinted = await tx.orderItem.findFirst({
+      where: {
+        order_id: orderId,
+        OR: [
+          { sent_at: { not: null } },
+          { void_printed_at: { not: null } },
+        ],
+      },
+      select: { id: true },
+    });
+    const isCorrection = wasEverPrinted != null;
+
     if (pending.length > 0) {
       await tx.orderItem.updateMany({
         where: { id: { in: pending.map((p) => p.id) } },
         data: { sent_to_kitchen: true, sent_at: printedAt },
       });
     }
+    if (pendingVoids.length > 0) {
+      await tx.orderItem.updateMany({
+        where: { id: { in: pendingVoids.map((p) => p.id) } },
+        data: { void_printed_at: printedAt },
+      });
+    }
 
-    // Re-fetch the items with their relations so the renderer doesn't have to
-    // do a second round-trip.
-    const items = pending.length
-      ? await tx.orderItem.findMany({
-          where: { id: { in: pending.map((p) => p.id) } },
-          orderBy: { created_at: 'asc' },
-          select: {
-            id: true,
-            quantity: true,
-            notes: true,
-            sent_at: true,
-            product: {
-              select: { id: true, name: true, type: true, station_id: true },
-            },
-            variant: { select: { id: true, name: true } },
-            modifiers: { select: { id: true, name: true } },
-          },
-        })
-      : [];
+    // Build the print payload.
+    //   • Correction → snapshot of every currently-active item, plus every
+    //     voided tombstone (regardless of whether the void was already on a
+    //     previous comanda — the new ticket must be self-contained so the
+    //     cocina can fully replace their slip).
+    //   • First print → only the items we just marked as sent. No voids
+    //     possible (an order with zero prior comandas can't have any
+    //     "previously sent" items to void).
+    let items: SendToKitchenItem[] = [];
+    let voidedRaw: Array<
+      SendToKitchenItem & { voided_at: Date | null; void_reason: string | null }
+    > = [];
+
+    if (isCorrection) {
+      items = await tx.orderItem.findMany({
+        where: { order_id: orderId, voided_at: null },
+        orderBy: { created_at: 'asc' },
+        select: sendItemSelect,
+      });
+      voidedRaw = await tx.orderItem.findMany({
+        where: { order_id: orderId, voided_at: { not: null } },
+        orderBy: { voided_at: 'asc' },
+        select: { ...sendItemSelect, voided_at: true, void_reason: true },
+      });
+    } else if (pending.length > 0) {
+      items = await tx.orderItem.findMany({
+        where: { id: { in: pending.map((p) => p.id) } },
+        orderBy: { created_at: 'asc' },
+        select: sendItemSelect,
+      });
+    }
+
+    const voided_items: SendToKitchenVoidedItem[] = voidedRaw.map((v) => ({
+      id: v.id,
+      quantity: v.quantity,
+      notes: v.notes,
+      sent_at: v.sent_at,
+      product: v.product,
+      variant: v.variant,
+      modifiers: v.modifiers,
+      voided_at: v.voided_at,
+      void_reason: v.void_reason,
+    }));
 
     const fullOrder = await loadOrderOrThrow(tx, orderId);
 
     return {
       order_id: orderId,
       printed_at: printedAt,
-      printed_count: items.length,
+      printed_count: items.length + voided_items.length,
+      is_correction: isCorrection,
       items,
+      voided_items,
       order: fullOrder,
     };
   });

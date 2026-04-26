@@ -172,7 +172,11 @@ model User {
   cash_registers    CashRegister[]
   cash_movements    CashMovement[]
   orders            Order[]
-  order_items_added OrderItem[]         @relation("OrderItemAddedBy")
+  orders_cancelled  Order[]             @relation("OrderCancelledBy")
+  order_items_added   OrderItem[]       @relation("OrderItemAddedBy")
+  order_items_voided  OrderItem[]       @relation("OrderItemVoidedBy")
+  suggestions_created  Suggestion[]    @relation("SuggestionCreator")
+  suggestions_reviewed Suggestion[]    @relation("SuggestionReviewer")
   attendance        Attendance[]        @relation("AttendanceEmployee")
   attendance_logs   Attendance[]        @relation("AttendanceRecorder")
   payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
@@ -600,6 +604,7 @@ model Product {
   recipe_items_as_prep   RecipeItem[]            @relation("RecipeItemPreparation")
   order_items            OrderItem[]
   modifier_overrides     ModifierProductOverride[]
+  suggestions            Suggestion[]
 
   @@index([category_id])
   @@index([type])
@@ -868,12 +873,19 @@ model Order {
   // after resolving.
   needs_attention  Boolean    @default(false)
   attention_reason String?
+  // Audit fields populated when an order is moved to CANCELLED. The cashier
+  // must enter a free-text reason (>=5 chars) and re-confirm with their PIN
+  // before the cancel is accepted.
+  cancel_reason       String?
+  cancelled_by_user_id String?  @db.Uuid
+  cancelled_at         DateTime?
   created_at      DateTime    @default(now())
   updated_at      DateTime    @updatedAt
 
   register CashRegister @relation(fields: [register_id], references: [id])
   user     User         @relation(fields: [user_id], references: [id])
   table    Table?       @relation(fields: [table_id], references: [id])
+  cancelled_by User?    @relation("OrderCancelledBy", fields: [cancelled_by_user_id], references: [id])
   items    OrderItem[]
   payments Payment[]
 
@@ -918,12 +930,23 @@ model OrderItem {
   // pre-existing items (added by the admin panel before terminal rollout)
   // and seeded test orders don't violate the constraint.
   added_by        String?  @db.Uuid
+  // Soft-delete (void) audit. Items that have been sent to the kitchen are
+  // never hard-deleted — instead voided_at is stamped so the ticket can show
+  // the line struck-through, the cashier can Restore it, and the next
+  // Send to Kitchen prints a "REMOVED" notification. void_printed_at is set
+  // once the kitchen has been told; restoring an item whose void was already
+  // printed clears sent_to_kitchen so the kitchen sees a fresh request.
+  voided_at       DateTime?
+  voided_by       String?  @db.Uuid
+  void_reason     String?
+  void_printed_at DateTime?
   created_at      DateTime @default(now())
 
   order      Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
   product    Product             @relation(fields: [product_id], references: [id])
   variant    ProductVariant?     @relation(fields: [variant_id], references: [id])
   added_by_user User?            @relation("OrderItemAddedBy", fields: [added_by], references: [id])
+  voided_by_user User?           @relation("OrderItemVoidedBy", fields: [voided_by], references: [id])
   modifiers  OrderItemModifier[]
 
   @@index([order_id])
@@ -931,6 +954,8 @@ model OrderItem {
   @@index([variant_id])
   @@index([added_by])
   @@index([order_id, sent_to_kitchen])
+  @@index([voided_at])
+  @@index([order_id, voided_at])
   @@map("order_items")
 }
 
@@ -1070,13 +1095,77 @@ model Table {
   created_at DateTime    @default(now())
   updated_at DateTime    @updatedAt
 
-  zone   Zone    @relation(fields: [zone_id], references: [id], onDelete: Cascade)
-  orders Order[]
+  zone        Zone         @relation(fields: [zone_id], references: [id], onDelete: Cascade)
+  orders      Order[]
+  suggestions Suggestion[]
 
   @@unique([zone_id, number])
   @@index([zone_id])
   @@index([status])
   @@map("tables")
+}
+
+// ─── Suggestion approval queue ────────────────────────────────────────────
+// Cashiers can propose schema-shape changes (new table, new product, layout
+// move) but admin holds the gate. The suggestion stores the *proposed* change
+// as an opaque JSON payload; on approval the matching service re-parses the
+// payload through its own Zod schema and executes the operation. This keeps
+// validation logic in one place per resource and makes the suggestion table
+// dumb storage.
+enum SuggestionType {
+  TABLE_CREATE
+  TABLE_UPDATE
+  TABLE_DELETE
+  PRODUCT_CREATE
+  PRODUCT_UPDATE
+  PRODUCT_DELETE
+}
+
+enum SuggestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Suggestion {
+  id      String           @id @default(uuid()) @db.Uuid
+  type    SuggestionType
+  status  SuggestionStatus @default(PENDING)
+  // Free-form JSON describing the proposed change. Validated against a Zod
+  // schema specific to each `type` at create-time and again at approve-time
+  // so a stale payload (e.g. table now belongs to a deleted zone) fails the
+  // approve cleanly instead of corrupting state.
+  payload Json
+  // Optional human-readable note from the suggester ("table moved to make
+  // room for the new bar"). Surfaced to admin when reviewing.
+  note    String?
+
+  // Targeting — populated only for UPDATE/DELETE so the admin UI can surface
+  // a link to the live record. CREATE suggestions leave both null.
+  target_table_id   String? @db.Uuid
+  target_product_id String? @db.Uuid
+
+  created_by  String   @db.Uuid
+  reviewed_by String?  @db.Uuid
+  // Optional admin note ("approved with capacity bumped to 4 by request").
+  review_note String?
+  reviewed_at DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  creator  User     @relation("SuggestionCreator",  fields: [created_by],  references: [id])
+  reviewer User?    @relation("SuggestionReviewer", fields: [reviewed_by], references: [id])
+  table    Table?   @relation(fields: [target_table_id],   references: [id], onDelete: SetNull)
+  product  Product? @relation(fields: [target_product_id], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([type])
+  @@index([created_by])
+  @@index([reviewed_by])
+  @@index([target_table_id])
+  @@index([target_product_id])
+  @@map("suggestions")
 }
 
 // Free-floating text labels rendered on the floor canvas. Unlike zone NAMES

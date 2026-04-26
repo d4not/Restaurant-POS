@@ -46,10 +46,40 @@ export const addOrderItemSchema = z
   })
   .strict();
 
+// `pin` is required at the service layer when the target item already has
+// sent_to_kitchen=true — the schema keeps it optional so the cashier can
+// freely edit unsent lines without a re-auth dance.
+//
+// variant_id and modifier_ids let the cashier reconfigure an existing line
+// without removing-and-re-adding it (which would lose the original sent_at /
+// added_by audit trail). Both are validated and re-priced server-side; the
+// snapshot tax_rate is preserved so the receipt math stays stable across
+// menu price changes.
 export const updateOrderItemSchema = z
   .object({
     quantity: z.number().int().positive().optional(),
     notes: z.string().max(2000).nullable().optional(),
+    variant_id: z.string().uuid().nullable().optional(),
+    modifier_ids: z.array(z.string().uuid()).optional(),
+    pin: z.string().regex(/^\d{4,6}$/).optional(),
+  })
+  .strict();
+
+// Remove may carry an optional reason (mirrors the cancel-order audit trail).
+// The reason is only stored when the line is sent — for unsent items the row
+// is hard-deleted, so there's nowhere to keep the reason.
+export const removeOrderItemSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4,6}$/).optional(),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+// Restore = un-void a previously voided line. Always requires cashier PIN
+// because the void itself was a privileged action.
+export const restoreOrderItemSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4,6}$/).optional(),
   })
   .strict();
 
@@ -69,6 +99,19 @@ export const requestAttentionSchema = z
   })
   .strict();
 
+// Cancel-order body. The fields are *conditionally* required at the service
+// layer: if any line was already sent to the kitchen, the kitchen has been
+// told to make food and the cashier (any active CASHIER/MANAGER/ADMIN) must
+// approve via PIN with a written reason. For untouched / unsent orders the
+// waiter can cancel without ceremony — both fields stay optional here so
+// validation doesn't trip on the "free cancel" path.
+export const cancelOrderSchema = z
+  .object({
+    reason: z.string().trim().min(5, 'Reason must be at least 5 characters').max(500).optional(),
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits').optional(),
+  })
+  .strict();
+
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
 export type ListOrderQuery = z.infer<typeof listOrderQuerySchema>;
@@ -76,3 +119,6 @@ export type AddOrderItemInput = z.infer<typeof addOrderItemSchema>;
 export type UpdateOrderItemInput = z.infer<typeof updateOrderItemSchema>;
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 export type RequestAttentionInput = z.infer<typeof requestAttentionSchema>;
+export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
+export type RemoveOrderItemInput = z.infer<typeof removeOrderItemSchema>;
+export type RestoreOrderItemInput = z.infer<typeof restoreOrderItemSchema>;

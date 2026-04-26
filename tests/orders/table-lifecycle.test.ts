@@ -217,7 +217,11 @@ describe('Order ↔ Table lifecycle', () => {
         table_id: s.table1Id,
       })
       .expect(201);
-    await request(app).delete(`/api/v1/orders/${order.body.data.id}`).set(s.auth).expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${order.body.data.id}`)
+      .set(s.auth)
+      .send({ reason: 'Table released', pin: '1234' })
+      .expect(200);
     const table = await prisma.table.findUniqueOrThrow({ where: { id: s.table1Id } });
     expect(table.status).toBe('AVAILABLE');
   });

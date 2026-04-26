@@ -3,8 +3,14 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 import type { User, UserRole } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
-import { ConflictError, UnauthorizedError } from '../../lib/errors.js';
-import type { LoginInput, PinLoginInput } from './schema.js';
+import { ConflictError, ForbiddenError, UnauthorizedError } from '../../lib/errors.js';
+import type { LoginInput, PinLoginInput, VerifyPinInput } from './schema.js';
+
+const CASHIER_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
+  'CASHIER',
+  'MANAGER',
+  'ADMIN',
+]);
 
 export interface AuthUser {
   id: string;
@@ -93,4 +99,49 @@ export async function getCurrentUser(userId: string): Promise<AuthUser> {
 
 export async function hashPassword(plaintext: string): Promise<string> {
   return bcrypt.hash(plaintext, 10);
+}
+
+/**
+ * PIN-only step-up auth used by terminal screens that need a fresh second
+ * factor without re-issuing the JWT (Order History gate, sent-item edits).
+ *
+ * mode='self' verifies the PIN matches the *currently-authenticated* user —
+ * the caller proves it's still them at the terminal.
+ *
+ * mode='cashier' verifies the PIN matches *any* active CASHIER/MANAGER/ADMIN
+ * — used by the waiter→cashier authorization flow where a waiter clicks a
+ * gated action and a passing cashier types their PIN to approve. Returns the
+ * approving user so the audit trail can record who said yes.
+ */
+export async function verifyPin(
+  callerId: string,
+  input: VerifyPinInput,
+): Promise<{ ok: true; approver: AuthUser }> {
+  if (input.mode === 'cashier') {
+    const matches = await prisma.user.findMany({
+      where: { pin: input.pin, active: true, role: { in: ['CASHIER', 'MANAGER', 'ADMIN'] } },
+      take: 2,
+    });
+    if (matches.length === 0) {
+      throw new ForbiddenError('Incorrect PIN');
+    }
+    if (matches.length > 1) {
+      throw new ConflictError(
+        'PIN is shared by multiple active users — ask an admin to assign unique PINs',
+      );
+    }
+    return { ok: true, approver: toAuthUser(matches[0]) };
+  }
+
+  const me = await prisma.user.findUnique({ where: { id: callerId } });
+  if (!me || !me.active || me.pin !== input.pin) {
+    throw new ForbiddenError('Incorrect PIN');
+  }
+  // Self-mode is used to gate cashier-only screens; reject the call if the
+  // caller's role doesn't reach the cashier ring at all so the gate stays
+  // meaningful.
+  if (!CASHIER_ROLES.has(me.role)) {
+    throw new ForbiddenError('Cashier role required');
+  }
+  return { ok: true, approver: toAuthUser(me) };
 }

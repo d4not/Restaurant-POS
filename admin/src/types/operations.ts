@@ -130,6 +130,21 @@ export interface OrderItem {
   tax_amount: string;
   base_amount: string;
   notes: string | null;
+  // Kitchen routing audit. sent_to_kitchen flips true on the first comanda
+  // that includes this item; sent_at stamps when the comanda printed. The
+  // admin timeline uses these to render "Sent to kitchen at HH:MM" events.
+  sent_to_kitchen: boolean;
+  sent_at: string | null;
+  added_by: string | null;
+  // Soft-delete (void) audit. Voided items aren't hard-deleted once they've
+  // been sent to the kitchen — they stay on the order as tombstones (totals
+  // exclude them) so the admin can render a struck-through line with the
+  // reason / who / when. void_printed_at stamps the comanda that announced
+  // the removal to the kitchen.
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  void_printed_at: string | null;
   created_at: string;
   product?: {
     id: string;
@@ -140,6 +155,8 @@ export interface OrderItem {
   };
   variant?: { id: string; name: string } | null;
   modifiers?: OrderItemModifier[];
+  added_by_user?: { id: string; name: string } | null;
+  voided_by_user?: { id: string; name: string } | null;
 }
 
 export interface Payment {
@@ -167,6 +184,18 @@ export interface Order {
   notes: string | null;
   user_id: string;
   order_date: string;
+  // Waiter→Cashier "Request edit" signal flipped from the terminal. Cleared
+  // by a cashier+ once they've reviewed the order. Surfaced in the admin
+  // timeline so management can see when help was requested.
+  needs_attention: boolean;
+  attention_reason: string | null;
+  // Cancellation audit — populated when an order is moved to CANCELLED.
+  // cancelled_by is included via orderInclude so the timeline can name who
+  // pulled the trigger.
+  cancel_reason: string | null;
+  cancelled_by_user_id: string | null;
+  cancelled_at: string | null;
+  cancelled_by?: { id: string; name: string } | null;
   created_at: string;
   updated_at: string;
   register?: { id: string; status: CashRegisterStatus; user_id: string };

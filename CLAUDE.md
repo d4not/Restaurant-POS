@@ -80,7 +80,7 @@
 - `cd terminal && npm run build` — package Electron app
 
 ### Design
-- YOU MUST match the design in @docs/pos-terminal-design.html — this is the authoritative reference
+- YOU MUST match the design in @docs/pos-terminal-styles.js — this is the authoritative reference
 - SAME warm light theme as admin panel — NOT dark theme
 - CSS variables: --bg (#f5f0e8), --sidebar (#2c2420), --gold (#c9a45c), --green (#4a8c5c), --red (#c45040)
 - Fonts: Playfair Display (headings), DM Sans (body)

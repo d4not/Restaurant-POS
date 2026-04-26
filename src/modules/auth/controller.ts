@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import * as service from './service.js';
 import { UnauthorizedError } from '../../lib/errors.js';
-import type { LoginInput, PinLoginInput } from './schema.js';
+import type { LoginInput, PinLoginInput, VerifyPinInput } from './schema.js';
 
 export async function login(req: Request, res: Response): Promise<void> {
   const result = await service.login(req.body as LoginInput);
@@ -17,4 +17,10 @@ export async function me(req: Request, res: Response): Promise<void> {
   if (!req.auth) throw new UnauthorizedError();
   const user = await service.getCurrentUser(req.auth.userId);
   res.json({ success: true, data: user });
+}
+
+export async function verifyPin(req: Request, res: Response): Promise<void> {
+  if (!req.auth) throw new UnauthorizedError();
+  const result = await service.verifyPin(req.auth.userId, req.body as VerifyPinInput);
+  res.json({ success: true, data: result });
 }

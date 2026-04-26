@@ -608,7 +608,10 @@ describe('Guard rails — orders require open register, no double-pay, no cancel
       .send({ method: 'CASH', amount: 2500 })
       .expect(201);
 
-    const cancel = await request(app).delete(`/api/v1/orders/${orderId}`).set(s.auth);
+    const cancel = await request(app)
+      .delete(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ reason: 'Customer asked', pin: '1234' });
     expect(cancel.status).toBe(409);
     // Inventory should still reflect the completed sale.
     const stock = await prisma.storageStock.findFirstOrThrow({
@@ -631,7 +634,10 @@ describe('Guard rails — orders require open register, no double-pay, no cancel
       .send({ product_id: s.waterProductId, quantity: 5 })
       .expect(201);
 
-    const cancel = await request(app).delete(`/api/v1/orders/${orderId}`).set(s.auth);
+    const cancel = await request(app)
+      .delete(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ reason: 'Customer changed mind', pin: '1234' });
     expect(cancel.status).toBe(200);
     expect(cancel.body.data.status).toBe('CANCELLED');
 
@@ -655,12 +661,561 @@ describe('Guard rails — orders require open register, no double-pay, no cancel
       .send({ register_id: s.registerId, order_type: 'DINE_IN' })
       .expect(201);
     const orderId = order.body.data.id as string;
-    await request(app).delete(`/api/v1/orders/${orderId}`).set(s.auth).expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ reason: 'Test cancellation', pin: '1234' })
+      .expect(200);
 
     const add = await request(app)
       .post(`/api/v1/orders/${orderId}/items`)
       .set(s.auth)
       .send({ product_id: s.waterProductId, quantity: 1 });
     expect(add.status).toBe(409);
+  });
+
+  it('settles an order whose original register was closed by routing to the cashier’s new shift', async () => {
+    const s = await seedScenario();
+    // Order opened against the original register, items added, but never
+    // settled — exactly the "left over from previous shift" case.
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+
+    // Close the original register. The cashier counts the drawer with only
+    // the opening float since no payment was rung up yet.
+    await request(app)
+      .post(`/api/v1/registers/${s.registerId}/close`)
+      .set(s.auth)
+      .send({ actual_amount: 50000 })
+      .expect(200);
+
+    // Same cashier opens a new shift. Reapply the deduction rule for the
+    // new register so inventory still lands at Barra.
+    const newReg = await request(app)
+      .post('/api/v1/registers')
+      .set(s.auth)
+      .send({ opening_amount: 30000 })
+      .expect(201);
+    const newRegisterId = newReg.body.data.id as string;
+    await request(app)
+      .post('/api/v1/deduction-rules')
+      .set(s.auth)
+      .send({ pos_register_id: newRegisterId, storage_id: s.barraId })
+      .expect(201);
+
+    // Pay the leftover order. The service should re-anchor it to the new
+    // register and credit the cash to the active drawer, not the closed one.
+    const pay = await request(app)
+      .post(`/api/v1/orders/${orderId}/payments`)
+      .set(s.auth)
+      .send({ method: 'CASH', amount: 2500 })
+      .expect(201);
+    expect(pay.body.data.order.status).toBe('PAID');
+
+    const oldRegister = await prisma.cashRegister.findUniqueOrThrow({
+      where: { id: s.registerId },
+    });
+    expect(oldRegister.expected_amount.toString()).toBe('50000');
+
+    const newRegister = await prisma.cashRegister.findUniqueOrThrow({
+      where: { id: newRegisterId },
+    });
+    // Opening float (30000) + cash payment (2500) = 32500.
+    expect(newRegister.expected_amount.toString()).toBe('32500');
+
+    const reanchored = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { register_id: true },
+    });
+    expect(reanchored.register_id).toBe(newRegisterId);
+  });
+
+  it('refuses payment when the original register is closed and the cashier has no open register', async () => {
+    const s = await seedScenario();
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+
+    await request(app)
+      .post(`/api/v1/registers/${s.registerId}/close`)
+      .set(s.auth)
+      .send({ actual_amount: 50000 })
+      .expect(200);
+
+    const pay = await request(app)
+      .post(`/api/v1/orders/${orderId}/payments`)
+      .set(s.auth)
+      .send({ method: 'CASH', amount: 2500 });
+    expect(pay.status).toBe(409);
+    expect(pay.body.error.code).toBe('CONFLICT');
+  });
+});
+
+describe('Void / Restore — soft-delete for sent items + comanda update', () => {
+  let s: Scenario;
+  beforeEach(async () => {
+    s = await seedScenario();
+  });
+
+  it('hard-deletes an unsent line and excludes it from totals', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+
+    const after = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({})
+      .expect(200);
+
+    // Unsent → row is gone entirely; no tombstone left on the ticket.
+    expect(after.body.data.items).toHaveLength(0);
+    expect(after.body.data.total).toBe('0');
+  });
+
+  it('soft-deletes a sent line, leaves it on the ticket as a tombstone, excludes from totals', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 2 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+    const lineTotal = add.body.data.total;
+    expect(lineTotal).toBe('5000');
+
+    // Send to kitchen flips sent_to_kitchen=true and stamps sent_at.
+    const sent = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    expect(sent.body.data.printed_count).toBe(1);
+
+    // Soft-delete requires a cashier PIN because the line is sent.
+    const noPin = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ reason: 'customer changed their mind' });
+    expect(noPin.status).toBe(403);
+
+    const voided = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234', reason: 'customer changed their mind' })
+      .expect(200);
+
+    // Tombstone present, but totals zeroed.
+    expect(voided.body.data.items).toHaveLength(1);
+    const tombstone = voided.body.data.items[0];
+    expect(tombstone.id).toBe(itemId);
+    expect(tombstone.voided_at).toBeTruthy();
+    expect(tombstone.void_reason).toBe('customer changed their mind');
+    expect(tombstone.void_printed_at).toBeNull();
+    expect(voided.body.data.total).toBe('0');
+  });
+
+  it('a follow-up Send to Kitchen prints a CORRECTION snapshot with the voided line struck through', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    // Two distinct lines so the correction has both an active item and a
+    // voided tombstone — proves the snapshot includes both.
+    const water = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1, notes: 'survives' })
+      .expect(201);
+    const voidWater = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1, notes: 'gets-voided' })
+      .expect(201);
+    const survivorId = water.body.data.items.find(
+      (i: { notes: string | null }) => i.notes === 'survives',
+    ).id as string;
+    const voidId = voidWater.body.data.items.find(
+      (i: { notes: string | null }) => i.notes === 'gets-voided',
+    ).id as string;
+
+    const first = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    expect(first.body.data.is_correction).toBe(false);
+    expect(first.body.data.items).toHaveLength(2);
+    expect(first.body.data.voided_items).toHaveLength(0);
+
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${voidId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const second = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+
+    // CORRECTION snapshot: the survivor stays in items, the voided one
+    // moves to voided_items. printed_count is total rows on the slip.
+    expect(second.body.data.is_correction).toBe(true);
+    expect(second.body.data.items).toHaveLength(1);
+    expect(second.body.data.items[0].id).toBe(survivorId);
+    expect(second.body.data.voided_items).toHaveLength(1);
+    expect(second.body.data.voided_items[0].id).toBe(voidId);
+    expect(second.body.data.printed_count).toBe(2);
+
+    // Third send with no further changes → silent no-op (no paper burned).
+    const third = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    expect(third.body.data.printed_count).toBe(0);
+    expect(third.body.data.items).toHaveLength(0);
+    expect(third.body.data.voided_items).toHaveLength(0);
+  });
+
+  it('the correction snapshot keeps showing the voided tombstone even after a no-change send cycle', async () => {
+    // The cocina is supposed to throw out the previous slip and replace it
+    // with the latest correction. So a correction printed AFTER another
+    // change must STILL include earlier voids — otherwise their replacement
+    // slip would silently re-introduce items they were already told to drop.
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const a = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1, notes: 'A' })
+      .expect(201);
+    const aId = a.body.data.items.find(
+      (i: { notes: string | null }) => i.notes === 'A',
+    ).id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${aId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+    // First correction surfaces the void.
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+
+    // Add a brand new item; the next correction must still mention the
+    // earlier void so the replacement slip stays self-contained.
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1, notes: 'B' })
+      .expect(201);
+
+    const corrected = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    expect(corrected.body.data.is_correction).toBe(true);
+    expect(corrected.body.data.items).toHaveLength(1);
+    expect(corrected.body.data.items[0].notes).toBe('B');
+    // Earlier void is still on this correction slip — single source of truth.
+    expect(corrected.body.data.voided_items).toHaveLength(1);
+    expect(corrected.body.data.voided_items[0].id).toBe(aId);
+  });
+
+  it('restoring a void whose comanda was not yet printed brings the line straight back', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const restored = await request(app)
+      .post(`/api/v1/orders/${orderId}/items/${itemId}/restore`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const item = restored.body.data.items.find(
+      (i: { id: string }) => i.id === itemId,
+    );
+    expect(item.voided_at).toBeNull();
+    // Kitchen wasn't notified of the void yet, so sent_to_kitchen stays true
+    // — the kitchen still has the original ticket.
+    expect(item.sent_to_kitchen).toBe(true);
+    expect(restored.body.data.total).toBe('2500');
+  });
+
+  it('restoring a void whose comanda was already printed resets sent_to_kitchen so the kitchen sees a fresh order', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+    // Print the void to flip void_printed_at.
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+
+    const restored = await request(app)
+      .post(`/api/v1/orders/${orderId}/items/${itemId}/restore`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const item = restored.body.data.items.find(
+      (i: { id: string }) => i.id === itemId,
+    );
+    expect(item.voided_at).toBeNull();
+    // The kitchen was already told the line was gone, so the restore demotes
+    // it back to "pending" — Send to Kitchen will pick it up again.
+    expect(item.sent_to_kitchen).toBe(false);
+    expect(item.sent_at).toBeNull();
+    expect(item.void_printed_at).toBeNull();
+
+    const reSent = await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    expect(reSent.body.data.items).toHaveLength(1);
+    expect(reSent.body.data.items[0].id).toBe(itemId);
+  });
+
+  it('voided items are excluded from inventory deduction at payment time', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    // Two distinct lines so the void leaves a survivor to deduct.
+    const water = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1, notes: 'keep' })
+      .expect(201);
+    const voidWater = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 3, notes: 'void' })
+      .expect(201);
+    const voidId = voidWater.body.data.items.find(
+      (i: { quantity: number; notes: string | null }) =>
+        i.notes === 'void',
+    ).id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${voidId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    // total = surviving line ($2500). Pay it.
+    const pay = await request(app)
+      .post(`/api/v1/orders/${orderId}/payments`)
+      .set(s.auth)
+      .send({ method: 'CASH', amount: 2500 })
+      .expect(201);
+    expect(pay.body.data.order.status).toBe('PAID');
+
+    const movements = await prisma.stockMovement.findMany({
+      where: { type: 'SALE', reference_id: orderId, supply_id: s.waterSupplyId },
+    });
+    // Single SALE movement of 1 bottle — the voided 3-bottle line never
+    // touched inventory.
+    expect(movements).toHaveLength(1);
+    expect(new Decimal(movements[0].quantity).abs().toString()).toBe('1');
+    void water; // silence unused warning while keeping the assignment self-documenting
+  });
+
+  it('restore is rejected without a cashier PIN', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const noPin = await request(app)
+      .post(`/api/v1/orders/${orderId}/items/${itemId}/restore`)
+      .set(s.auth)
+      .send({});
+    expect(noPin.status).toBe(403);
+  });
+});
+
+describe('Tap-to-edit — variant + modifier changes via updateOrderItem', () => {
+  let s: Scenario;
+  beforeEach(async () => {
+    s = await seedScenario();
+  });
+
+  it('reshapes an unsent line: changes modifiers and reprices the line', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    // Plain Latte Grande (no modifiers) = $6500.
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({
+        product_id: s.latteProductId,
+        variant_id: s.latteVariantId,
+        quantity: 1,
+      })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+    expect(add.body.data.total).toBe('6500');
+
+    // Edit: add Almond Milk (+$1000) → total 7500.
+    const edited = await request(app)
+      .patch(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ modifier_ids: [s.almondMilkModifierId] })
+      .expect(200);
+    expect(edited.body.data.total).toBe('7500');
+    const line = edited.body.data.items.find(
+      (i: { id: string }) => i.id === itemId,
+    );
+    expect(line.modifiers).toHaveLength(1);
+    expect(line.modifiers[0].name).toBe('Almond Milk');
+    expect(line.line_total).toBe('7500');
+  });
+
+  it('rejects edits to a voided line — must Restore first', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234' })
+      .expect(200);
+
+    const editVoided = await request(app)
+      .patch(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ quantity: 5, pin: '1234' });
+    expect(editVoided.status).toBe(409);
   });
 });

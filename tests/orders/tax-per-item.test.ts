@@ -336,15 +336,19 @@ describe('Phase 9A audit — tax responds to modifier price and discount edits',
       .send({ register_id: s.registerId, order_type: 'DINE_IN' })
       .expect(201);
 
+    // Distinct notes keep the lines from auto-merging — addOrderItem only
+    // collapses two taps into one row when the product / variant / modifier /
+    // notes signature matches exactly. We need two separate lines here so the
+    // deletion path has a survivor to recompute against.
     const first = await request(app)
       .post(`/api/v1/orders/${order.body.data.id}/items`)
       .set(s.auth)
-      .send({ product_id: s.taxedProductId, quantity: 2 }) // 2000 inc; tax 276
+      .send({ product_id: s.taxedProductId, quantity: 2, notes: 'first' }) // 2000 inc; tax 276
       .expect(201);
     const second = await request(app)
       .post(`/api/v1/orders/${order.body.data.id}/items`)
       .set(s.auth)
-      .send({ product_id: s.taxedProductId, quantity: 1 }) // 1000 inc; tax 138
+      .send({ product_id: s.taxedProductId, quantity: 1, notes: 'second' }) // 1000 inc; tax 138
       .expect(201);
     expect(second.body.data.tax_amount).toBe('414');
 

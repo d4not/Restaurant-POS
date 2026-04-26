@@ -3,10 +3,13 @@ import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
 import type {
   AddOrderItemInput,
+  CancelOrderInput,
   CreateOrderInput,
   CreatePaymentInput,
   ListOrderQuery,
+  RemoveOrderItemInput,
   RequestAttentionInput,
+  RestoreOrderItemInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
 } from './schema.js';
@@ -43,7 +46,11 @@ export async function update(req: Request, res: Response): Promise<void> {
 }
 
 export async function cancel(req: Request, res: Response): Promise<void> {
-  const order = await service.cancelOrder(req.params.id as string);
+  const order = await service.cancelOrder(
+    req.params.id as string,
+    currentUserId(req),
+    req.body as CancelOrderInput,
+  );
   res.json({ success: true, data: order });
 }
 
@@ -69,6 +76,16 @@ export async function removeItem(req: Request, res: Response): Promise<void> {
   const order = await service.removeOrderItem(
     req.params.id as string,
     req.params.itemId as string,
+    req.body as RemoveOrderItemInput,
+  );
+  res.json({ success: true, data: order });
+}
+
+export async function restoreItem(req: Request, res: Response): Promise<void> {
+  const order = await service.restoreOrderItem(
+    req.params.id as string,
+    req.params.itemId as string,
+    req.body as RestoreOrderItemInput,
   );
   res.json({ success: true, data: order });
 }
@@ -77,6 +94,7 @@ export async function addPayment(req: Request, res: Response): Promise<void> {
   const result = await service.addPayment(
     req.params.id as string,
     req.body as CreatePaymentInput,
+    currentUserId(req),
   );
   res.status(201).json({ success: true, data: result });
 }

@@ -21,5 +21,18 @@ export const pinLoginSchema = z.object({
     .regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
 });
 
+// Step-up PIN re-auth used by the terminal to gate destructive UI screens
+// (Order History, Settings, etc.) without re-issuing a JWT.
+//   - mode='self' (default): PIN must match the currently-authenticated user
+//   - mode='cashier': PIN must match ANY active CASHIER/MANAGER/ADMIN
+//     — used by the waiter→cashier authorization flow on sent items.
+export const verifyPinSchema = z.object({
+  pin: z
+    .string()
+    .regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+  mode: z.enum(['self', 'cashier']).optional().default('self'),
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type PinLoginInput = z.infer<typeof pinLoginSchema>;
+export type VerifyPinInput = z.infer<typeof verifyPinSchema>;

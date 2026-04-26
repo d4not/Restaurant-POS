@@ -3,7 +3,7 @@ import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import * as controller from './controller.js';
-import { loginSchema, pinLoginSchema } from './schema.js';
+import { loginSchema, pinLoginSchema, verifyPinSchema } from './schema.js';
 
 export const authRouter = Router();
 
@@ -20,3 +20,10 @@ authRouter.post(
 );
 
 authRouter.get('/me', requireAuth, asyncHandler(controller.me));
+
+authRouter.post(
+  '/verify-pin',
+  requireAuth,
+  validate(verifyPinSchema),
+  asyncHandler(controller.verifyPin),
+);

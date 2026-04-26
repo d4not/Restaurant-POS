@@ -5,8 +5,11 @@ import { prisma } from './lib/prisma.js';
 
 const app = createApp();
 
-const server = app.listen(env.PORT, () => {
-  logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Server listening');
+// Bind to 0.0.0.0 so other machines on the LAN (POS terminals, tablets) can
+// reach the API. Node already defaults to all-interfaces, but making it
+// explicit documents the intent and prevents surprise if a host arg is added.
+const server = app.listen(env.PORT, '0.0.0.0', () => {
+  logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Server listening on 0.0.0.0');
 });
 
 async function shutdown(signal: string): Promise<void> {
