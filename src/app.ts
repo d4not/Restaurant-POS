@@ -35,6 +35,7 @@ import { zoneRouter } from './modules/zones/routes.js';
 import { zoneLabelRouter } from './modules/zone-labels/routes.js';
 import { tableRouter } from './modules/tables/routes.js';
 import { floorRouter } from './modules/floors/routes.js';
+import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
@@ -108,6 +109,7 @@ export function createApp(): Express {
   app.use('/api/v1/zone-labels', zoneLabelRouter);
   app.use('/api/v1/tables', tableRouter);
   app.use('/api/v1/floors', floorRouter);
+  app.use('/api/v1/floor-decor', floorDecorRouter);
   app.use('/api/v1/suggestions', suggestionRouter);
 
   app.use(notFoundHandler);

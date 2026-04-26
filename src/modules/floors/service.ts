@@ -1,4 +1,4 @@
-import { OrderStatus, TableShape, TableStatus } from '@prisma/client';
+import { DecorType, OrderStatus, TableShape, TableStatus, ZoneKind } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 
 /**
@@ -50,12 +50,32 @@ export interface FloorZoneLabelSummary {
   rotation: number;
 }
 
+export interface FloorDecorSummary {
+  id: string;
+  type: DecorType;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  label: string | null;
+  rotation: number;
+}
+
 export interface FloorZoneSummary {
   id: string;
   name: string;
   display_order: number;
+  // DINE_IN zones host positioned tables on the canvas. TAKEOUT zones never
+  // do — the terminal renders a list of active takeout orders for that tab.
+  kind: ZoneKind;
+  // Floor-canvas geometry — the rendered dashed-bordered box.
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
   tables: FloorTableSummary[];
   labels: FloorZoneLabelSummary[];
+  decor: FloorDecorSummary[];
 }
 
 /**
@@ -89,6 +109,10 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
       zone_labels: {
         orderBy: { created_at: 'asc' },
       },
+      floor_decor: {
+        where: { active: true },
+        orderBy: { created_at: 'asc' },
+      },
     },
   });
 
@@ -96,6 +120,11 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
     id: zone.id,
     name: zone.name,
     display_order: zone.display_order,
+    kind: zone.kind,
+    pos_x: zone.pos_x,
+    pos_y: zone.pos_y,
+    width: zone.width,
+    height: zone.height,
     tables: zone.tables.map((table) => {
       const openOrders = table.orders;
       const head = openOrders[0] ?? null;
@@ -133,6 +162,16 @@ export async function getFloors(): Promise<FloorZoneSummary[]> {
       height: label.height,
       font_size: label.font_size,
       rotation: label.rotation,
+    })),
+    decor: zone.floor_decor.map((d) => ({
+      id: d.id,
+      type: d.type,
+      pos_x: d.pos_x,
+      pos_y: d.pos_y,
+      width: d.width,
+      height: d.height,
+      label: d.label,
+      rotation: d.rotation,
     })),
   }));
 }

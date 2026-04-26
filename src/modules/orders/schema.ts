@@ -1,5 +1,17 @@
 import { z } from 'zod';
-import { OrderStatus, OrderType, PaymentMethod } from '@prisma/client';
+import { OrderStatus, OrderType, PaymentMethod, TakeoutChannel } from '@prisma/client';
+
+// Free-text fields shared by create + update. Empty strings are coerced to
+// null at the service layer so blanks from the form don't leak into the DB.
+const takeoutCustomerFields = {
+  customer_name: z.string().max(120).nullable().optional(),
+  customer_phone: z.string().max(40).nullable().optional(),
+  delivery_address: z.string().max(500).nullable().optional(),
+  delivery_reference: z.string().max(500).nullable().optional(),
+  delivery_driver_name: z.string().max(120).nullable().optional(),
+  delivery_app: z.string().max(80).nullable().optional(),
+  delivery_app_order_id: z.string().max(80).nullable().optional(),
+};
 
 export const createOrderSchema = z
   .object({
@@ -8,7 +20,11 @@ export const createOrderSchema = z
     // Optional table assignment. Only meaningful for DINE_IN orders — TAKEOUT
     // with a table_id is rejected at the service level.
     table_id: z.string().uuid().nullable().optional(),
+    // Required when order_type=TAKEOUT, ignored for DINE_IN. Service-layer
+    // validates "is this channel currently active in settings".
+    takeout_channel: z.nativeEnum(TakeoutChannel).optional(),
     notes: z.string().max(2000).optional(),
+    ...takeoutCustomerFields,
   })
   .strict();
 
@@ -20,6 +36,11 @@ export const updateOrderSchema = z
     order_type: z.nativeEnum(OrderType).optional(),
     // Pass null to detach the order from its table; pass a UUID to reseat it.
     table_id: z.string().uuid().nullable().optional(),
+    // Reroute a TAKEOUT order to a different channel (e.g. customer originally
+    // walked up but ends up wanting delivery). Cleared automatically when
+    // order_type flips to DINE_IN.
+    takeout_channel: z.nativeEnum(TakeoutChannel).nullable().optional(),
+    ...takeoutCustomerFields,
   })
   .strict();
 

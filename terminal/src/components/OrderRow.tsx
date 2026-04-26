@@ -20,6 +20,7 @@ import { PulsingDot, Spinner } from './Spinner';
 import { IconClose, IconPrinter } from './Icons';
 import { CancelOrderModal } from './CancelOrderModal';
 import { confirmDialog } from './ConfirmDialog';
+import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
 
 // Discount + cashier-only actions stay gated; cancel is open to everyone now
 // — the *backend* gate kicks in only when at least one line was sent to the
@@ -411,9 +412,17 @@ export function OrderRow({ order }: Props) {
       ? `Table ${order.table.number}`
       : `Order #${order.order_number}`;
 
-  const zoneLabel = order.order_type === 'TAKEOUT'
-    ? 'Takeout'
-    : order.table?.zone.name ?? '—';
+  // Subtitle below "Takeout #N" — show the channel name (and customer when
+  // we have one) so the cashier can pick the right ticket without expanding.
+  const zoneLabel = (() => {
+    if (order.order_type !== 'TAKEOUT') return order.table?.zone.name ?? '—';
+    const channelLabel = order.takeout_channel
+      ? TAKEOUT_CHANNEL_LABEL[order.takeout_channel]
+      : 'Takeout';
+    if (order.customer_name) return `${channelLabel} · ${order.customer_name}`;
+    if (order.delivery_app_order_id) return `${channelLabel} · ${order.delivery_app_order_id}`;
+    return channelLabel;
+  })();
 
   const sendKitchenMutation = useMutation({
     mutationFn: () => sendOrderToKitchen(order.id),

@@ -65,6 +65,93 @@ describe('Zones CRUD', () => {
       .set(auth);
     expect(list.body.data.items[0].tables.map((t: { number: number }) => t.number)).toEqual([1, 2, 3]);
   });
+
+  it('rejects creating a TAKEOUT zone via the API (system-managed singleton)', async () => {
+    const res = await request(app)
+      .post('/api/v1/zones')
+      .set(auth)
+      .send({ name: 'Counter', kind: 'TAKEOUT' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/takeout zone/i);
+  });
+
+  it('rejects flipping a DINE_IN zone to TAKEOUT', async () => {
+    const zone = await request(app)
+      .post('/api/v1/zones')
+      .set(auth)
+      .send({ name: 'Indoor' });
+    const flip = await request(app)
+      .patch(`/api/v1/zones/${zone.body.data.id}`)
+      .set(auth)
+      .send({ kind: 'TAKEOUT' });
+    expect(flip.status).toBe(400);
+    expect(flip.body.error.message).toMatch(/takeout zone/i);
+  });
+
+  it('rejects deleting the TAKEOUT zone', async () => {
+    const takeoutZone = await prisma.zone.create({
+      data: { name: 'Barra/takeout', kind: 'TAKEOUT' },
+    });
+    const res = await request(app).delete(`/api/v1/zones/${takeoutZone.id}`).set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/takeout zone/i);
+  });
+
+  it('rejects deactivating the TAKEOUT zone', async () => {
+    const takeoutZone = await prisma.zone.create({
+      data: { name: 'Barra/takeout', kind: 'TAKEOUT' },
+    });
+    const res = await request(app)
+      .patch(`/api/v1/zones/${takeoutZone.id}`)
+      .set(auth)
+      .send({ active: false });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/takeout zone/i);
+  });
+
+  it('round-trips floor-canvas geometry on create and update', async () => {
+    const create = await request(app)
+      .post('/api/v1/zones')
+      .set(auth)
+      .send({
+        name: 'Patio',
+        pos_x: 540,
+        pos_y: 30,
+        width: 320,
+        height: 220,
+      });
+    expect(create.status).toBe(201);
+    expect(create.body.data).toMatchObject({
+      pos_x: 540,
+      pos_y: 30,
+      width: 320,
+      height: 220,
+    });
+
+    const patch = await request(app)
+      .patch(`/api/v1/zones/${create.body.data.id}`)
+      .set(auth)
+      .send({ pos_x: 700, height: 280 });
+    expect(patch.body.data).toMatchObject({
+      pos_x: 700,
+      pos_y: 30,
+      width: 320,
+      height: 280,
+    });
+  });
+
+  it('zones get default geometry (480x320 at origin) when none supplied', async () => {
+    const create = await request(app)
+      .post('/api/v1/zones')
+      .set(auth)
+      .send({ name: 'Indoor' });
+    expect(create.body.data).toMatchObject({
+      pos_x: 0,
+      pos_y: 0,
+      width: 480,
+      height: 320,
+    });
+  });
 });
 
 describe('Tables CRUD', () => {
@@ -99,6 +186,20 @@ describe('Tables CRUD', () => {
       .set(auth)
       .send({ zone_id: zoneId, number: 1 });
     expect(dup.status).toBe(409);
+  });
+
+  it('rejects creating a table in a TAKEOUT zone', async () => {
+    // Truncate clears the migration's seeded takeout zone — re-create via
+    // direct Prisma since the API blocks TAKEOUT creation by design.
+    const takeoutZone = await prisma.zone.create({
+      data: { name: 'Barra/takeout', kind: 'TAKEOUT' },
+    });
+    const res = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: takeoutZone.id, number: 1 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/takeout zone/i);
   });
 
   it('allows the same table number in two different zones', async () => {
@@ -169,16 +270,62 @@ describe('Tables CRUD', () => {
     expect(res.status).toBe(422);
   });
 
-  it('soft-deletes a table (active=false, row preserved for order history)', async () => {
+  it('hard-deletes a table that has no order history', async () => {
     const create = await request(app)
       .post('/api/v1/tables')
       .set(auth)
       .send({ zone_id: zoneId, number: 1 });
     await request(app).delete(`/api/v1/tables/${create.body.data.id}`).set(auth).expect(204);
-    const row = await prisma.table.findUniqueOrThrow({
-      where: { id: create.body.data.id },
+    const row = await prisma.table.findUnique({ where: { id: create.body.data.id } });
+    expect(row).toBeNull();
+  });
+
+  it('soft-deletes a table that has order history (preserves row for the orders)', async () => {
+    const tableRow = await prisma.table.create({
+      data: { zone_id: zoneId, number: 9 },
     });
+    const register = await prisma.cashRegister.create({
+      data: {
+        user_id: (await prisma.user.findFirstOrThrow()).id,
+        opening_amount: 0,
+      },
+    });
+    await prisma.order.create({
+      data: {
+        register_id: register.id,
+        order_number: 1,
+        order_date: new Date(),
+        order_type: 'DINE_IN',
+        status: 'PAID',
+        table_id: tableRow.id,
+        user_id: register.user_id,
+      },
+    });
+    await request(app).delete(`/api/v1/tables/${tableRow.id}`).set(auth).expect(204);
+    const row = await prisma.table.findUniqueOrThrow({ where: { id: tableRow.id } });
     expect(row.active).toBe(false);
+  });
+
+  it('resurrects a soft-deleted table when creating with the same (zone, number)', async () => {
+    const created = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: zoneId, number: 4, pos_x: 100, pos_y: 100 });
+    // Force the row into the soft-deleted state to simulate a table that was
+    // retired while it had order history.
+    await prisma.table.update({
+      where: { id: created.body.data.id },
+      data: { active: false },
+    });
+    const recreate = await request(app)
+      .post('/api/v1/tables')
+      .set(auth)
+      .send({ zone_id: zoneId, number: 4, pos_x: 200, pos_y: 250 });
+    expect(recreate.status).toBe(201);
+    expect(recreate.body.data.id).toBe(created.body.data.id);
+    expect(recreate.body.data.active).toBe(true);
+    expect(recreate.body.data.pos_x).toBe(200);
+    expect(recreate.body.data.pos_y).toBe(250);
   });
 
   it('accepts floor-plan layout fields on create and returns them on read', async () => {
@@ -335,6 +482,48 @@ describe('GET /api/v1/floors includes layout fields and labels', () => {
       pos_x: 20,
       pos_y: 20,
       font_size: 28,
+    });
+  });
+
+  it('returns zone geometry and decor in the payload', async () => {
+    const zone = await request(app)
+      .post('/api/v1/zones')
+      .set(auth)
+      .send({ name: 'Indoor', pos_x: 30, pos_y: 30, width: 460, height: 320 });
+    const zoneId = zone.body.data.id as string;
+    await request(app)
+      .post('/api/v1/floor-decor')
+      .set(auth)
+      .send({
+        zone_id: zoneId,
+        type: 'BAR_COUNTER',
+        pos_x: 24,
+        pos_y: 80,
+        width: 272,
+        height: 60,
+        label: 'Main Bar',
+      });
+    await request(app)
+      .post('/api/v1/floor-decor')
+      .set(auth)
+      .send({ zone_id: zoneId, type: 'DECOR_PLANT', pos_x: 350, pos_y: 40 });
+
+    const floors = await request(app).get('/api/v1/floors').set(auth);
+    expect(floors.status).toBe(200);
+    const z = floors.body.data.find((zz: { id: string }) => zz.id === zoneId);
+    expect(z).toMatchObject({
+      pos_x: 30,
+      pos_y: 30,
+      width: 460,
+      height: 320,
+    });
+    expect(z.decor).toHaveLength(2);
+    expect(z.decor.find((d: { type: string }) => d.type === 'BAR_COUNTER')).toMatchObject({
+      pos_x: 24,
+      pos_y: 80,
+      width: 272,
+      height: 60,
+      label: 'Main Bar',
     });
   });
 });

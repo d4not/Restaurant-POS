@@ -142,6 +142,33 @@ enum TableShape {
   TABLE_CIRCLE
 }
 
+enum ZoneKind {
+  DINE_IN
+  TAKEOUT
+}
+
+enum DecorType {
+  // Free-floating non-table elements painted on the floor canvas. BAR_COUNTER
+  // is the long hatched rectangle (a bar/counter that doesn't host orders);
+  // DECOR_PLANT is a small green dot used as visual flavor next to seating.
+  // These have no operational meaning — they're layout-only.
+  BAR_COUNTER
+  DECOR_PLANT
+}
+
+// Sub-channel for TAKEOUT orders. The takeout zone hosts three independent
+// flows; each can be toggled on/off in settings without affecting the others.
+//   LOCAL          — walk-up customer waiting at the counter for pickup.
+//   DELIVERY_LOCAL — order delivered by the restaurant's own driver.
+//   DELIVERY_APP   — third-party platform (Uber Eats, DiDi Food, etc.). The
+//                    integration with each platform lands later; for now this
+//                    is a free-form bucket the cashier picks manually.
+enum TakeoutChannel {
+  LOCAL
+  DELIVERY_LOCAL
+  DELIVERY_APP
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
@@ -852,6 +879,26 @@ model Order {
   order_number    Int
   status          OrderStatus @default(OPEN)
   order_type      OrderType
+  // Required when order_type=TAKEOUT, NULL for DINE_IN. Service-layer
+  // enforcement only — Postgres can't express the conditional easily and
+  // adding a CHECK constraint conflicts with existing rows.
+  takeout_channel TakeoutChannel?
+  // Customer + delivery snapshots for takeout orders. All optional — the
+  // cashier fills the relevant subset for the active channel:
+  //   LOCAL          → customer_name (so the comanda prints "for John")
+  //   DELIVERY_LOCAL → customer_name + customer_phone + delivery_address +
+  //                    delivery_reference + delivery_driver_name
+  //   DELIVERY_APP   → delivery_app + delivery_app_order_id
+  // The fields stay populated even if the channel changes — the snapshot is
+  // historical. Service-layer code clears every field when order_type flips
+  // back to DINE_IN.
+  customer_name           String?
+  customer_phone          String?
+  delivery_address        String?
+  delivery_reference      String?
+  delivery_driver_name    String?
+  delivery_app            String?
+  delivery_app_order_id   String?
   // Optional dine-in table assignment. Multiple OPEN orders on the same table
   // are permitted (group ordering); the table is freed only after the LAST
   // open order is PAID or CANCELLED. ON DELETE SET NULL so deleting the table
@@ -1056,6 +1103,18 @@ model Zone {
   id            String   @id @default(uuid()) @db.Uuid
   name          String
   display_order Int      @default(0)
+  // DINE_IN: regular zone hosting positioned tables on the floor canvas.
+  // TAKEOUT: virtual zone that never holds tables — its floor-plan tab swaps
+  // the canvas for a list of active TAKEOUT/delivery orders. The system
+  // permits at most one TAKEOUT zone (enforced by a partial unique index).
+  kind          ZoneKind @default(DINE_IN)
+  // Floor-canvas geometry — the zone is rendered as a dashed-bordered box at
+  // these coordinates and sizes, with its tables/decor positioned relative to
+  // its top-left corner. TAKEOUT zones ignore these (they render as a list).
+  pos_x         Int      @default(0)
+  pos_y         Int      @default(0)
+  width         Int      @default(480)
+  height        Int      @default(320)
   active        Boolean  @default(true)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
@@ -1064,6 +1123,7 @@ model Zone {
   // Floor-canvas free-floating text labels scoped to this zone. Cascade delete
   // so wiping a zone doesn't leave orphaned labels on the canvas.
   zone_labels  ZoneLabel[]
+  floor_decor  FloorDecor[]
 
   @@map("zones")
 }
@@ -1190,4 +1250,28 @@ model ZoneLabel {
 
   @@index([zone_id])
   @@map("zone_labels")
+}
+
+// Decorative non-interactive elements on the floor canvas (bar counters, plants)
+// scoped to a zone. Cascade delete keeps the canvas tidy when a zone is wiped.
+// Soft-deleted via `active=false` so historical floor snapshots remain valid;
+// the floors endpoint filters to active=true.
+model FloorDecor {
+  id         String    @id @default(uuid()) @db.Uuid
+  zone_id    String    @db.Uuid
+  type       DecorType
+  pos_x      Int       @default(0)
+  pos_y      Int       @default(0)
+  width      Int       @default(80)
+  height     Int       @default(50)
+  label      String?
+  rotation   Int       @default(0)
+  active     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  zone Zone @relation(fields: [zone_id], references: [id], onDelete: Cascade)
+
+  @@index([zone_id])
+  @@map("floor_decor")
 }

@@ -1,10 +1,19 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { ConflictError, NotFoundError } from '../../lib/errors.js';
+import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import type { CreateZoneInput, ListZoneQuery, UpdateZoneInput } from './schema.js';
 
+// The TAKEOUT zone is a system-managed singleton seeded by the migration.
+// Users only manage DINE_IN zones through the API — preventing TAKEOUT creates
+// here keeps the singleton invariant simple and avoids race conditions on the
+// partial unique index.
 export async function createZone(input: CreateZoneInput) {
+  if (input.kind === 'TAKEOUT') {
+    throw new BadRequestError(
+      'The takeout zone is created automatically and cannot be added manually',
+    );
+  }
   return prisma.zone.create({ data: input });
 }
 
@@ -33,7 +42,27 @@ export async function getZone(id: string) {
 }
 
 export async function updateZone(id: string, input: UpdateZoneInput) {
-  await getZone(id);
+  const zone = await getZone(id);
+
+  // The TAKEOUT zone is system-managed; let the operator rename it and tweak
+  // display_order, but block flipping kind, deactivating, or any other state
+  // change that could break the singleton invariant.
+  if (zone.kind === 'TAKEOUT') {
+    if (input.kind && input.kind !== 'TAKEOUT') {
+      throw new BadRequestError('Cannot change the kind of the takeout zone');
+    }
+    if (input.active === false) {
+      throw new BadRequestError('The takeout zone cannot be deactivated');
+    }
+  }
+  // Flipping a DINE_IN zone to TAKEOUT is no longer allowed via the API — the
+  // takeout zone is exclusively the seeded one. Reject explicitly so the UI
+  // can show a clear message.
+  if (input.kind === 'TAKEOUT' && zone.kind !== 'TAKEOUT') {
+    throw new BadRequestError(
+      'Only the system-managed takeout zone can be of kind TAKEOUT',
+    );
+  }
   return prisma.zone.update({ where: { id }, data: input });
 }
 
@@ -43,6 +72,9 @@ export async function updateZone(id: string, input: UpdateZoneInput) {
 // Inactivation preserves the link instead.
 export async function deleteZone(id: string) {
   const zone = await getZone(id);
+  if (zone.kind === 'TAKEOUT') {
+    throw new BadRequestError('The takeout zone cannot be deleted');
+  }
   // Block deletion if any active table in this zone is currently in use by
   // an OPEN order — releasing the order from the table on the way out is the
   // user's call to make, not ours.

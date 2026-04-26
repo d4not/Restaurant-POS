@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../store/session';
 import { useUi, type TerminalView } from '../store/ui';
 import { formatTime, formatDate, getInitials, useClock } from '../utils/clock';
@@ -16,6 +17,10 @@ import { ShiftPill, ShiftManagerModal } from './RegisterPanel';
 import { PinConfirmModal } from './PinConfirmModal';
 import { verifyPin } from '../api/auth';
 import { ApiError } from '../api/client';
+import { createOrder, type TakeoutChannel } from '../api/orders';
+import { fetchOpenRegister } from '../api/registers';
+import { fetchSettings } from '../api/settings';
+import { TakeoutChannelPicker } from './TakeoutChannelPicker';
 
 interface NavTab {
   view: TerminalView;
@@ -102,6 +107,17 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(232,221,208,0.12)',
     cursor: 'pointer',
     transition: 'background 0.15s',
+    whiteSpace: 'nowrap',
+  },
+  newOrderBtnDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  newOrderError: {
+    fontSize: 11,
+    color: '#e8a597',
+    paddingLeft: 4,
+    maxWidth: 220,
   },
   navList: {
     display: 'flex',
@@ -259,6 +275,7 @@ export function TopBar() {
   const toggleMenu = useUi((s) => s.toggleMenu);
   const closeMenu = useUi((s) => s.closeMenu);
   const openSettings = useUi((s) => s.openSettings);
+  const openOrderDetail = useUi((s) => s.openOrderDetail);
   const historyUnlocked = useUi((s) => s.historyUnlocked);
   const unlockHistory = useUi((s) => s.unlockHistory);
   const resetSession = useUi((s) => s.resetSession);
@@ -271,11 +288,61 @@ export function TopBar() {
   const canSeeHistory = HISTORY_ROLES.has(role);
 
   const now = useClock(15_000);
+  const queryClient = useQueryClient();
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [historyPinOpen, setHistoryPinOpen] = useState(false);
   const [historyPinBusy, setHistoryPinBusy] = useState(false);
   const [historyPinError, setHistoryPinError] = useState<string | null>(null);
+  const [takeoutError, setTakeoutError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Same shift lookup the floor plan uses — the backend rejects POST /orders
+  // without a register_id, and takeout has no table to fall back on.
+  const userId = user?.id ?? null;
+  const registerQuery = useQuery({
+    queryKey: ['register', 'open', userId],
+    queryFn: () => (userId ? fetchOpenRegister(userId) : Promise.resolve(null)),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+
+  // Fetch the per-channel active flags so the picker can grey out anything
+  // currently disabled. Cheap (returns the whole settings dict) so we share
+  // the cache key with the rest of the app.
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+    staleTime: 60_000,
+  });
+
+  const takeoutMutation = useMutation({
+    mutationFn: (channel: TakeoutChannel) => {
+      const reg = registerQuery.data;
+      if (!reg) {
+        return Promise.reject(
+          new ApiError(
+            'No open shift — tap the shift pill to open one.',
+            409,
+          ),
+        );
+      }
+      return createOrder({
+        register_id: reg.id,
+        order_type: 'TAKEOUT',
+        takeout_channel: channel,
+      });
+    },
+    onSuccess: (order) => {
+      setTakeoutError(null);
+      setPickerOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
+      openOrderDetail(order.id);
+    },
+    onError: (err) => {
+      setTakeoutError(err instanceof ApiError ? err.message : 'Could not start takeout order');
+    },
+  });
 
   const visibleTabs = TABS.filter((tab) => tab.view !== 'history' || canSeeHistory);
 
@@ -337,14 +404,24 @@ export function TopBar() {
         </div>
         <button
           type="button"
-          style={styles.newOrderBtn}
+          style={{
+            ...styles.newOrderBtn,
+            ...(takeoutMutation.isPending ? styles.newOrderBtnDisabled : null),
+          }}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setView('floor')}
-          title="Pick a table on the floor plan"
+          onClick={() => {
+            setTakeoutError(null);
+            setPickerOpen(true);
+          }}
+          disabled={takeoutMutation.isPending}
+          title="Open a takeout or delivery order"
         >
           <IconPlus />
-          <span>New Order</span>
+          <span>{takeoutMutation.isPending ? 'Opening…' : 'Takeout/Delivery Order'}</span>
         </button>
+        {takeoutError && !pickerOpen && (
+          <span style={styles.newOrderError}>{takeoutError}</span>
+        )}
       </div>
 
       <nav style={styles.navList}>
@@ -391,6 +468,18 @@ export function TopBar() {
           <IconMenu />
         </button>
       </div>
+
+      <TakeoutChannelPicker
+        open={pickerOpen}
+        busy={takeoutMutation.isPending}
+        error={takeoutError}
+        settings={settingsQuery.data}
+        onCancel={() => {
+          setPickerOpen(false);
+          setTakeoutError(null);
+        }}
+        onChoose={(channel) => takeoutMutation.mutate(channel)}
+      />
 
       <ShiftManagerModal open={shiftModalOpen} onClose={() => setShiftModalOpen(false)} />
 

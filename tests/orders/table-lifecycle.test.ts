@@ -161,6 +161,7 @@ describe('Order ↔ Table lifecycle', () => {
       .send({
         register_id: s.registerId,
         order_type: 'TAKEOUT',
+        takeout_channel: 'LOCAL',
         table_id: s.table1Id,
       });
     expect(res.status).toBe(400);
@@ -339,7 +340,7 @@ describe('Order ↔ Table lifecycle', () => {
     await request(app)
       .post('/api/v1/orders')
       .set(s.auth)
-      .send({ register_id: s.registerId, order_type: 'TAKEOUT' })
+      .send({ register_id: s.registerId, order_type: 'TAKEOUT', takeout_channel: 'LOCAL' })
       .expect(201);
 
     const byTable = await request(app)

@@ -159,8 +159,16 @@ export function TableNode({
   return (
     <div
       style={root}
-      onPointerDown={(e) => onPointerDown?.(e, 'drag')}
-      onClick={onClick}
+      onPointerDown={(e) => {
+        // Stop the parent zone from also receiving this pointerdown — otherwise
+        // dragging a table would simultaneously start a zone drag.
+        e.stopPropagation();
+        onPointerDown?.(e, 'drag');
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
       data-table-id={table.id}
     >
       {!isCircle && <div style={cornerStripe} />}

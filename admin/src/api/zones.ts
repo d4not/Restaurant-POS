@@ -1,6 +1,6 @@
 import { api } from './client';
 import type { Paginated } from '../types/api';
-import type { Zone, ZoneWithTables } from '../types/operations';
+import type { Zone, ZoneKind, ZoneWithTables } from '../types/operations';
 
 export interface ListZonesParams {
   cursor?: string;
@@ -20,6 +20,7 @@ export function getZone(id: string) {
 export interface CreateZoneInput {
   name: string;
   display_order?: number;
+  kind?: ZoneKind;
   active?: boolean;
 }
 

@@ -13,13 +13,38 @@ const tableInclude = {
   zone: { select: { id: true, name: true, display_order: true } },
 } satisfies Prisma.TableInclude;
 
-async function assertZoneExists(zoneId: string): Promise<void> {
-  const zone = await prisma.zone.findUnique({ where: { id: zoneId }, select: { id: true } });
+async function assertZoneAcceptsTables(zoneId: string): Promise<void> {
+  const zone = await prisma.zone.findUnique({
+    where: { id: zoneId },
+    select: { id: true, kind: true, name: true },
+  });
   if (!zone) throw new BadRequestError('zone_id references a non-existent zone');
+  if (zone.kind === 'TAKEOUT') {
+    throw new BadRequestError(
+      `Zone "${zone.name}" is a takeout zone — it cannot host tables`,
+    );
+  }
 }
 
 export async function createTable(input: CreateTableInput) {
-  await assertZoneExists(input.zone_id);
+  await assertZoneAcceptsTables(input.zone_id);
+
+  // If a soft-deleted table already occupies (zone_id, number), resurrect it
+  // with the new layout instead of failing on the unique index. Soft-deleted
+  // rows that still have order history can't be hard-deleted, so without this
+  // path the user could never reuse that number.
+  const existing = await prisma.table.findUnique({
+    where: { zone_id_number: { zone_id: input.zone_id, number: input.number } },
+    select: { id: true, active: true },
+  });
+  if (existing && !existing.active) {
+    return prisma.table.update({
+      where: { id: existing.id },
+      data: { ...input, active: true },
+      include: tableInclude,
+    });
+  }
+
   try {
     return await prisma.table.create({ data: input, include: tableInclude });
   } catch (err) {
@@ -61,7 +86,7 @@ export async function getTable(id: string) {
 
 export async function updateTable(id: string, input: UpdateTableInput) {
   await getTable(id);
-  if (input.zone_id) await assertZoneExists(input.zone_id);
+  if (input.zone_id) await assertZoneAcceptsTables(input.zone_id);
   try {
     return await prisma.table.update({
       where: { id },
@@ -90,9 +115,10 @@ export async function updateTableStatus(id: string, input: UpdateTableStatusInpu
   });
 }
 
-// Soft-delete: keep the row so historical orders' table_id link remains
-// resolvable. A hard delete here would also break (orders still reference it
-// even after ON DELETE SET NULL fires, until the order rows are updated).
+// Hard-delete when the table has no order history; soft-delete otherwise so
+// historical orders' table_id link remains resolvable. Without the hard-delete
+// branch, every cleared table left a zombie row blocking the next reuse of its
+// number — the operator had no way to free the slot from the floor plan.
 export async function deleteTable(id: string) {
   const table = await getTable(id);
   const openOrders = await prisma.order.count({
@@ -102,6 +128,10 @@ export async function deleteTable(id: string) {
     throw new ConflictError(
       `Cannot delete table ${table.number} — it has ${openOrders} open order(s)`,
     );
+  }
+  const totalOrders = await prisma.order.count({ where: { table_id: id } });
+  if (totalOrders === 0) {
+    return prisma.table.delete({ where: { id } });
   }
   return prisma.table.update({ where: { id }, data: { active: false } });
 }

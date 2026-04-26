@@ -254,8 +254,69 @@ describe('Full order lifecycle — open register → pay → deduct inventory', 
     const second = await request(app)
       .post('/api/v1/orders')
       .set(s.auth)
-      .send({ register_id: s.registerId, order_type: 'TAKEOUT' });
+      .send({ register_id: s.registerId, order_type: 'TAKEOUT', takeout_channel: 'LOCAL' });
     expect(second.body.data.order_number).toBe(2);
+    expect(second.body.data.takeout_channel).toBe('LOCAL');
+  });
+
+  it('rejects a TAKEOUT order without a takeout_channel', async () => {
+    const res = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'TAKEOUT' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/takeout_channel/i);
+  });
+
+  it('rejects takeout_channel on a DINE_IN order', async () => {
+    const res = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({
+        register_id: s.registerId,
+        order_type: 'DINE_IN',
+        takeout_channel: 'LOCAL',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/TAKEOUT/i);
+  });
+
+  it('rejects creating a TAKEOUT order on a disabled channel', async () => {
+    await prisma.setting.upsert({
+      where: { key: 'takeout_channel_delivery_app_active' },
+      create: { key: 'takeout_channel_delivery_app_active', value: 'false' },
+      update: { value: 'false' },
+    });
+    const res = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({
+        register_id: s.registerId,
+        order_type: 'TAKEOUT',
+        takeout_channel: 'DELIVERY_APP',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/disabled/i);
+  });
+
+  it('flipping order_type to DINE_IN clears takeout_channel', async () => {
+    const created = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({
+        register_id: s.registerId,
+        order_type: 'TAKEOUT',
+        takeout_channel: 'DELIVERY_LOCAL',
+      });
+    const orderId = created.body.data.id as string;
+
+    const updated = await request(app)
+      .patch(`/api/v1/orders/${orderId}`)
+      .set(s.auth)
+      .send({ order_type: 'DINE_IN' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data.order_type).toBe('DINE_IN');
+    expect(updated.body.data.takeout_channel).toBeNull();
   });
 
   it('adds items with modifiers, snapshots prices, recalculates totals on each change', async () => {
@@ -468,7 +529,7 @@ describe('Register close — expected_amount calculation with sales + cash movem
     const o1 = await request(app)
       .post('/api/v1/orders')
       .set(s.auth)
-      .send({ register_id: s.registerId, order_type: 'TAKEOUT' })
+      .send({ register_id: s.registerId, order_type: 'TAKEOUT', takeout_channel: 'LOCAL' })
       .expect(201);
     await request(app)
       .post(`/api/v1/orders/${o1.body.data.id}/items`)
@@ -485,7 +546,7 @@ describe('Register close — expected_amount calculation with sales + cash movem
     const o2 = await request(app)
       .post('/api/v1/orders')
       .set(s.auth)
-      .send({ register_id: s.registerId, order_type: 'TAKEOUT' })
+      .send({ register_id: s.registerId, order_type: 'TAKEOUT', takeout_channel: 'LOCAL' })
       .expect(201);
     await request(app)
       .post(`/api/v1/orders/${o2.body.data.id}/items`)

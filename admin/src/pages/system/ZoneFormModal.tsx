@@ -19,6 +19,11 @@ export function ZoneFormModal({ open, onClose, zone }: Props) {
   const [order, setOrder] = useState('0');
   const [error, setError] = useState<string | null>(null);
 
+  // Takeout zones are system-managed singletons. Editing the seeded zone
+  // exposes only name + display_order; "kind" is read-only and uncreatable
+  // from the form.
+  const isTakeoutZone = zone?.kind === 'TAKEOUT';
+
   useEffect(() => {
     if (!open) return;
     setName(zone?.name ?? '');
@@ -94,6 +99,15 @@ export function ZoneFormModal({ open, onClose, zone }: Props) {
           onChange={(e) => setOrder(e.target.value)}
           hint="Lower numbers show first in the picker. Defaults to 0."
         />
+        {isTakeoutZone && (
+          <div className="field">
+            <label>Type</label>
+            <div className="field-hint">
+              System-managed Takeout/Delivery zone — name and order can be
+              tweaked, but the zone itself is permanent.
+            </div>
+          </div>
+        )}
       </form>
     </Modal>
   );

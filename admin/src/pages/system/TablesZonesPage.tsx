@@ -137,10 +137,13 @@ function ZoneCard({ zone, onEditZone, onDeleteZone, deletingZone }: ZoneCardProp
   const meta = (
     <div className="flex gap-12" style={{ alignItems: 'center' }}>
       <span className="fs-11 text-muted">
-        order {zone.display_order} · {activeTables.length} table
-        {activeTables.length === 1 ? '' : 's'}
-        {inactiveCount > 0 && ` (+${inactiveCount} inactive)`}
+        order {zone.display_order}
+        {zone.kind === 'TAKEOUT'
+          ? ' · takeout zone'
+          : ` · ${activeTables.length} table${activeTables.length === 1 ? '' : 's'}`}
+        {zone.kind !== 'TAKEOUT' && inactiveCount > 0 && ` (+${inactiveCount} inactive)`}
       </span>
+      {zone.kind === 'TAKEOUT' && <Badge tone="gold">Takeout</Badge>}
       {!zone.active && <Badge tone="gray">Inactive</Badge>}
       <button
         type="button"
@@ -163,11 +166,20 @@ function ZoneCard({ zone, onEditZone, onDeleteZone, deletingZone }: ZoneCardProp
 
   return (
     <Card title={zone.name} actions={meta}>
-      <TablesGrid zoneId={zone.id} tables={activeTables} />
-      <AddTableForm
-        zoneId={zone.id}
-        existingNumbers={(zone.tables ?? []).map((t) => t.number)}
-      />
+      {zone.kind === 'TAKEOUT' ? (
+        <div className="text-muted fs-13" style={{ padding: '8px 0' }}>
+          Takeout zone — no tables. The terminal renders this tab as a list of
+          active takeout/delivery orders.
+        </div>
+      ) : (
+        <>
+          <TablesGrid zoneId={zone.id} tables={activeTables} />
+          <AddTableForm
+            zoneId={zone.id}
+            existingNumbers={(zone.tables ?? []).map((t) => t.number)}
+          />
+        </>
+      )}
     </Card>
   );
 }

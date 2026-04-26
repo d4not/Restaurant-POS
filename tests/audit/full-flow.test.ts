@@ -329,7 +329,7 @@ describe('Full-flow audit — Phase 2 scenarios', () => {
     const cashOrder = await request(app)
       .post('/api/v1/orders')
       .set(auth)
-      .send({ register_id: reg.body.data.id, order_type: 'TAKEOUT' })
+      .send({ register_id: reg.body.data.id, order_type: 'TAKEOUT', takeout_channel: 'LOCAL' })
       .expect(201);
     await request(app)
       .post(`/api/v1/orders/${cashOrder.body.data.id}/items`)

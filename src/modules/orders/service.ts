@@ -7,6 +7,7 @@ import {
   ProductType,
   StockMovementType,
   TableStatus,
+  TakeoutChannel,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
@@ -262,6 +263,97 @@ async function syncTableStatus(tx: Tx, tableId: string): Promise<void> {
 // Order CRUD
 // ----------------------------------------------------------------------------
 
+const TAKEOUT_CHANNEL_SETTING_KEY: Record<TakeoutChannel, string> = {
+  LOCAL: 'takeout_channel_local_active',
+  DELIVERY_LOCAL: 'takeout_channel_delivery_local_active',
+  DELIVERY_APP: 'takeout_channel_delivery_app_active',
+};
+
+const TAKEOUT_CHANNEL_LABEL: Record<TakeoutChannel, string> = {
+  LOCAL: 'Local pickup',
+  DELIVERY_LOCAL: 'Local delivery',
+  DELIVERY_APP: 'Delivery app',
+};
+
+// Settings store the per-channel active flag as a string ("true" / "false").
+// We treat anything that isn't an explicit "false" as enabled — that matches
+// the migration default and avoids breaking when a key was wiped manually.
+async function assertTakeoutChannelActive(
+  tx: Prisma.TransactionClient,
+  channel: TakeoutChannel,
+): Promise<void> {
+  const value = await getSetting(TAKEOUT_CHANNEL_SETTING_KEY[channel], tx);
+  if (value === 'false') {
+    throw new BadRequestError(
+      `${TAKEOUT_CHANNEL_LABEL[channel]} is currently disabled — enable it in settings before taking orders for this channel`,
+    );
+  }
+}
+
+// Centralise the order_type ↔ takeout_channel rules so create/update share
+// them. For TAKEOUT, channel is required and must be active. For DINE_IN, a
+// channel is meaningless and is rejected outright.
+async function validateOrderTypeAndChannel(
+  tx: Prisma.TransactionClient,
+  orderType: OrderType,
+  channel: TakeoutChannel | null | undefined,
+): Promise<void> {
+  if (orderType === OrderType.TAKEOUT) {
+    if (!channel) {
+      throw new BadRequestError(
+        'takeout_channel is required for TAKEOUT orders',
+      );
+    }
+    await assertTakeoutChannelActive(tx, channel);
+  } else if (channel) {
+    throw new BadRequestError(
+      'takeout_channel is only valid for TAKEOUT orders',
+    );
+  }
+}
+
+// Empty strings from form fields collapse to null so the DB stays clean and
+// "is the field set?" checks don't have to special-case "".
+function nullifyBlank(v: string | null | undefined): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  const trimmed = v.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+const TAKEOUT_FIELD_KEYS = [
+  'customer_name',
+  'customer_phone',
+  'delivery_address',
+  'delivery_reference',
+  'delivery_driver_name',
+  'delivery_app',
+  'delivery_app_order_id',
+] as const;
+
+interface TakeoutFieldsInput {
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  delivery_address?: string | null;
+  delivery_reference?: string | null;
+  delivery_driver_name?: string | null;
+  delivery_app?: string | null;
+  delivery_app_order_id?: string | null;
+}
+
+// Build a Prisma data slice from the raw form input, dropping fields that
+// weren't sent so a PATCH /orders/:id only touches what the cashier changed.
+function pickTakeoutFields(
+  input: TakeoutFieldsInput,
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const key of TAKEOUT_FIELD_KEYS) {
+    const v = nullifyBlank(input[key]);
+    if (v !== undefined) out[key] = v;
+  }
+  return out;
+}
+
 export async function createOrder(userId: string, input: CreateOrderInput) {
   return prisma.$transaction(async (tx) => {
     const register = await tx.cashRegister.findUnique({
@@ -272,6 +364,8 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
     if (register.status !== CashRegisterStatus.OPEN) {
       throw new ConflictError('Cannot create an order while the cash register is closed');
     }
+
+    await validateOrderTypeAndChannel(tx, input.order_type, input.takeout_channel);
 
     if (input.table_id) {
       await assertTableAssignable(tx, input.table_id, input.order_type);
@@ -289,10 +383,17 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
             register_id: input.register_id,
             user_id: userId,
             order_type: input.order_type,
+            takeout_channel:
+              input.order_type === OrderType.TAKEOUT
+                ? input.takeout_channel ?? null
+                : null,
             table_id: input.table_id ?? null,
             notes: input.notes,
             order_number: orderNumber,
             order_date: date,
+            ...(input.order_type === OrderType.TAKEOUT
+              ? pickTakeoutFields(input)
+              : {}),
           },
         });
         if (input.table_id) {
@@ -355,23 +456,54 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
     // validated against the correct (possibly just-changed) type.
     const current = await tx.order.findUniqueOrThrow({
       where: { id },
-      select: { table_id: true, order_type: true },
+      select: { table_id: true, order_type: true, takeout_channel: true },
     });
     const nextOrderType = input.order_type ?? current.order_type;
+    // Pick the next channel: explicit input wins, else keep the current one
+    // unless the type is flipping to DINE_IN (which forces null).
+    const nextChannel =
+      nextOrderType === OrderType.DINE_IN
+        ? null
+        : input.takeout_channel !== undefined
+          ? input.takeout_channel
+          : current.takeout_channel;
+    await validateOrderTypeAndChannel(tx, nextOrderType, nextChannel);
     if (input.table_id !== undefined && input.table_id !== null) {
       await assertTableAssignable(tx, input.table_id, nextOrderType);
     }
+
+    // Flip back to DINE_IN clears every takeout snapshot field — keeps stale
+    // delivery info from showing on a now-dine-in order.
+    const clearTakeoutFields =
+      input.order_type === OrderType.DINE_IN && current.order_type !== OrderType.DINE_IN;
 
     await tx.order.update({
       where: { id },
       data: {
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
         ...(input.order_type !== undefined ? { order_type: input.order_type } : {}),
+        // Persist the resolved channel whenever the type or channel input
+        // changed — covers "flip to DINE_IN clears channel" and explicit
+        // channel updates.
+        ...(input.order_type !== undefined || input.takeout_channel !== undefined
+          ? { takeout_channel: nextChannel }
+          : {}),
         ...(input.table_id !== undefined ? { table_id: input.table_id } : {}),
         ...(input.discount_amount !== undefined
           ? { discount_amount: new Decimal(input.discount_amount) }
           : {}),
         ...(input.discount_reason !== undefined ? { discount_reason: input.discount_reason } : {}),
+        ...(clearTakeoutFields
+          ? {
+              customer_name: null,
+              customer_phone: null,
+              delivery_address: null,
+              delivery_reference: null,
+              delivery_driver_name: null,
+              delivery_app: null,
+              delivery_app_order_id: null,
+            }
+          : pickTakeoutFields(input)),
       },
     });
     if (input.discount_amount !== undefined) {

@@ -34,6 +34,8 @@ import {
 } from '../components/Icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { PinConfirmModal } from '../components/PinConfirmModal';
+import { TakeoutCustomerPanel } from '../components/TakeoutCustomerPanel';
+import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
 import { useSession } from '../store/session';
 import { useUi } from '../store/ui';
 import {
@@ -1156,7 +1158,11 @@ export function TableDetail() {
         ? `Table ${order.table.number}`
         : `Order #${order.order_number}`;
   const zoneLabel =
-    order.order_type === 'TAKEOUT' ? 'Takeout' : order.table?.zone.name ?? '—';
+    order.order_type === 'TAKEOUT'
+      ? order.takeout_channel
+        ? TAKEOUT_CHANNEL_LABEL[order.takeout_channel]
+        : 'Takeout'
+      : order.table?.zone.name ?? '—';
   const elapsed = formatElapsed(minutesSince(order.created_at));
   // Ticket header counts only non-voided lines so the "X items" matches what
   // the customer is paying for (voided lines are tombstones, not active).
@@ -1551,6 +1557,15 @@ export function TableDetail() {
               {hasUnsent ? 'Some items not sent to kitchen' : 'All items sent'}
             </div>
           </div>
+
+          {order.order_type === 'TAKEOUT' && (
+            <div style={{ padding: '12px 20px 0' }}>
+              <TakeoutCustomerPanel
+                order={order}
+                editable={order.status === 'OPEN'}
+              />
+            </div>
+          )}
 
           <div style={styles.ticketBody}>
             {order.items.length === 0 ? (

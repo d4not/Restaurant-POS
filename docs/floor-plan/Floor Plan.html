@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Floor Plan</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #f5f0e6;
+    --bg-grid: rgba(0,0,0,0.05);
+    --paper: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #6b6b6b;
+    --line: #e3ddd0;
+    --line-soft: #ede8db;
+
+    --green: #4f8a52;
+    --amber: #c98a2b;
+    --red:   #b04848;
+    --blue:  #3a6b8a;
+
+    --green-soft: #e8f0e4;
+    --amber-soft: #f6ecda;
+    --red-soft:   #f3e0e0;
+    --blue-soft:  #e0eaf0;
+
+    --zone-salon:   rgba(201, 138, 43, 0.05);
+    --zone-terraza: rgba(79, 138, 82, 0.05);
+    --zone-barra:   rgba(58, 107, 138, 0.05);
+    --zone-altura:  rgba(176, 72, 72, 0.05);
+
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .serif { font-family: 'Fraunces', Georgia, serif; font-weight: 500; }
+
+  /* Header */
+  .topbar {
+    padding: 14px 24px 0;
+    background: var(--bg);
+  }
+  .topbar-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .title { font-family: 'Fraunces', serif; font-weight: 500; font-size: 22px; line-height: 1; letter-spacing: -0.01em; }
+  .subtitle { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+
+  .legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--ink-soft); }
+  .legend-dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 6px; vertical-align: middle;
+  }
+
+  .actions { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    padding: 7px 12px;
+    border: 1px solid var(--line);
+    background: white;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.12s ease;
+  }
+  .btn:hover { border-color: #c9c2b1; background: #fafaf6; }
+  .btn-primary {
+    background: var(--ink); color: white; border-color: var(--ink);
+  }
+  .btn-primary:hover { background: #000; border-color: #000; }
+  .btn .ic { font-size: 13px; line-height: 1; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 12px 24px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--ink);
+    font-weight: 500;
+    border-bottom-color: var(--ink);
+  }
+  .tab .count {
+    font-size: 11px;
+    color: var(--ink-soft);
+    background: rgba(0,0,0,0.05);
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .tab.active .count { background: rgba(0,0,0,0.08); color: var(--ink); }
+
+  /* Canvas */
+  .canvas-wrap {
+    position: relative;
+    height: calc(100vh - 110px);
+    overflow: auto;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .canvas-wrap.focused {
+    overflow: hidden;
+  }
+  .canvas-wrap.focused .canvas {
+    width: 100%;
+    height: 100%;
+  }
+  .canvas {
+    position: relative;
+    width: 1600px;
+    height: 1100px;
+    padding: 24px;
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform-origin: 0 0;
+  }
+  .canvas-wrap.focused .canvas {
+    width: 100%;
+    height: 100%;
+    padding: 24px;
+  }
+  .zone {
+    transform-origin: 0 0;
+    transition:
+      transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 0.25s ease,
+      border-color 0.12s,
+      box-shadow 0.12s;
+  }
+  .zone.zone-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .zone.zone-focused .zone-label {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* Zone */
+  .zone {
+    position: absolute;
+    border: 1px dashed #c9c2b1;
+    border-radius: 10px;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .zone.solid { border-style: solid; }
+  .zone.editing { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+  .zone.editing.selected { box-shadow: 0 0 0 2px #4a90e2; border-color: #4a90e2; }
+
+  .zone-label {
+    position: absolute;
+    top: -11px;
+    left: 14px;
+    background: var(--bg);
+    padding: 0 10px;
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .zone-meta {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+
+  /* Mesa card (matches reference) */
+  .mesa {
+    position: absolute;
+    background: white;
+    border: 2px solid var(--green);
+    border-radius: 10px;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+    user-select: none;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+  }
+  .mesa:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,0.06); }
+  .mesa.libre    { border-color: var(--green); }
+  .mesa.ocupada  { border-color: var(--amber); }
+  .mesa.atencion { border-color: var(--red); }
+  .mesa.reservada{ border-color: var(--blue); }
+
+  .mesa-num {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .mesa-status {
+    margin-top: 6px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    text-align: center;
+    line-height: 1.25;
+    font-weight: 500;
+  }
+  .mesa-detail {
+    font-size: 9px;
+    color: var(--ink-soft);
+    text-align: center;
+    line-height: 1.25;
+    margin-top: 2px;
+  }
+  .mesa.ocupada  .mesa-status { color: var(--amber); }
+  .mesa.atencion .mesa-status { color: var(--red); }
+  .mesa.reservada .mesa-status { color: var(--blue); }
+
+  /* Mesa shapes */
+  .mesa.shape-circle { border-radius: 50%; }
+  .mesa.shape-booth { border-radius: 14px; }
+
+  /* Bar element (just a bar, no individual seats) */
+  .bar-counter {
+    position: absolute;
+    background: white;
+    border: 2px solid var(--ink);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    color: var(--ink);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent 0,
+      transparent 8px,
+      rgba(0,0,0,0.025) 8px,
+      rgba(0,0,0,0.025) 9px
+    );
+  }
+
+  /* Decor */
+  .decor-plant {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(79, 138, 82, 0.12);
+    border: 1px solid rgba(79, 138, 82, 0.3);
+  }
+
+  /* Selected state — handles */
+  .selected-outline {
+    outline: 2px solid #4a90e2;
+    outline-offset: 4px;
+  }
+  .resize-handle {
+    position: absolute;
+    width: 9px; height: 9px;
+    background: white;
+    border: 1.5px solid #4a90e2;
+    border-radius: 2px;
+    z-index: 5;
+  }
+
+  /* Floating contextual toolbar */
+  .floating-toolbar {
+    position: absolute;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    display: flex;
+    padding: 4px;
+    gap: 2px;
+    z-index: 10;
+    font-size: 12px;
+  }
+  .floating-toolbar > button {
+    border: none;
+    background: transparent;
+    padding: 5px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .floating-toolbar > button:hover { background: rgba(0,0,0,0.05); }
+  .floating-toolbar .sep { width: 1px; background: var(--line); margin: 4px 2px; }
+  .floating-toolbar .danger { color: var(--red); }
+
+  /* Edit mode banner */
+  .edit-banner {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  }
+  .edit-banner .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #4a90e2;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Inspector panel (right drawer) */
+  .inspector {
+    position: absolute;
+    right: 16px;
+    top: 16px;
+    bottom: 16px;
+    width: 280px;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    padding: 18px;
+    overflow-y: auto;
+    z-index: 15;
+  }
+  .inspector h4 {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: 18px;
+    margin: 0 0 4px;
+  }
+  .inspector .sub {
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin-bottom: 14px;
+  }
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    font-size: 10px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 5px;
+    font-weight: 500;
+  }
+  .input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    background: white;
+    color: var(--ink);
+  }
+  .input:focus { outline: none; border-color: #4a90e2; }
+  .row { display: flex; gap: 8px; }
+  .row > .field { flex: 1; }
+  .swatches { display: flex; gap: 6px; }
+  .swatch {
+    width: 24px; height: 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    border: 1px solid var(--line);
+  }
+  .swatch.active { box-shadow: 0 0 0 2px var(--ink); }
+
+  .inspector-footer {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .inspector-footer .btn { flex: 1; justify-content: center; }
+  .btn-danger { color: var(--red); border-color: rgba(176,72,72,0.3); }
+  .btn-danger:hover { background: var(--red-soft); border-color: var(--red); }
+
+  /* Add menu (when clicking + Add) */
+  .add-menu {
+    position: absolute;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    padding: 4px;
+    min-width: 180px;
+    z-index: 30;
+  }
+  .add-menu-item {
+    padding: 8px 10px;
+    border-radius: 5px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .add-menu-item:hover { background: #f5f5f0; }
+  .add-menu-shape {
+    width: 22px; height: 22px;
+    border: 1.5px solid var(--ink);
+    background: white;
+    flex-shrink: 0;
+  }
+  .add-menu-sub {
+    font-size: 11px;
+    color: var(--ink-soft);
+    padding: 6px 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Tweaks button */
+  .corner-hint {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    background: rgba(255,255,255,0.7);
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-row">
+    <div>
+      <div class="title">Floor Plan</div>
+      <div class="subtitle">3 zones · 14 tables · bar</div>
+    </div>
+    <div class="legend">
+      <span><span class="legend-dot" style="background: var(--green)"></span>Available</span>
+      <span><span class="legend-dot" style="background: var(--amber)"></span>Occupied</span>
+      <span><span class="legend-dot" style="background: var(--red)"></span>Needs attention</span>
+      <span><span class="legend-dot" style="background: var(--blue)"></span>Reserved</span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-add"><span class="ic">+</span> Add</button>
+      <button class="btn btn-primary" id="btn-edit"><span class="ic">✎</span> <span id="edit-label">Edit Layout</span></button>
+    </div>
+  </div>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-zone="all">All <span class="count">14</span></div>
+    <div class="tab" data-zone="salon">Dining <span class="count">6</span></div>
+    <div class="tab" data-zone="terraza">Patio <span class="count">4</span></div>
+    <div class="tab" data-zone="altura">Booths <span class="count">4</span></div>
+    <div class="tab" data-zone="barra">Bar <span class="count">—</span></div>
+  </div>
+</div>
+
+<!-- Canvas -->
+<div class="canvas-wrap">
+  <div class="canvas" id="canvas">
+
+    <!-- Banner appears in edit mode -->
+    <div class="edit-banner" id="edit-banner" style="display:none">
+      <span class="dot"></span> Edit mode · drag to move · corners to resize
+    </div>
+
+    <!-- ZONE: Salón -->
+    <div class="zone" id="zone-salon" data-zone="salon" style="left: 30px; top: 30px; width: 460px; height: 320px;">
+      <div class="zone-label">Dining</div>
+      <div class="zone-meta">6 tables</div>
+
+      <div class="mesa libre" style="left: 24px; top: 38px; width: 78px; height: 92px;">
+        <div class="mesa-num">S1</div>
+        <div class="mesa-status">Available</div>
+      </div>
+      <div class="mesa ocupada" style="left: 122px; top: 38px; width: 78px; height: 92px;">
+        <div class="mesa-num">S2</div>
+        <div class="mesa-status">Occupied</div>
+        <div class="mesa-detail">32 min</div>
+      </div>
+      <div class="mesa atencion" style="left: 220px; top: 38px; width: 78px; height: 92px;">
+        <div class="mesa-num">S3</div>
+        <div class="mesa-status">Attention</div>
+        <div class="mesa-detail">$420</div>
+      </div>
+      <div class="mesa reservada" style="left: 318px; top: 38px; width: 78px; height: 92px;">
+        <div class="mesa-num">S4</div>
+        <div class="mesa-status">Reserved</div>
+        <div class="mesa-detail">20:30</div>
+      </div>
+      <div class="mesa libre" style="left: 24px; top: 178px; width: 176px; height: 92px;">
+        <div class="mesa-num">S5</div>
+        <div class="mesa-status">Available</div>
+      </div>
+      <div class="mesa ocupada" style="left: 220px; top: 178px; width: 78px; height: 92px;">
+        <div class="mesa-num">S6</div>
+        <div class="mesa-status">Occupied</div>
+        <div class="mesa-detail">$1,240</div>
+      </div>
+    </div>
+
+    <!-- ZONE: Terraza -->
+    <div class="zone" id="zone-terraza" data-zone="terraza" style="left: 510px; top: 30px; width: 320px; height: 320px;">
+      <div class="zone-label">Patio</div>
+      <div class="zone-meta">4 tables</div>
+
+      <div class="mesa libre shape-circle" style="left: 24px; top: 38px; width: 92px; height: 92px;">
+        <div class="mesa-num">T1</div>
+        <div class="mesa-status" style="font-size: 8px">Free</div>
+      </div>
+      <div class="mesa libre shape-circle" style="left: 138px; top: 38px; width: 92px; height: 92px;">
+        <div class="mesa-num">T2</div>
+        <div class="mesa-status" style="font-size: 8px">Free</div>
+      </div>
+      <div class="mesa ocupada shape-circle" style="left: 24px; top: 178px; width: 92px; height: 92px;">
+        <div class="mesa-num">T3</div>
+        <div class="mesa-status" style="font-size: 8px">Occupied</div>
+      </div>
+      <div class="mesa reservada shape-circle" style="left: 138px; top: 178px; width: 92px; height: 92px;">
+        <div class="mesa-num">T4</div>
+        <div class="mesa-status" style="font-size: 8px">19:45</div>
+      </div>
+      <div class="decor-plant" style="left: 260px; top: 60px;"></div>
+      <div class="decor-plant" style="left: 260px; top: 220px;"></div>
+    </div>
+
+    <!-- ZONE: Altura -->
+    <div class="zone" id="zone-altura" data-zone="altura" style="left: 30px; top: 380px; width: 460px; height: 220px;">
+      <div class="zone-label">Booths</div>
+      <div class="zone-meta">4 tables</div>
+
+      <div class="mesa libre shape-booth" style="left: 24px; top: 38px; width: 92px; height: 140px;">
+        <div class="mesa-num">A1</div>
+        <div class="mesa-status">Available</div>
+      </div>
+      <div class="mesa ocupada shape-booth" style="left: 132px; top: 38px; width: 92px; height: 140px;">
+        <div class="mesa-num">A2</div>
+        <div class="mesa-status">Occupied</div>
+        <div class="mesa-detail">14 min</div>
+      </div>
+      <div class="mesa libre shape-booth" style="left: 240px; top: 38px; width: 92px; height: 140px;">
+        <div class="mesa-num">A3</div>
+        <div class="mesa-status">Available</div>
+      </div>
+      <div class="mesa atencion shape-booth" style="left: 348px; top: 38px; width: 92px; height: 140px;">
+        <div class="mesa-num">A4</div>
+        <div class="mesa-status">Attention</div>
+      </div>
+    </div>
+
+    <!-- ZONE: Barra (just a bar, no seats) -->
+    <div class="zone" id="zone-barra" data-zone="barra" style="left: 510px; top: 380px; width: 320px; height: 220px;">
+      <div class="zone-label">Bar</div>
+      <div class="zone-meta">— bar only</div>
+      <div class="bar-counter" style="left: 24px; top: 80px; width: 272px; height: 60px;">
+        Bar
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="corner-hint">Tip: click a table for details · "Edit Layout" to move/resize</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('canvas');
+  const banner = document.getElementById('edit-banner');
+  const editBtn = document.getElementById('btn-edit');
+  const editLabel = document.getElementById('edit-label');
+  const tabs = document.getElementById('tabs');
+  const addBtn = document.getElementById('btn-add');
+
+  let editing = false;
+  let selected = null;
+  let inspector = null;
+  let toolbar = null;
+  let addMenu = null;
+
+  // ---- Tabs ----
+  const canvasWrap = document.querySelector('.canvas-wrap');
+  let focusedZoneId = 'all';
+
+  function applyZoneFocus() {
+    const zones = document.querySelectorAll('.zone');
+    if (focusedZoneId === 'all') {
+      canvasWrap.classList.add('focused');
+      zones.forEach(z => {
+        z.classList.remove('zone-hidden', 'zone-focused');
+        z.style.transform = '';
+      });
+      // Compute the bounding box of all zones and scale canvas to fit
+      const wrapRect = canvasWrap.getBoundingClientRect();
+      const padding = 32;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      zones.forEach(z => {
+        const x = parseFloat(z.style.left);
+        const y = parseFloat(z.style.top);
+        const w = parseFloat(z.style.width);
+        const h = parseFloat(z.style.height);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w);
+        maxY = Math.max(maxY, y + h);
+      });
+      const contentW = maxX - minX;
+      const contentH = maxY - minY;
+      const availW = wrapRect.width - padding * 2;
+      const availH = wrapRect.height - padding * 2;
+      const scale = Math.min(availW / contentW, availH / contentH, 1.6);
+      const scaledW = contentW * scale;
+      const scaledH = contentH * scale;
+      const offsetX = (wrapRect.width - scaledW) / 2 - minX * scale;
+      const offsetY = (wrapRect.height - scaledH) / 2 - minY * scale;
+      canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+      return;
+    }
+    canvas.style.transform = '';
+    canvasWrap.classList.add('focused');
+    const target = document.getElementById('zone-' + focusedZoneId);
+    if (!target) return;
+
+    // Compute scale to fit the zone into the available canvas-wrap area
+    const wrapRect = canvasWrap.getBoundingClientRect();
+    const padding = 48; // breathing room
+    const availW = wrapRect.width - padding * 2;
+    const availH = wrapRect.height - padding * 2;
+    const zoneW = parseFloat(target.style.width);
+    const zoneH = parseFloat(target.style.height);
+    const zoneX = parseFloat(target.style.left);
+    const zoneY = parseFloat(target.style.top);
+    const scale = Math.min(availW / zoneW, availH / zoneH);
+
+    // Center the scaled zone in the viewport
+    const scaledW = zoneW * scale;
+    const scaledH = zoneH * scale;
+    const offsetX = (wrapRect.width - scaledW) / 2 - zoneX;
+    const offsetY = (wrapRect.height - scaledH) / 2 - zoneY;
+
+    zones.forEach(z => {
+      if (z === target) {
+        z.classList.add('zone-focused');
+        z.classList.remove('zone-hidden');
+        z.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+      } else {
+        z.classList.add('zone-hidden');
+        z.classList.remove('zone-focused');
+        z.style.transform = '';
+      }
+    });
+  }
+
+  tabs.addEventListener('click', (e) => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    tabs.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    focusedZoneId = t.dataset.zone;
+    deselect(); // clear any selection inspector before re-laying out
+    applyZoneFocus();
+  });
+
+  // Re-apply on resize so it stays responsive
+  window.addEventListener('resize', () => {
+    applyZoneFocus();
+  });
+
+  // Apply on initial load so "All" view is fitted from the start
+  requestAnimationFrame(() => applyZoneFocus());
+
+  // ---- Edit mode toggle ----
+  editBtn.addEventListener('click', () => {
+    editing = !editing;
+    document.querySelectorAll('.zone').forEach(z => {
+      z.classList.toggle('editing', editing);
+      z.classList.toggle('solid', editing);
+    });
+    banner.style.display = editing ? 'flex' : 'none';
+    editLabel.textContent = editing ? 'Done' : 'Edit Layout';
+    editBtn.classList.toggle('btn-primary', !editing);
+    if (!editing) deselect();
+  });
+
+  // ---- Selection in edit mode ----
+  canvas.addEventListener('click', (e) => {
+    if (!editing) {
+      const m = e.target.closest('.mesa');
+      if (m) flashSelect(m);
+      return;
+    }
+    if (justDragged) { justDragged = false; return; }
+    const z = e.target.closest('.zone');
+    const m = e.target.closest('.mesa');
+    closeAddMenu();
+    if (m) { select(m, 'mesa'); e.stopPropagation(); }
+    else if (z) { select(z, 'zone'); e.stopPropagation(); }
+    else { deselect(); }
+  });
+
+  // ---- Drag to move (edit mode only) ----
+  let dragState = null;
+  let justDragged = false;
+  function getCanvasScale() {
+    const t = canvas.style.transform || '';
+    const m = t.match(/scale\(([0-9.]+)\)/);
+    return m ? parseFloat(m[1]) : 1;
+  }
+  canvas.addEventListener('mousedown', (e) => {
+    if (!editing) return;
+    if (e.target.classList.contains('resize-handle')) return;
+    const m = e.target.closest('.mesa');
+    const z = e.target.closest('.zone');
+    const el = m || z;
+    if (!el) return;
+    const isMesa = !!m;
+    // For mesas, only drag if the zone isn't focused via tab (otherwise scale math gets messy)
+    e.preventDefault();
+    const scale = getCanvasScale();
+    const startX = e.clientX, startY = e.clientY;
+    const origLeft = parseFloat(el.style.left);
+    const origTop = parseFloat(el.style.top);
+    dragState = { el, isMesa, startX, startY, origLeft, origTop, scale, moved: false };
+    el.style.transition = 'none';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragState) return;
+    const dx = (e.clientX - dragState.startX) / dragState.scale;
+    const dy = (e.clientY - dragState.startY) / dragState.scale;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragState.moved = true;
+    dragState.el.style.left = (dragState.origLeft + dx) + 'px';
+    dragState.el.style.top = (dragState.origTop + dy) + 'px';
+    if (toolbar && selected && selected.el === dragState.el) {
+      const r = dragState.el.getBoundingClientRect();
+      const pr = canvas.getBoundingClientRect();
+      toolbar.style.left = (r.left - pr.left) / dragState.scale + 'px';
+      toolbar.style.top = ((r.top - pr.top) / dragState.scale - 42) + 'px';
+    }
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragState) return;
+    dragState.el.style.transition = '';
+    if (dragState.moved) justDragged = true;
+    dragState = null;
+  });
+
+  function flashSelect(el) {
+    el.style.transform = 'translateY(-2px) scale(1.03)';
+    setTimeout(() => { el.style.transform = ''; }, 180);
+  }
+
+  function select(el, kind) {
+    deselect();
+    selected = { el, kind };
+    el.classList.add('selected-outline');
+    addHandles(el);
+    showToolbar(el, kind);
+    showInspector(el, kind);
+  }
+
+  function deselect() {
+    if (!selected) {
+      removeToolbar();
+      removeInspector();
+      return;
+    }
+    selected.el.classList.remove('selected-outline');
+    removeHandles();
+    removeToolbar();
+    removeInspector();
+    selected = null;
+  }
+
+  function addHandles(el) {
+    removeHandles();
+    const positions = [
+      ['top','left'],['top','right'],['bottom','left'],['bottom','right'],
+      ['top','center'],['bottom','center'],['middle','left'],['middle','right']
+    ];
+    positions.forEach(([v, h]) => {
+      const hd = document.createElement('div');
+      hd.className = 'resize-handle';
+      hd.dataset.handle = v + '-' + h;
+      const styles = {};
+      if (v === 'top') styles.top = '-5px';
+      if (v === 'bottom') styles.bottom = '-5px';
+      if (v === 'middle') { styles.top = 'calc(50% - 4.5px)'; }
+      if (h === 'left') styles.left = '-5px';
+      if (h === 'right') styles.right = '-5px';
+      if (h === 'center') { styles.left = 'calc(50% - 4.5px)'; }
+      Object.assign(hd.style, styles);
+      el.appendChild(hd);
+    });
+  }
+  function removeHandles() {
+    document.querySelectorAll('.resize-handle').forEach(h => h.remove());
+  }
+
+  function showToolbar(el, kind) {
+    removeToolbar();
+    const tb = document.createElement('div');
+    tb.className = 'floating-toolbar';
+    const name = kind === 'zone'
+      ? (el.querySelector('.zone-label')?.textContent || 'Zone')
+      : (el.querySelector('.mesa-num')?.textContent || 'Table');
+    tb.innerHTML = `
+      <button>✎ ${name}</button>
+      <div class="sep"></div>
+      <button title="Color">●</button>
+      <button title="Duplicate">⎘</button>
+      ${kind === 'mesa' ? '<button title="Rotate">↻</button>' : ''}
+      <button title="Lock">🔒</button>
+      <div class="sep"></div>
+      <button class="danger" title="Delete">🗑</button>
+    `;
+    canvas.appendChild(tb);
+    const r = el.getBoundingClientRect();
+    const pr = canvas.getBoundingClientRect();
+    const sc = getCanvasScale();
+    tb.style.left = ((r.left - pr.left) / sc) + 'px';
+    tb.style.top = (((r.top - pr.top) / sc) - 42) + 'px';
+    toolbar = tb;
+
+    // Wire delete button in toolbar
+    const delBtn = tb.querySelector('button.danger');
+    if (delBtn) delBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!confirm(kind === 'zone' ? 'Delete this zone and all its tables?' : 'Delete this table?')) return;
+      el.remove();
+      deselect();
+      applyZoneFocus();
+    });
+    const dupBtn = tb.querySelector('button[title="Duplicate"]');
+    if (dupBtn) dupBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const clone = el.cloneNode(true);
+      clone.style.left = (parseFloat(el.style.left) + 24) + 'px';
+      clone.style.top = (parseFloat(el.style.top) + 24) + 'px';
+      clone.classList.remove('selected-outline');
+      clone.querySelectorAll('.resize-handle').forEach(h => h.remove());
+      el.parentElement.appendChild(clone);
+      deselect();
+    });
+  }
+  function removeToolbar() { if (toolbar) { toolbar.remove(); toolbar = null; } }
+
+  function showInspector(el, kind) {
+    removeInspector();
+    const ins = document.createElement('div');
+    ins.className = 'inspector';
+    if (kind === 'zone') {
+      const name = el.querySelector('.zone-label')?.textContent || 'Zone';
+      const id = el.dataset.zone;
+      const colorIdx = ({salon:0, terraza:1, altura:2, barra:3})[id] ?? 0;
+      ins.innerHTML = `
+        <h4>${name}</h4>
+        <div class="sub">Zone selected</div>
+        <div class="field">
+          <label>Name</label>
+          <input class="input" value="${name}" />
+        </div>
+        <div class="field">
+          <label>Color</label>
+          <div class="swatches">
+            <div class="swatch ${colorIdx===0?'active':''}" style="background: var(--amber-soft); border-color: var(--amber)"></div>
+            <div class="swatch ${colorIdx===1?'active':''}" style="background: var(--green-soft); border-color: var(--green)"></div>
+            <div class="swatch ${colorIdx===2?'active':''}" style="background: var(--red-soft); border-color: var(--red)"></div>
+            <div class="swatch ${colorIdx===3?'active':''}" style="background: var(--blue-soft); border-color: var(--blue)"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field"><label>X</label><input class="input" value="${el.style.left.replace('px','')}" /></div>
+          <div class="field"><label>Y</label><input class="input" value="${el.style.top.replace('px','')}" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Width</label><input class="input" value="${el.style.width.replace('px','')}" /></div>
+          <div class="field"><label>Height</label><input class="input" value="${el.style.height.replace('px','')}" /></div>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select class="input"><option>Open</option><option>Closed</option></select>
+        </div>
+        <div class="field">
+          <label>Assigned server</label>
+          <select class="input"><option>—</option><option>Carlos M.</option><option>Ana R.</option></select>
+        </div>
+        <div class="inspector-footer">
+          <button class="btn btn-primary">💾 Save</button>
+          <button class="btn btn-danger">🗑 Delete</button>
+        </div>
+      `;
+    } else {
+      const num = el.querySelector('.mesa-num')?.textContent || 'Table';
+      const zoneEl = el.closest('.zone');
+      const zoneName = zoneEl?.querySelector('.zone-label')?.textContent || '—';
+      const isCircle = el.classList.contains('shape-circle');
+      const isBooth = el.classList.contains('shape-booth');
+      ins.innerHTML = `
+        <h4>${num}</h4>
+        <div class="sub">Table in ${zoneName}</div>
+        <div class="field">
+          <label>Identifier</label>
+          <input class="input" value="${num}" />
+          <div style="font-size: 10px; color: var(--ink-soft); margin-top: 4px;">Prefix (${num.charAt(0)}) is inherited from the zone automatically.</div>
+        </div>
+        <div class="field">
+          <label>Shape</label>
+          <div class="swatches">
+            <div class="swatch ${!isCircle && !isBooth?'active':''}" style="background: white; border-radius: 4px"></div>
+            <div class="swatch ${isCircle?'active':''}" style="background: white; border-radius: 50%"></div>
+            <div class="swatch ${isBooth?'active':''}" style="background: white; border-radius: 10px"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Width</label><input class="input" value="${el.style.width.replace('px','')}" /></div>
+          <div class="field"><label>Height</label><input class="input" value="${el.style.height.replace('px','')}" /></div>
+        </div>
+        <div class="field">
+          <label>Rotation</label>
+          <input class="input" value="0°" />
+        </div>
+        <div class="inspector-footer">
+          <button class="btn btn-primary">💾 Save</button>
+          <button class="btn btn-danger">🗑 Delete</button>
+        </div>
+      `;
+    }
+    canvas.parentElement.appendChild(ins);
+    inspector = ins;
+
+    // Wire up Save and Delete
+    const saveBtn = ins.querySelector('.btn-primary');
+    const delBtn = ins.querySelector('.btn-danger');
+    if (saveBtn) saveBtn.addEventListener('click', () => {
+      const inputs = ins.querySelectorAll('input.input');
+      if (kind === 'zone') {
+        const [nameI] = ins.querySelectorAll('input.input');
+        const labelEl = el.querySelector('.zone-label');
+        if (labelEl && nameI) labelEl.textContent = nameI.value;
+        // X, Y, W, H inputs follow color swatches; grab them by order
+        const all = Array.from(ins.querySelectorAll('input.input'));
+        // Index: 0=name, 1=X, 2=Y, 3=W, 4=H
+        if (all[1]) el.style.left = parseFloat(all[1].value) + 'px';
+        if (all[2]) el.style.top = parseFloat(all[2].value) + 'px';
+        if (all[3]) el.style.width = parseFloat(all[3].value) + 'px';
+        if (all[4]) el.style.height = parseFloat(all[4].value) + 'px';
+      } else {
+        const all = Array.from(ins.querySelectorAll('input.input'));
+        // 0=identifier, 1=W, 2=H, 3=rotation
+        const numEl = el.querySelector('.mesa-num');
+        if (numEl && all[0]) numEl.textContent = all[0].value;
+        if (all[1]) el.style.width = parseFloat(all[1].value) + 'px';
+        if (all[2]) el.style.height = parseFloat(all[2].value) + 'px';
+      }
+      flashSaved(saveBtn);
+      applyZoneFocus();
+    });
+    if (delBtn) delBtn.addEventListener('click', () => {
+      if (!confirm(kind === 'zone' ? 'Delete this zone and all its tables?' : 'Delete this table?')) return;
+      el.remove();
+      deselect();
+      applyZoneFocus();
+    });
+  }
+  function flashSaved(btn) {
+    const t = btn.innerHTML;
+    btn.innerHTML = '✓ Saved';
+    setTimeout(() => { btn.innerHTML = t; }, 1100);
+  }
+  function removeInspector() { if (inspector) { inspector.remove(); inspector = null; } }
+
+  // ---- Add menu ----
+  let addCounter = 100;
+  function addNewItem(kind, shape) {
+    // Find target zone: focused zone if one is focused, else first visible zone
+    let targetZone;
+    if (focusedZoneId !== 'all') {
+      targetZone = document.getElementById('zone-' + focusedZoneId);
+    } else {
+      targetZone = document.querySelector('.zone:not(.zone-hidden)');
+    }
+    if (kind === 'zone') {
+      const newZone = document.createElement('div');
+      newZone.className = 'zone' + (editing ? ' editing solid' : '');
+      newZone.dataset.zone = 'custom-' + (++addCounter);
+      // Place below existing zones
+      let maxBottom = 0;
+      document.querySelectorAll('.zone').forEach(z => {
+        const b = parseFloat(z.style.top) + parseFloat(z.style.height);
+        if (b > maxBottom) maxBottom = b;
+      });
+      newZone.style.cssText = `left: 30px; top: ${maxBottom + 30}px; width: 320px; height: 220px;`;
+      newZone.innerHTML = `
+        <div class="zone-label">New Zone</div>
+        <div class="zone-meta">0 tables</div>
+      `;
+      canvas.appendChild(newZone);
+      applyZoneFocus();
+      return;
+    }
+    if (kind === 'bar') {
+      if (!targetZone) return;
+      const bar = document.createElement('div');
+      bar.className = 'bar-counter';
+      bar.style.cssText = 'left: 24px; top: 24px; width: 200px; height: 50px;';
+      bar.textContent = 'Bar';
+      targetZone.appendChild(bar);
+      return;
+    }
+    // Table
+    if (!targetZone) { alert('Select a zone first.'); return; }
+    const prefix = (targetZone.querySelector('.zone-label')?.textContent || 'X').charAt(0).toUpperCase();
+    const existing = targetZone.querySelectorAll('.mesa').length;
+    const num = prefix + (existing + 1);
+    const mesa = document.createElement('div');
+    mesa.className = 'mesa libre' + (shape === 'round' ? ' shape-circle' : shape === 'booth' ? ' shape-booth' : '');
+    const w = shape === 'booth' ? 92 : (shape === 'round' ? 80 : 78);
+    const h = shape === 'booth' ? 140 : (shape === 'round' ? 80 : 92);
+    mesa.style.cssText = `left: 24px; top: 24px; width: ${w}px; height: ${h}px;`;
+    mesa.innerHTML = `<div class="mesa-num">${num}</div><div class="mesa-status">Available</div>`;
+    targetZone.appendChild(mesa);
+  }
+
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (addMenu) { closeAddMenu(); return; }
+    const m = document.createElement('div');
+    m.className = 'add-menu';
+    m.innerHTML = `
+      <div class="add-menu-sub">Table</div>
+      <div class="add-menu-item" data-add="square"><div class="add-menu-shape"></div> Square</div>
+      <div class="add-menu-item" data-add="round"><div class="add-menu-shape" style="border-radius: 50%"></div> Round</div>
+      <div class="add-menu-item" data-add="booth"><div class="add-menu-shape" style="border-radius: 10px"></div> Booth</div>
+      <div class="add-menu-sub">Other</div>
+      <div class="add-menu-item" data-add="zone"><div class="add-menu-shape" style="border-style: dashed"></div> New zone</div>
+      <div class="add-menu-item" data-add="bar"><div class="add-menu-shape" style="background-image: repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 5px)"></div> Bar / wall</div>
+    `;
+    document.body.appendChild(m);
+    const r = addBtn.getBoundingClientRect();
+    m.style.top = (r.bottom + 6) + 'px';
+    m.style.left = (r.right - 180) + 'px';
+    addMenu = m;
+    m.addEventListener('click', (ev) => {
+      const item = ev.target.closest('.add-menu-item');
+      if (!item) return;
+      const kind = item.dataset.add;
+      if (kind === 'zone') addNewItem('zone');
+      else if (kind === 'bar') addNewItem('bar');
+      else addNewItem('table', kind);
+      closeAddMenu();
+    });
+    setTimeout(() => {
+      document.addEventListener('click', closeAddMenu, { once: true });
+    }, 0);
+  });
+  function closeAddMenu() { if (addMenu) { addMenu.remove(); addMenu = null; } }
+
+})();
+</script>
+
+</body>
+</html>

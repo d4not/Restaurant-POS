@@ -102,6 +102,29 @@
 
 ---
 
+## POS Terminal Mobile (/terminal-mobile)
+
+### Stack
+- Capacitor 7+ (Android shell)
+- Shares React code from /terminal/src/
+- @capacitor/preferences, @capacitor/network, @capacitor/haptics
+
+### Commands
+- `cd terminal-mobile && npm run dev` — browser testing
+- `cd terminal-mobile && npm run build` — build for Capacitor
+- `cd terminal-mobile && npx cap sync android` — sync to Android project
+- `cd terminal-mobile && npx cap open android` — open in Android Studio
+
+### Rules
+- NEVER duplicate code from terminal/src/ — import via @ alias
+- NEVER import @capacitor/* in terminal/src/ — only in terminal-mobile/src/platform/
+- All printing goes through backend API (POST /api/v1/print/*) — no direct printer access
+- Auth tokens in @capacitor/preferences, never localStorage
+- Landscape only, min Android API 26
+- Platform-specific code ONLY in terminal-mobile/src/platform/
+
+---
+
 ## IMPORTANT
 - Read @docs/SPEC.md for ALL backend business logic
 - Read @docs/FRONTEND-SPEC.md for admin panel pages
@@ -113,4 +136,5 @@
 - Prices are TAX-INCLUSIVE — never add tax on top
 - Modifier groups: SWAP replaces recipe ingredients, ADD stacks on top
 - Recipe modifier lines link to a modifier_group_id, not a specific supply
-- ALL UI text in English
+- Read @docs/MOBILE-SPEC.md for Android tablet app specification
+- Terminal mobile shares code with terminal/ via platform abstraction — see terminal/src/platform/

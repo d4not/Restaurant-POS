@@ -213,10 +213,13 @@ export interface Order {
 
 /* ── Zones & Tables ──────────────────────────────────────── */
 
+export type ZoneKind = 'DINE_IN' | 'TAKEOUT';
+
 export interface Zone {
   id: string;
   name: string;
   display_order: number;
+  kind: ZoneKind;
   active: boolean;
   created_at: string;
   updated_at: string;

@@ -1,12 +1,26 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchActiveOrders, type ActiveOrder, type OrderType } from '../api/orders';
+import {
+  fetchActiveOrders,
+  type ActiveOrder,
+  type OrderType,
+  type TakeoutChannel,
+} from '../api/orders';
 import { ApiError } from '../api/client';
 import { ZoneSection } from '../components/ZoneSection';
 import { MetricCard } from '../components/MetricCard';
 import { Spinner } from '../components/Spinner';
+import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
 
 const TAKEOUT_KEY = '__takeout__';
+// Channel sub-buckets render inside the Takeout zone section, not as their own
+// top-level zones. Order matters for the visual rhythm — pickup first (most
+// common), then own delivery, then 3rd-party apps.
+const TAKEOUT_CHANNEL_ORDER: TakeoutChannel[] = [
+  'LOCAL',
+  'DELIVERY_LOCAL',
+  'DELIVERY_APP',
+];
 
 type FilterValue = 'ALL' | OrderType;
 
@@ -157,12 +171,47 @@ const pillStyle = (active: boolean): React.CSSProperties => ({
   transition: 'all 0.12s',
 });
 
+// A sub-bucket inside the Takeout zone — one per channel. Channels with no
+// active orders are dropped entirely so the section header doesn't show three
+// "0 active" stripes when only one channel is in use.
+export interface TakeoutSubBucket {
+  channel: TakeoutChannel | 'UNSPECIFIED';
+  label: string;
+  orders: ActiveOrder[];
+}
+
 interface ZoneBucket {
   key: string;
   name: string;
   orders: ActiveOrder[];
   // Used to sort: dine-in zones first (preserved order), Takeout always last.
   sort: number;
+  // Only populated for the Takeout bucket — drives the in-section sub-headers.
+  subBuckets?: TakeoutSubBucket[];
+}
+
+function buildTakeoutSubBuckets(orders: ActiveOrder[]): TakeoutSubBucket[] {
+  const byChannel = new Map<TakeoutChannel | 'UNSPECIFIED', ActiveOrder[]>();
+  for (const o of orders) {
+    const ch = o.takeout_channel ?? 'UNSPECIFIED';
+    const arr = byChannel.get(ch) ?? [];
+    arr.push(o);
+    byChannel.set(ch, arr);
+  }
+  const buckets: TakeoutSubBucket[] = [];
+  for (const ch of TAKEOUT_CHANNEL_ORDER) {
+    const list = byChannel.get(ch);
+    if (list && list.length > 0) {
+      buckets.push({ channel: ch, label: TAKEOUT_CHANNEL_LABEL[ch], orders: list });
+    }
+  }
+  // Legacy / mid-flight rows without a channel still need a home — render them
+  // under a generic "Other" sub-header so they don't silently disappear.
+  const legacy = byChannel.get('UNSPECIFIED');
+  if (legacy && legacy.length > 0) {
+    buckets.push({ channel: 'UNSPECIFIED', label: 'Other', orders: legacy });
+  }
+  return buckets;
 }
 
 function bucketByZone(orders: ActiveOrder[]): ZoneBucket[] {
@@ -184,7 +233,10 @@ function bucketByZone(orders: ActiveOrder[]): ZoneBucket[] {
     }
     bucket.orders.push(o);
   }
-  return [...map.values()].sort((a, b) => a.sort - b.sort);
+  const out = [...map.values()].sort((a, b) => a.sort - b.sort);
+  const takeout = out.find((b) => b.key === TAKEOUT_KEY);
+  if (takeout) takeout.subBuckets = buildTakeoutSubBuckets(takeout.orders);
+  return out;
 }
 
 function filterOrders(orders: ActiveOrder[], filter: FilterValue, search: string): ActiveOrder[] {
@@ -315,6 +367,7 @@ export function ActiveOrders() {
             key={bucket.key}
             zoneName={bucket.name}
             orders={bucket.orders}
+            subBuckets={bucket.subBuckets}
             defaultOpen={bucket.orders.length > 0}
           />
         ))}

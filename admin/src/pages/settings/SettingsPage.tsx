@@ -33,8 +33,103 @@ export function SettingsPage() {
     <div style={{ display: 'grid', gap: 16 }}>
       <DisplayPreferencesCard />
       <DefaultTaxCard />
+      <TakeoutChannelsCard />
       <TaxConfigurationCard />
     </div>
+  );
+}
+
+/* ───────────────── Takeout channels ─────────────────────── */
+
+const TAKEOUT_CHANNELS: Array<{
+  key: string;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: 'takeout_channel_local_active',
+    label: 'Local pickup',
+    hint: 'Customer waiting at the counter for pickup.',
+  },
+  {
+    key: 'takeout_channel_delivery_local_active',
+    label: 'Local delivery',
+    hint: "Restaurant's own delivery driver.",
+  },
+  {
+    key: 'takeout_channel_delivery_app_active',
+    label: 'Delivery apps',
+    hint: 'Uber Eats, DiDi Food, Rappi, etc. (manual entry for now.)',
+  },
+];
+
+function TakeoutChannelsCard() {
+  const settingsQ = useSettings();
+  const updateSettingsM = useUpdateSettings();
+
+  // Treat anything that isn't an explicit "false" as enabled — that matches
+  // the migration default and keeps behaviour stable if a row is missing.
+  function isEnabled(key: string): boolean {
+    return settingsQ.data?.[key] !== 'false';
+  }
+
+  const onToggle = (key: string) => {
+    const next = isEnabled(key) ? 'false' : 'true';
+    updateSettingsM.mutate({ [key]: next });
+  };
+
+  return (
+    <Card title="Takeout / delivery channels">
+      <p className="fs-12 text-muted mb-12">
+        The Barra/takeout zone in the terminal accepts orders from these
+        channels. Disable one to hide it from the picker — open orders on a
+        disabled channel keep working until they're settled.
+      </p>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {TAKEOUT_CHANNELS.map((ch) => {
+          const enabled = isEnabled(ch.key);
+          return (
+            <div
+              key={ch.key}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
+                gap: 12,
+                alignItems: 'center',
+                padding: '12px 14px',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: enabled ? 'var(--surface)' : 'var(--bg)',
+              }}
+            >
+              <div>
+                <div className="fw-600 fs-13">{ch.label}</div>
+                <div className="fs-11 text-muted mt-4">{ch.hint}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => onToggle(ch.key)}
+                disabled={updateSettingsM.isPending}
+              >
+                {enabled ? (
+                  <Badge tone="green">Active</Badge>
+                ) : (
+                  <Badge tone="gray">Disabled</Badge>
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {updateSettingsM.isError && (
+        <div className="auth-alert mt-8">
+          {updateSettingsM.error instanceof Error
+            ? updateSettingsM.error.message
+            : 'Could not update channel'}
+        </div>
+      )}
+    </Card>
   );
 }
 

@@ -48,6 +48,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError('Cannot reach the server', 0, 'NETWORK');
   }
 
+  // 204 No Content (and any other empty-body success) has no JSON to parse.
+  // Returning undefined keeps callers like deleteTable from blowing up on a
+  // successful DELETE that the server signals with 204.
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    if (!response.ok) {
+      throw new ApiError(`Request failed (${response.status})`, response.status);
+    }
+    return undefined as T;
+  }
+
   let payload: ApiEnvelope<T>;
   try {
     payload = (await response.json()) as ApiEnvelope<T>;

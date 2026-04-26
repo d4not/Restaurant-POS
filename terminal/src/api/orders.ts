@@ -7,6 +7,7 @@ import { api } from './client';
 
 export type OrderStatus = 'OPEN' | 'PAID' | 'CANCELLED';
 export type OrderType = 'DINE_IN' | 'TAKEOUT';
+export type TakeoutChannel = 'LOCAL' | 'DELIVERY_LOCAL' | 'DELIVERY_APP';
 export type ProductType = 'PRODUCT' | 'DISH' | 'PREPARATION';
 export type PaymentMethodType = 'CASH' | 'CARD' | 'TRANSFER';
 
@@ -80,6 +81,14 @@ export interface ActiveOrder {
   order_number: number;
   status: OrderStatus;
   order_type: OrderType;
+  takeout_channel: TakeoutChannel | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  delivery_address: string | null;
+  delivery_reference: string | null;
+  delivery_driver_name: string | null;
+  delivery_app: string | null;
+  delivery_app_order_id: string | null;
   table_id: string | null;
   subtotal: string;
   tax_amount: string;
@@ -134,6 +143,7 @@ export function fetchOrderHistory(query: OrderHistoryQuery): Promise<PageResult<
 export interface CreateOrderInput {
   register_id: string;
   order_type: OrderType;
+  takeout_channel?: TakeoutChannel;
   table_id?: string | null;
   notes?: string;
 }
@@ -146,6 +156,14 @@ export interface UpdateOrderInput {
   notes?: string | null;
   discount_amount?: number;
   discount_reason?: string | null;
+  takeout_channel?: TakeoutChannel | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  delivery_address?: string | null;
+  delivery_reference?: string | null;
+  delivery_driver_name?: string | null;
+  delivery_app?: string | null;
+  delivery_app_order_id?: string | null;
 }
 
 export function updateOrder(orderId: string, input: UpdateOrderInput): Promise<ActiveOrder> {
