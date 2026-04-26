@@ -3,9 +3,11 @@
 ## Project Structure
 - `/src` — Backend (Express API)
 - `/admin` — Frontend admin panel (React + Vite)
-- `/terminal` — POS terminal (Electron + React)
+- `/terminal` — POS terminal desktop (Electron + React)
+- `/terminal-mobile` — POS terminal tablet (Capacitor + React, shares code from terminal/src/)
 - `/prisma` — Database schema and migrations
 - `/docs` — Specifications and design references
+- `/.claude/steering` — Context docs for technical decisions
 
 ---
 
@@ -67,7 +69,7 @@
 
 ---
 
-## POS Terminal (/terminal)
+## POS Terminal Desktop (/terminal)
 
 ### Stack
 - Electron 30+ (main process)
@@ -80,20 +82,12 @@
 - `cd terminal && npm run build` — package Electron app
 
 ### Design
-- YOU MUST match the design in @docs/pos-terminal-styles.js — this is the authoritative reference
+- YOU MUST match the design in @docs/pos-terminal-styles.js
 - SAME warm light theme as admin panel — NOT dark theme
 - CSS variables: --bg (#f5f0e8), --sidebar (#2c2420), --gold (#c9a45c), --green (#4a8c5c), --red (#c45040)
 - Fonts: Playfair Display (headings), DM Sans (body)
-- Top bar: dark brown (#2c2420), 72px height, center nav tabs, right status area
 - Touch targets: 44px+ height minimum
 - Time-based color coding: green <10min, gold 10-25min, red 25+min
-
-### Key Screens (from wireframe)
-- **Active Orders**: zone-grouped collapsible rows, expandable inline, footer summary bar
-- **Floor Plan**: visual table canvas with positioned elements, edit mode for drag/resize
-- **Table Detail**: 3-column layout (categories+products | ticket | payment)
-- **Order History**: searchable completed orders list
-- **Settings**: modal with left nav sections (general, printers, users)
 
 ### Printing
 - Electron main process handles ESC/POS via IPC
@@ -106,7 +100,7 @@
 
 ### Stack
 - Capacitor 7+ (Android shell)
-- Shares React code from /terminal/src/
+- Shares React code from /terminal/src/ via Vite alias
 - @capacitor/preferences, @capacitor/network, @capacitor/haptics
 
 ### Commands
@@ -122,19 +116,22 @@
 - Auth tokens in @capacitor/preferences, never localStorage
 - Landscape only, min Android API 26
 - Platform-specific code ONLY in terminal-mobile/src/platform/
+- Terminal and terminal-mobile share code via terminal/src/platform/ abstraction layer
 
 ---
 
 ## IMPORTANT
 - Read @docs/SPEC.md for ALL backend business logic
 - Read @docs/FRONTEND-SPEC.md for admin panel pages
-- Read @docs/TERMINAL-SPEC.md for POS terminal specification
-- Read @docs/pos-terminal-design.html for terminal design reference — the wireframe is the source of truth
+- Read @docs/TERMINAL-SPEC.md for POS terminal desktop specification
+- Read @docs/MOBILE-SPEC.md for Android tablet app specification
+- Read @docs/pos-terminal-styles.js for terminal design tokens and component styles
+- Read @docs/PERMISSIONS.md for role-based access rules
+- Terminal mobile shares code with terminal/ via platform abstraction — see terminal/src/platform/
 - Never use floating point for money
 - Always wrap multi-table writes in Prisma transactions
 - Inventory operations MUST update stock AND log movement in a single transaction
 - Prices are TAX-INCLUSIVE — never add tax on top
 - Modifier groups: SWAP replaces recipe ingredients, ADD stacks on top
 - Recipe modifier lines link to a modifier_group_id, not a specific supply
-- Read @docs/MOBILE-SPEC.md for Android tablet app specification
-- Terminal mobile shares code with terminal/ via platform abstraction — see terminal/src/platform/
+- ALL UI text in English
