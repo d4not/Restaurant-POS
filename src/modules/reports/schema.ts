@@ -51,3 +51,26 @@ export const productAnalysisQuerySchema = z
   });
 
 export type ProductAnalysisQuery = z.infer<typeof productAnalysisQuerySchema>;
+
+// Daily summary: one cashier-facing snapshot of a single day's sales activity.
+// `date` is interpreted in UTC against the Order.order_date column (a DATE).
+// `register_id` scopes to a single shift and unlocks `expected_cash`.
+const dateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
+  .refine((s) => {
+    // Reject overflowed dates like "2026-13-99". Parse strictly: re-emit YYYY-MM-DD
+    // from the parsed components and require an exact match.
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return (
+      dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+    );
+  }, 'date is not a valid calendar date');
+
+export const dailySummaryQuerySchema = z.object({
+  date: dateString.optional(),
+  register_id: z.string().uuid().optional(),
+});
+
+export type DailySummaryQuery = z.infer<typeof dailySummaryQuerySchema>;

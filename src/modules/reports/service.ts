@@ -1,8 +1,17 @@
-import { OrderStatus, Prisma, StockMovementType, ProductType } from '@prisma/client';
+import {
+  CashMovementType,
+  CashRegisterStatus,
+  OrderStatus,
+  PaymentMethod,
+  Prisma,
+  StockMovementType,
+  ProductType,
+} from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { Decimal } from '../../lib/decimal.js';
 import { NotFoundError } from '../../lib/errors.js';
 import type {
+  DailySummaryQuery,
   ProductAnalysisQuery,
   ProductCostsQuery,
   SupplyMovementsQuery,
@@ -655,5 +664,206 @@ export async function getProductAnalysisReport(
     variant_sales,
     modifier_usage,
     ingredients_used,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Daily summary — cashier-facing one-shot view of a day's activity
+// ---------------------------------------------------------------------------
+
+export interface DailySummaryOrders {
+  count: number;
+  gross_revenue: string;
+  net_revenue: string;
+  tax_total: string;
+  discount_total: string;
+  avg_ticket: string;
+}
+
+export interface DailySummaryPaymentMethodRow {
+  method: PaymentMethod;
+  count: number;
+  total: string;
+}
+
+export interface DailySummaryCashMovementItem {
+  id: string;
+  type: CashMovementType;
+  amount: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface DailySummaryCashMovements {
+  cash_in_total: string;
+  cash_out_total: string;
+  items: DailySummaryCashMovementItem[];
+}
+
+export interface DailySummaryReport {
+  date: string;
+  register_id: string | null;
+  orders: DailySummaryOrders;
+  payment_methods: DailySummaryPaymentMethodRow[];
+  cash_movements: DailySummaryCashMovements;
+  // Only populated when register_id was supplied — opening_amount + cash payments
+  // − change given + cash_in − cash_out, recomputed from primary tables (not the
+  // CashRegister.expected_amount cache, which can drift after a close).
+  expected_cash: string | null;
+  generated_at: string;
+}
+
+function parseDateOrToday(date: string | undefined): Date {
+  if (date) {
+    const [y, m, d] = date.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+export async function getDailySummary(query: DailySummaryQuery): Promise<DailySummaryReport> {
+  const day = parseDateOrToday(query.date);
+  const dayStart = day;
+  const dayEnd = new Date(day.getTime() + 24 * 60 * 60 * 1000);
+  const dayIso = day.toISOString().slice(0, 10);
+
+  // If a register was requested, validate it exists so the response carries
+  // explicit semantics (404 vs an empty register-scoped report).
+  if (query.register_id) {
+    const exists = await prisma.cashRegister.findUnique({
+      where: { id: query.register_id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundError('CashRegister');
+  }
+
+  const orderWhere: Prisma.OrderWhereInput = {
+    status: OrderStatus.PAID,
+    order_date: dayStart,
+    ...(query.register_id ? { register_id: query.register_id } : {}),
+  };
+
+  // Pull paid orders + their payments for the day. Aggregating in memory keeps
+  // the SQL simple and lets us emit per-method rows + totals from one fetch.
+  const orders = await prisma.order.findMany({
+    where: orderWhere,
+    select: {
+      id: true,
+      subtotal: true,
+      tax_amount: true,
+      discount_amount: true,
+      total: true,
+      payments: {
+        select: { id: true, method: true, amount: true, change_amount: true },
+      },
+    },
+  });
+
+  let grossRevenue = new Decimal(0);
+  let netRevenue = new Decimal(0);
+  let taxTotal = new Decimal(0);
+  let discountTotal = new Decimal(0);
+  const methodMap = new Map<PaymentMethod, { count: number; total: Decimal }>();
+  let cashPaymentSum = new Decimal(0);
+  let cashChangeSum = new Decimal(0);
+
+  for (const o of orders) {
+    grossRevenue = grossRevenue.add(new Decimal(o.total));
+    netRevenue = netRevenue.add(new Decimal(o.subtotal));
+    taxTotal = taxTotal.add(new Decimal(o.tax_amount));
+    discountTotal = discountTotal.add(new Decimal(o.discount_amount));
+    for (const p of o.payments) {
+      const row = methodMap.get(p.method) ?? { count: 0, total: new Decimal(0) };
+      row.count += 1;
+      row.total = row.total.add(new Decimal(p.amount));
+      methodMap.set(p.method, row);
+      if (p.method === PaymentMethod.CASH) {
+        cashPaymentSum = cashPaymentSum.add(new Decimal(p.amount));
+        cashChangeSum = cashChangeSum.add(new Decimal(p.change_amount));
+      }
+    }
+  }
+
+  const orderCount = orders.length;
+  const avgTicket = orderCount > 0 ? grossRevenue.div(orderCount) : new Decimal(0);
+
+  // Cash movements scoped to either the day or a single register. When
+  // register-scoped, fetch every movement on that register for the day window —
+  // the register may have been opened on a previous day, so we filter by
+  // created_at rather than register-open dates.
+  const movementWhere: Prisma.CashMovementWhereInput = {
+    created_at: { gte: dayStart, lt: dayEnd },
+    ...(query.register_id
+      ? { register_id: query.register_id }
+      : { register: { opened_at: { lt: dayEnd } } }),
+  };
+  const movementRows = await prisma.cashMovement.findMany({
+    where: movementWhere,
+    orderBy: { created_at: 'asc' },
+    select: {
+      id: true,
+      type: true,
+      amount: true,
+      reason: true,
+      created_at: true,
+    },
+  });
+  let cashInTotal = new Decimal(0);
+  let cashOutTotal = new Decimal(0);
+  const movementItems: DailySummaryCashMovementItem[] = movementRows.map((m) => {
+    const amount = new Decimal(m.amount);
+    if (m.type === CashMovementType.CASH_IN) cashInTotal = cashInTotal.add(amount);
+    else cashOutTotal = cashOutTotal.add(amount);
+    return {
+      id: m.id,
+      type: m.type,
+      amount: amount.toString(),
+      reason: m.reason,
+      created_at: m.created_at.toISOString(),
+    };
+  });
+
+  let expectedCash: string | null = null;
+  if (query.register_id) {
+    const register = await prisma.cashRegister.findUniqueOrThrow({
+      where: { id: query.register_id },
+      select: { opening_amount: true, status: true },
+    });
+    // Only meaningful for an open register — once closed, the expected/actual
+    // diff is already frozen on the register row.
+    if (register.status === CashRegisterStatus.OPEN) {
+      const expected = new Decimal(register.opening_amount)
+        .add(cashPaymentSum)
+        .sub(cashChangeSum)
+        .add(cashInTotal)
+        .sub(cashOutTotal);
+      expectedCash = expected.toString();
+    }
+  }
+
+  const paymentMethods: DailySummaryPaymentMethodRow[] = [...methodMap.entries()]
+    .map(([method, v]) => ({ method, count: v.count, total: v.total.toString() }))
+    .sort((a, b) => a.method.localeCompare(b.method));
+
+  return {
+    date: dayIso,
+    register_id: query.register_id ?? null,
+    orders: {
+      count: orderCount,
+      gross_revenue: grossRevenue.toString(),
+      net_revenue: netRevenue.toString(),
+      tax_total: taxTotal.toString(),
+      discount_total: discountTotal.toString(),
+      avg_ticket: avgTicket.toFixed(0),
+    },
+    payment_methods: paymentMethods,
+    cash_movements: {
+      cash_in_total: cashInTotal.toString(),
+      cash_out_total: cashOutTotal.toString(),
+      items: movementItems,
+    },
+    expected_cash: expectedCash,
+    generated_at: new Date().toISOString(),
   };
 }

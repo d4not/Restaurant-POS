@@ -4,6 +4,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import * as controller from './controller.js';
 import {
+  dailySummaryQuerySchema,
   productAnalysisQuerySchema,
   productCostsQuerySchema,
   supplyMovementsQuerySchema,
@@ -36,4 +37,10 @@ reportRouter.get(
   '/product-analysis',
   validate(productAnalysisQuerySchema, 'query'),
   asyncHandler(controller.productAnalysis),
+);
+
+reportRouter.get(
+  '/daily-summary',
+  validate(dailySummaryQuerySchema, 'query'),
+  asyncHandler(controller.dailySummary),
 );

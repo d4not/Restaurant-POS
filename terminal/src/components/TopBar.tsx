@@ -13,7 +13,8 @@ import {
   IconSettings,
   IconSignOut,
 } from './Icons';
-import { ShiftPill, ShiftManagerModal } from './RegisterPanel';
+import { OperationsPill } from './RegisterPanel';
+import { OperationsHubModal } from './operations-hub/OperationsHubModal';
 import { PinConfirmModal } from './PinConfirmModal';
 import { verifyPin } from '../api/auth';
 import { ApiError } from '../api/client';
@@ -344,7 +345,7 @@ export function TopBar() {
   const now = useClock(15_000);
   const queryClient = useQueryClient();
   const drawerRef = useRef<HTMLDivElement | null>(null);
-  const [shiftModalOpen, setShiftModalOpen] = useState(false);
+  const [hubOpen, setHubOpen] = useState(false);
   const [historyPinOpen, setHistoryPinOpen] = useState(false);
   const [historyPinBusy, setHistoryPinBusy] = useState(false);
   const [historyPinError, setHistoryPinError] = useState<string | null>(null);
@@ -538,7 +539,7 @@ export function TopBar() {
       )}
 
       <div className="topbar-right" style={styles.right}>
-        <ShiftPill onClick={() => setShiftModalOpen(true)} />
+        <OperationsPill onClick={() => setHubOpen(true)} />
         <div style={styles.clockGroup}>
           <span style={styles.clockTime}>{formatTime(now)}</span>
           <span className="topbar-clock-date" style={styles.clockDate}>{formatDate(now)}</span>
@@ -576,7 +577,7 @@ export function TopBar() {
         onChoose={(channel) => takeoutMutation.mutate(channel)}
       />
 
-      <ShiftManagerModal open={shiftModalOpen} onClose={() => setShiftModalOpen(false)} />
+      <OperationsHubModal open={hubOpen} onClose={() => setHubOpen(false)} />
 
       {historyPinOpen && (
         <PinConfirmModal
