@@ -1,8 +1,24 @@
 {
   "name": "restaurant-pos-terminal-mobile",
+  "description": "POS terminal mobile app — Capacitor + React for Android tablets, with backend-delegated printing",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "keywords": [
+    "pos",
+    "pos-terminal",
+    "restaurant-pos",
+    "cafe",
+    "capacitor",
+    "android",
+    "tablet",
+    "react",
+    "vite",
+    "typescript",
+    "mobile-pos",
+    "waiter-tablet",
+    "landscape"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

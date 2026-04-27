@@ -1,9 +1,27 @@
 {
   "name": "restaurant-pos-terminal",
+  "description": "POS terminal desktop app — Electron + React for cashier and waiter stations with ESC/POS printing",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "main": "electron/main.cjs",
+  "keywords": [
+    "pos",
+    "pos-terminal",
+    "restaurant-pos",
+    "cafe",
+    "electron",
+    "react",
+    "vite",
+    "typescript",
+    "esc-pos",
+    "thermal-printer",
+    "kitchen-printer",
+    "receipt-printer",
+    "touch-screen",
+    "cashier",
+    "waiter"
+  ],
   "scripts": {
     "dev:vite": "vite",
     "dev:electron": "wait-on tcp:5173 && cross-env ELECTRON_DEV=1 electron .",

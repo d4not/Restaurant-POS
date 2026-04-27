@@ -1,8 +1,24 @@
 {
   "name": "admin",
+  "description": "Admin panel for the Restaurant POS — React + Vite dashboard for inventory, menu, orders, and reports",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "keywords": [
+    "pos",
+    "restaurant-pos",
+    "admin-panel",
+    "dashboard",
+    "react",
+    "vite",
+    "typescript",
+    "tanstack-query",
+    "zustand",
+    "recharts",
+    "inventory",
+    "menu-management",
+    "reporting"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
