@@ -6,10 +6,12 @@ import { getBridge, getPlatformId } from '../platform';
 
 const STORAGE_KEY = 'pos-terminal-server-url';
 
-// Mobile default points at the LAN IP from the deployment guide. Desktop and
-// the Vite dev preview don't seed a value — their resolver picks localhost or
-// the page hostname instead, which works without configuration.
-export const MOBILE_DEFAULT_SERVER_URL = 'http://192.168.0.245:3000/api/v1';
+// Mobile default is read at build time from VITE_MOBILE_DEFAULT_SERVER_URL so
+// each deployment can bake in its own LAN address. When unset the value is an
+// empty string and the PIN screen shows a "Configure server" affordance so the
+// operator can point the app at their backend on first launch.
+export const MOBILE_DEFAULT_SERVER_URL: string =
+  import.meta.env.VITE_MOBILE_DEFAULT_SERVER_URL ?? '';
 
 export async function loadServerUrl(): Promise<string | null> {
   try {

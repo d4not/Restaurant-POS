@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError } from '../api/client';
+import { ApiError, getApiBase, setApiBase } from '../api/client';
 import { pinLogin } from '../api/auth';
 import { useSession } from '../store/session';
 import { useHaptics } from '../hooks/useHaptics';
 import { IconBackspace } from '../components/Icons';
+import {
+  defaultServerUrlForPlatform,
+  saveServerUrl,
+} from '../store/serverUrl';
 
 const PIN_LENGTH = 4;
 
@@ -124,6 +128,42 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
     letterSpacing: '0.02em',
   },
+  serverFooter: {
+    marginTop: 22,
+    paddingTop: 16,
+    borderTop: '1px solid var(--border)',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 6,
+  },
+  serverLabel: {
+    fontSize: 11,
+    color: 'var(--text3)',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    fontWeight: 600,
+  },
+  serverValue: {
+    fontSize: 12,
+    color: 'var(--text2)',
+    fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+    wordBreak: 'break-all',
+    textAlign: 'center',
+    maxWidth: '100%',
+  },
+  serverButton: {
+    marginTop: 4,
+    padding: '6px 14px',
+    background: 'transparent',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    color: 'var(--text2)',
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
 };
 
 const dotStyle = (filled: boolean): React.CSSProperties => ({
@@ -139,6 +179,7 @@ export function PinLogin() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [serverUrl, setServerUrl] = useState(() => getApiBase());
   const signIn = useSession((s) => s.signIn);
   const sessionExpired = useSession((s) => s.sessionExpired);
   const consumeSessionExpired = useSession((s) => s.consumeSessionExpired);
@@ -222,6 +263,29 @@ export function PinLogin() {
     setError(null);
   }
 
+  // Lets the operator point this terminal at a different backend without
+  // logging in first — needed on Capacitor builds whose default URL was not
+  // baked in at build time, and convenient for switching dev/staging hosts.
+  async function configureServer() {
+    const current = getApiBase();
+    const example = defaultServerUrlForPlatform() || 'http://192.168.1.100:3000/api/v1';
+    const next = window.prompt(
+      `Server URL\n\nExample: ${example}`,
+      current,
+    );
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    try {
+      await saveServerUrl(trimmed);
+    } catch {
+      /* storage unavailable on web preview — still apply for this session */
+    }
+    setApiBase(trimmed);
+    setServerUrl(getApiBase());
+    setError(null);
+  }
+
   return (
     <div style={{ ...styles.root, position: 'relative' }}>
       {expiredToast && (
@@ -282,6 +346,14 @@ export function PinLogin() {
         </div>
 
         {busy && <div style={styles.spinner}>Signing in…</div>}
+
+        <div style={styles.serverFooter}>
+          <span style={styles.serverLabel}>Server</span>
+          <span style={styles.serverValue}>{serverUrl || 'Not configured'}</span>
+          <button type="button" style={styles.serverButton} onClick={configureServer}>
+            Change server
+          </button>
+        </div>
       </div>
     </div>
   );
