@@ -273,4 +273,4 @@ For deeper docs:
 
 ## License
 
-No license file is included — all rights reserved unless a `LICENSE` file is added later.
+Released under the [MIT License](LICENSE).

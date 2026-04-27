@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Restaurant POS backend — local-first café POS",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
