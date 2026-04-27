@@ -78,6 +78,8 @@ export const es: Record<TranslationKey, string> = {
   'login.changeServer': 'Cambiar servidor',
   'login.serverPromptTitle': 'URL del servidor',
   'login.serverPromptExample': 'Ejemplo',
+  'login.serverPromptDesc': 'Apunta esta terminal al backend en tu red local. Los cambios se aplican de inmediato.',
+  'login.serverPromptHint': 'Incluye protocolo y puerto — por ejemplo, http://192.168.1.100:3000/api/v1',
   'login.backspace': 'Borrar',
 
   // ─── Floor plan

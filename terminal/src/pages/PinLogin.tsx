@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, getApiBase, setApiBase } from '../api/client';
+import { ApiError, getApiBase, getServerRoot, setApiBase } from '../api/client';
 import { pinLogin } from '../api/auth';
 import { useSession } from '../store/session';
 import { useHaptics } from '../hooks/useHaptics';
 import { IconBackspace } from '../components/Icons';
+import { Spinner } from '../components/Spinner';
 import {
   defaultServerUrlForPlatform,
+  loadServerUrl,
   saveServerUrl,
 } from '../store/serverUrl';
 import { useTranslation } from '../i18n';
@@ -165,6 +167,135 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     cursor: 'pointer',
   },
+  modalScrim: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(44,36,32,0.42)',
+    zIndex: 70,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modal: {
+    width: 460,
+    maxWidth: '100%',
+    background: 'var(--bg2)',
+    borderRadius: 16,
+    boxShadow: '0 24px 64px rgba(0,0,0,0.32)',
+    border: '1px solid var(--border)',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  modalHead: {
+    padding: '20px 22px 14px',
+    borderBottom: '1px solid var(--border)',
+  },
+  modalTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 20,
+    fontWeight: 600,
+    color: 'var(--text1)',
+    margin: 0,
+  },
+  modalSub: {
+    fontSize: 12,
+    color: 'var(--text2)',
+    marginTop: 6,
+    lineHeight: 1.4,
+  },
+  modalBody: {
+    padding: '18px 22px 4px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  },
+  modalLabel: {
+    fontSize: 11,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: 'var(--text3)',
+    fontWeight: 600,
+  },
+  modalInput: {
+    height: 46,
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    padding: '0 14px',
+    background: 'var(--bg)',
+    color: 'var(--text1)',
+    fontSize: 14,
+    outline: 'none',
+    fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+    width: '100%',
+  },
+  modalHint: {
+    fontSize: 11,
+    color: 'var(--text3)',
+    fontStyle: 'italic',
+  },
+  modalActiveLine: {
+    fontSize: 11,
+    color: 'var(--text3)',
+    fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+    wordBreak: 'break-all',
+  },
+  modalActions: {
+    padding: '14px 22px 18px',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'flex-end',
+    borderTop: '1px solid var(--border)',
+    background: 'var(--bg)',
+  },
+  modalGhostBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    background: 'transparent',
+    color: 'var(--text2)',
+    fontSize: 13,
+    fontWeight: 500,
+    border: '1px solid var(--border)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 44,
+  },
+  modalGoldBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    background: 'var(--gold)',
+    color: '#2c2420',
+    fontSize: 13,
+    fontWeight: 600,
+    border: '1px solid rgba(44,36,32,0.08)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 44,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalPrimaryBtn: {
+    padding: '10px 18px',
+    borderRadius: 8,
+    background: 'var(--text1)',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    border: '1px solid var(--text1)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 44,
+  },
+  modalBanner: {
+    margin: '4px 22px 0',
+    padding: '8px 12px',
+    borderRadius: 8,
+    fontSize: 12,
+    fontWeight: 500,
+  },
 };
 
 const dotStyle = (filled: boolean): React.CSSProperties => ({
@@ -182,6 +313,7 @@ export function PinLogin() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [serverUrl, setServerUrl] = useState(() => getApiBase());
+  const [serverModalOpen, setServerModalOpen] = useState(false);
   const signIn = useSession((s) => s.signIn);
   const sessionExpired = useSession((s) => s.sessionExpired);
   const consumeSessionExpired = useSession((s) => s.consumeSessionExpired);
@@ -231,10 +363,12 @@ export function PinLogin() {
       });
   }, [pin, signIn, haptics, t]);
 
-  // Hardware keyboard support — handy for development and accessibility.
+  // Hardware keyboard support — handy for development and accessibility. The
+  // server-config modal owns its own input, so suppress the global handler
+  // while it's open or the URL field would steal digits into the PIN dots.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (busy) return;
+      if (busy || serverModalOpen) return;
       if (e.key >= '0' && e.key <= '9') {
         setPin((p) => (p.length < PIN_LENGTH ? p + e.key : p));
       } else if (e.key === 'Backspace') {
@@ -243,7 +377,7 @@ export function PinLogin() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [busy]);
+  }, [busy, serverModalOpen]);
 
   function press(digit: string) {
     if (busy) return;
@@ -268,23 +402,15 @@ export function PinLogin() {
   // Lets the operator point this terminal at a different backend without
   // logging in first — needed on Capacitor builds whose default URL was not
   // baked in at build time, and convenient for switching dev/staging hosts.
-  async function configureServer() {
-    const current = getApiBase();
-    const example = defaultServerUrlForPlatform() || 'http://192.168.1.100:3000/api/v1';
-    const next = window.prompt(
-      `${t('login.serverPromptTitle')}\n\n${t('login.serverPromptExample')}: ${example}`,
-      current,
-    );
-    if (next == null) return;
-    const trimmed = next.trim();
-    if (!trimmed) return;
-    try {
-      await saveServerUrl(trimmed);
-    } catch {
-      /* storage unavailable on web preview — still apply for this session */
-    }
-    setApiBase(trimmed);
+  // Uses an in-page modal rather than window.prompt() because Android WebView
+  // silently drops prompt() calls, leaving the cashier unable to set the URL.
+  function openServerModal() {
+    setServerModalOpen(true);
+  }
+  function handleServerSaved(next: string) {
+    setApiBase(next);
     setServerUrl(getApiBase());
+    setServerModalOpen(false);
     setError(null);
   }
 
@@ -352,8 +478,224 @@ export function PinLogin() {
         <div style={styles.serverFooter}>
           <span style={styles.serverLabel}>{t('login.serverLabel')}</span>
           <span style={styles.serverValue}>{serverUrl || t('login.serverNotConfigured')}</span>
-          <button type="button" style={styles.serverButton} onClick={configureServer}>
+          <button type="button" style={styles.serverButton} onClick={openServerModal}>
             {t('login.changeServer')}
+          </button>
+        </div>
+      </div>
+      {serverModalOpen && (
+        <ServerConfigModal
+          onClose={() => setServerModalOpen(false)}
+          onSaved={handleServerSaved}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ServerConfigModalProps {
+  onClose: () => void;
+  onSaved: (url: string) => void;
+}
+
+// Replaces window.prompt() for setting the backend URL. Lives next to the PIN
+// screen because that's the only place the cashier can reach it before signing
+// in — once authenticated the same control is in Settings → General.
+function ServerConfigModal({ onClose, onSaved }: ServerConfigModalProps) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string>(() => getApiBase());
+  const [hydrated, setHydrated] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    { ok: true; latencyMs: number } | { ok: false; error: string } | null
+  >(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Hydrate the draft from persisted storage on open. If nothing's stored,
+  // surface the platform default so the field shows a meaningful starting
+  // point on a fresh install (rather than a stale in-memory fallback).
+  useEffect(() => {
+    let cancelled = false;
+    loadServerUrl()
+      .then((stored) => {
+        if (cancelled) return;
+        const fallback = defaultServerUrlForPlatform() || getApiBase();
+        setDraft(stored || fallback);
+        setHydrated(true);
+      })
+      .catch(() => {
+        if (!cancelled) setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-focus the input once we've hydrated so the on-screen keyboard pops up
+  // on tablets without a second tap.
+  useEffect(() => {
+    if (!hydrated) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [hydrated]);
+
+  // Esc cancels — matches the convention used by the settings/hamburger modals.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const trimmed = draft.trim();
+  const valid = /^https?:\/\/.+/i.test(trimmed);
+
+  async function save() {
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      await saveServerUrl(trimmed);
+    } catch {
+      /* storage unavailable on web preview — still apply for this session */
+    }
+    onSaved(trimmed);
+  }
+
+  async function runTest() {
+    if (!valid || testing) return;
+    setTesting(true);
+    setTestResult(null);
+    // Test the *draft* URL, not the live one — operators usually test before
+    // committing. Strip /api/v1 the same way getServerRoot does for live.
+    const draftRoot = trimmed.replace(/\/api\/v\d+\/?$/, '').replace(/\/$/, '');
+    const target = `${draftRoot}/health`;
+    const startedAt = performance.now();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(target, { signal: controller.signal });
+      const latencyMs = Math.round(performance.now() - startedAt);
+      if (!res.ok) {
+        setTestResult({ ok: false, error: `Server returned ${res.status}` });
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { success?: boolean; data?: { status?: string } }
+        | null;
+      if (!body?.success || body.data?.status !== 'ok') {
+        setTestResult({ ok: false, error: 'Unexpected health response' });
+        return;
+      }
+      setTestResult({ ok: true, latencyMs });
+    } catch (err) {
+      const reason =
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Timed out after 5s'
+          : err instanceof Error
+            ? err.message
+            : t('settings.couldNotReach');
+      setTestResult({ ok: false, error: reason });
+    } finally {
+      window.clearTimeout(timeout);
+      setTesting(false);
+    }
+  }
+
+  function bannerStyle(ok: boolean): React.CSSProperties {
+    return {
+      ...styles.modalBanner,
+      background: ok ? 'rgba(74,140,92,0.12)' : 'rgba(196,80,64,0.10)',
+      color: ok ? 'var(--green)' : 'var(--red)',
+    };
+  }
+
+  return (
+    <div
+      style={styles.modalScrim}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('login.serverPromptTitle')}
+    >
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <header style={styles.modalHead}>
+          <h2 style={styles.modalTitle}>{t('login.serverPromptTitle')}</h2>
+          <p style={styles.modalSub}>{t('login.serverPromptDesc')}</p>
+        </header>
+        <div style={styles.modalBody}>
+          <label style={styles.modalLabel} htmlFor="server-url-input">
+            {t('settings.serverBaseLabel')}
+          </label>
+          <input
+            id="server-url-input"
+            ref={inputRef}
+            style={styles.modalInput}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setTestResult(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && valid && !saving) {
+                e.preventDefault();
+                void save();
+              }
+            }}
+            placeholder="http://192.168.1.100:3000/api/v1"
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            inputMode="url"
+            type="url"
+          />
+          <div style={styles.modalHint}>{t('login.serverPromptHint')}</div>
+          <div style={styles.modalActiveLine}>
+            {t('settings.activeUrl')}: {getServerRoot() || '—'}
+          </div>
+        </div>
+        {!valid && draft.length > 0 && (
+          <div style={bannerStyle(false)}>{t('settings.urlMustStart')}</div>
+        )}
+        {testResult?.ok && (
+          <div style={bannerStyle(true)}>
+            {t('settings.connectedHealth')} {testResult.latencyMs}ms.
+          </div>
+        )}
+        {testResult && !testResult.ok && (
+          <div style={bannerStyle(false)}>
+            {t('settings.couldNotReach')}: {testResult.error}
+          </div>
+        )}
+        <div style={styles.modalActions}>
+          <button type="button" style={styles.modalGhostBtn} onClick={onClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.modalGoldBtn,
+              opacity: !valid || testing ? 0.55 : 1,
+              cursor: !valid || testing ? 'not-allowed' : 'pointer',
+            }}
+            onClick={runTest}
+            disabled={!valid || testing}
+          >
+            {testing ? <Spinner size={12} /> : null}
+            {t('settings.testConnection')}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.modalPrimaryBtn,
+              opacity: !valid || saving ? 0.55 : 1,
+              cursor: !valid || saving ? 'not-allowed' : 'pointer',
+            }}
+            onClick={save}
+            disabled={!valid || saving}
+          >
+            {t('settings.saveChanges')}
           </button>
         </div>
       </div>

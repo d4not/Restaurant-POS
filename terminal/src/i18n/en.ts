@@ -79,6 +79,8 @@ export const en = {
   'login.changeServer': 'Change server',
   'login.serverPromptTitle': 'Server URL',
   'login.serverPromptExample': 'Example',
+  'login.serverPromptDesc': 'Point this terminal at the backend running on your local network. Changes apply immediately.',
+  'login.serverPromptHint': 'Include the protocol and port — for example, http://192.168.1.100:3000/api/v1',
   'login.backspace': 'Backspace',
 
   // ─── Floor plan
