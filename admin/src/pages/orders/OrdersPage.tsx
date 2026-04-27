@@ -21,6 +21,7 @@ import {
 } from '../staff/operations-meta';
 import { OrderDetailModal } from './OrderDetailModal';
 import { NewOrderModal } from './NewOrderModal';
+import { useTranslation } from '../../i18n';
 
 function toIsoDayStart(value: string): string | undefined {
   if (!value) return undefined;
@@ -35,6 +36,7 @@ function toIsoDayEnd(value: string): string | undefined {
 }
 
 export function OrdersPage() {
+  const { t } = useTranslation();
   const [urlParams, setUrlParams] = useSearchParams();
 
   const [status, setStatus] = useState<OrderStatus | ''>('');
@@ -97,7 +99,7 @@ export function OrdersPage() {
     },
     {
       key: 'date',
-      header: 'Date / time',
+      header: t('common.date'),
       width: '170px',
       render: (o) => (
         <span className="fs-12 text-muted">{formatDateTime(o.created_at)}</span>
@@ -105,7 +107,7 @@ export function OrdersPage() {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '110px',
       render: (o) => (
         <Badge tone={orderTypeTone(o.order_type)}>
@@ -115,7 +117,7 @@ export function OrdersPage() {
     },
     {
       key: 'table',
-      header: 'Table',
+      header: t('orders.colTable'),
       width: '160px',
       render: (o) => {
         if (!o.table) {
@@ -131,13 +133,13 @@ export function OrdersPage() {
     },
     {
       key: 'cashier',
-      header: 'Cashier',
+      header: t('role.cashier'),
       width: '1fr',
       render: (o) => <span className="fs-13">{o.user?.name ?? '—'}</span>,
     },
     {
       key: 'items',
-      header: 'Items',
+      header: t('orders.colItems'),
       width: '110px',
       render: (o) => {
         // Count only non-voided items so the column matches what the customer
@@ -151,7 +153,7 @@ export function OrdersPage() {
             {count}
             {removed > 0 && (
               <span className="text-red fs-11" style={{ marginLeft: 6 }}>
-                −{removed} removed
+                −{removed} {t('common.remove').toLowerCase()}
               </span>
             )}
           </span>
@@ -160,7 +162,7 @@ export function OrdersPage() {
     },
     {
       key: 'total',
-      header: 'Total',
+      header: t('common.total'),
       width: '120px',
       render: (o) => (
         <span className="fw-600 fs-13">{formatMoney(Number(o.total))}</span>
@@ -168,7 +170,7 @@ export function OrdersPage() {
     },
     {
       key: 'payment',
-      header: 'Payment',
+      header: t('orders.colPayment'),
       width: '130px',
       render: (o) => {
         const methods = Array.from(
@@ -186,7 +188,7 @@ export function OrdersPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (o) => (
         <Badge tone={orderStatusTone(o.status)}>
@@ -213,7 +215,7 @@ export function OrdersPage() {
       <div className="flex-between mb-12">
         <div />
         <Button variant="primary" onClick={() => setNewOrderOpen(true)}>
-          + New order
+          + {t('orders.newOrder')}
         </Button>
       </div>
 
@@ -223,12 +225,12 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Search
+            {t('common.search')}
           </label>
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Order # or cashier…"
+            placeholder={t('common.search')}
           />
         </div>
 
@@ -237,7 +239,7 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Status
+            {t('common.status')}
           </label>
           <select
             className="search-box"
@@ -245,7 +247,7 @@ export function OrdersPage() {
             onChange={(e) => setStatus(e.target.value as OrderStatus | '')}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All statuses</option>
+            <option value="">{t('common.all')}</option>
             {ORDER_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {orderStatusLabel(s)}
@@ -259,7 +261,7 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Type
+            {t('common.type')}
           </label>
           <select
             className="search-box"
@@ -267,10 +269,10 @@ export function OrdersPage() {
             onChange={(e) => setOrderType(e.target.value as OrderType | '')}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All types</option>
-            {ORDER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {orderTypeLabel(t)}
+            <option value="">{t('common.all')}</option>
+            {ORDER_TYPES.map((typ) => (
+              <option key={typ} value={typ}>
+                {orderTypeLabel(typ)}
               </option>
             ))}
           </select>
@@ -281,7 +283,7 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Zone
+            {t('common.category')}
           </label>
           <select
             className="search-box"
@@ -290,7 +292,7 @@ export function OrdersPage() {
             style={{ cursor: 'pointer' }}
             disabled={zonesQ.isLoading}
           >
-            <option value="">All zones</option>
+            <option value="">{t('common.all')}</option>
             {zones.map((z) => (
               <option key={z.id} value={z.id}>
                 {z.name}
@@ -304,7 +306,7 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            From
+            {t('common.from')}
           </label>
           <input
             type="date"
@@ -318,7 +320,7 @@ export function OrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            To
+            {t('common.to')}
           </label>
           <input
             type="date"
@@ -335,7 +337,7 @@ export function OrdersPage() {
             onClick={clearAll}
             style={{ alignSelf: 'flex-end' }}
           >
-            Clear filters
+            {t('common.cancel')}
           </button>
         )}
       </div>
@@ -347,14 +349,8 @@ export function OrdersPage() {
         onRowClick={(o) => setSelectedId(o.id)}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage={
-          hasActiveFilters ? 'No orders match these filters' : 'No orders yet'
-        }
-        emptySub={
-          hasActiveFilters
-            ? 'Try clearing some filters.'
-            : 'Orders are created from the POS terminal. This view is read-only.'
-        }
+        emptyMessage={t('orders.empty')}
+        emptySub={t('orders.subtitle')}
         hasMore={!!query.hasNextPage}
         isLoadingMore={query.isFetchingNextPage}
         onLoadMore={() => query.fetchNextPage()}

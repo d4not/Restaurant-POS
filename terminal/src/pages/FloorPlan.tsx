@@ -45,6 +45,7 @@ import {
 import { AddMenu, type AddKind } from '../components/floor-plan/AddMenu';
 import { useSession } from '../store/session';
 import { useUi } from '../store/ui';
+import { useTranslation } from '../i18n';
 
 const styles: Record<string, CSSProperties> = {
   root: {
@@ -194,6 +195,7 @@ interface DragState {
 }
 
 export function FloorPlan() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const userId = useSession((s) => s.user?.id ?? null);
   const role = useSession((s) => s.user?.role ?? 'WAITER');
@@ -277,7 +279,7 @@ export function FloorPlan() {
       openOrderDetail(order.id);
     },
     onError: (err) => {
-      setOpenOrderError(err instanceof ApiError ? err.message : 'Could not open order');
+      setOpenOrderError(err instanceof ApiError ? err.message : t('error.somethingWrong'));
     },
   });
 
@@ -442,7 +444,7 @@ export function FloorPlan() {
     const tabs = [
       {
         id: ALL_ZONES,
-        name: 'All Zones',
+        name: t('floor.allZones'),
         count: dineInZones.reduce((a, z) => a + activeIn(z), 0),
         kind: 'DINE_IN' as const,
       },
@@ -1196,7 +1198,7 @@ export function FloorPlan() {
                 setSelection(null);
               }}
             >
-              {editing ? '✓ Done' : '✎ Edit'}
+              {editing ? `✓ ${t('common.done')}` : `✎ ${t('common.edit')}`}
             </button>
           )}
         </div>
@@ -1225,7 +1227,7 @@ export function FloorPlan() {
           {isLoading && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text2)' }}>
               <Spinner size={26} />
-              <span>Loading floor…</span>
+              <span>{t('common.loading')}…</span>
             </div>
           )}
           {error && (
@@ -1239,7 +1241,7 @@ export function FloorPlan() {
                 fontSize: 13,
               }}
             >
-              {error instanceof ApiError ? error.message : 'Failed to load floor'}
+              {error instanceof ApiError ? error.message : t('orders.failedLoad')}
             </div>
           )}
           {openOrderError && (

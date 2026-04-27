@@ -15,6 +15,7 @@ import {
   formatMoney,
   formatNumber,
 } from '../utils/format';
+import { useTranslation } from '../i18n';
 
 /** Midnight of `daysAgo` days before today, local time → ISO. */
 function startOfDayOffset(daysAgo: number): string {
@@ -48,6 +49,7 @@ function localDayKeyFromDate(d: Date): string {
 }
 
 export function DashboardPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   // Last 7 days of PAID orders — feeds both the 7-day chart and the
@@ -126,7 +128,7 @@ export function DashboardPage() {
     },
     {
       key: 'date',
-      header: 'Date / time',
+      header: t('common.date'),
       width: '170px',
       render: (o) => (
         <span className="fs-12 text-muted">{formatDateTime(o.created_at)}</span>
@@ -134,7 +136,7 @@ export function DashboardPage() {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '110px',
       render: (o) => (
         <Badge tone={orderTypeTone(o.order_type)}>
@@ -144,13 +146,13 @@ export function DashboardPage() {
     },
     {
       key: 'cashier',
-      header: 'Cashier',
+      header: t('role.cashier'),
       width: '1fr',
       render: (o) => <span className="fs-13">{o.user?.name ?? '—'}</span>,
     },
     {
       key: 'total',
-      header: 'Total',
+      header: t('common.total'),
       width: '120px',
       render: (o) => (
         <span className="fw-600 fs-13">{formatMoney(Number(o.total))}</span>
@@ -158,7 +160,7 @@ export function DashboardPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (o) => (
         <Badge tone={orderStatusTone(o.status)}>
@@ -173,7 +175,7 @@ export function DashboardPage() {
   const alertColumns: TableColumn<LowStockAlert>[] = [
     {
       key: 'supply',
-      header: 'Supply',
+      header: t('nav.supplies'),
       width: '1.4fr',
       render: (a) => (
         <div>
@@ -184,7 +186,7 @@ export function DashboardPage() {
     },
     {
       key: 'stock',
-      header: 'On hand',
+      header: t('supplies.colStock'),
       width: '110px',
       render: (a) => (
         <span className="fs-13">
@@ -194,7 +196,7 @@ export function DashboardPage() {
     },
     {
       key: 'min',
-      header: 'Min',
+      header: t('supplies.minStock'),
       width: '100px',
       render: (a) => (
         <span className="fs-12 text-muted">{formatNumber(a.min_stock, 2)}</span>
@@ -202,7 +204,7 @@ export function DashboardPage() {
     },
     {
       key: 'short',
-      header: 'Short by',
+      header: t('supplies.lowStock'),
       width: '110px',
       render: (a) => (
         <span className="fw-600 fs-13 text-red">
@@ -217,40 +219,40 @@ export function DashboardPage() {
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <KPICard
           accent
-          label="Sales today"
+          label={t('dashboard.salesToday')}
           value={formatMoney(todaySales)}
-          sub={weekOrdersQ.isLoading ? 'Loading…' : `${todayCount} paid order${todayCount === 1 ? '' : 's'}`}
+          sub={weekOrdersQ.isLoading ? `${t('common.loading')}…` : `${todayCount} ${t('orders.statusPaid').toLowerCase()}`}
         />
         <KPICard
-          label="Orders today"
+          label={t('dashboard.ordersToday')}
           value={todayCount}
-          sub={weekOrdersQ.isLoading ? 'Loading…' : 'Paid orders only'}
+          sub={weekOrdersQ.isLoading ? `${t('common.loading')}…` : t('orders.statusPaid')}
         />
         <KPICard
-          label="Average ticket"
+          label={t('dashboard.avgTicket')}
           value={formatMoney(avgTicket)}
-          sub={todayCount > 0 ? 'Per paid order' : 'No orders yet'}
+          sub={todayCount > 0 ? t('orders.statusPaid') : t('orders.empty')}
         />
         <KPICard
-          label="Low stock supplies"
+          label={t('dashboard.lowStock')}
           value={lowStock.length}
           valueColor={lowStock.length > 0 ? 'red' : 'default'}
-          sub={lowStockQ.isLoading ? 'Loading…' : lowStock.length === 0 ? 'All supplies above min' : 'Attention required'}
+          sub={lowStockQ.isLoading ? `${t('common.loading')}…` : lowStock.length === 0 ? t('common.ok') : t('error.tryAgain')}
         />
       </div>
 
       <div className="section-grid-3">
-        <Card title="Sales — last 7 days">
+        <Card title={t('dashboard.salesLast7')}>
           {weekOrdersQ.isLoading ? (
             <div className="loading-block">
               <span className="spinner" />
-              Loading chart…
+              {t('common.loading')}…
             </div>
           ) : chartData.every((d) => d.value === 0) ? (
             <EmptyState
               icon="📈"
-              message="No sales yet this week"
-              sub="Paid orders from the last 7 days will show up here."
+              message={t('orders.empty')}
+              sub={t('dashboard.salesLast7')}
             />
           ) : (
             <SalesBarChart data={chartData} />
@@ -258,7 +260,7 @@ export function DashboardPage() {
         </Card>
 
         <Card
-          title="Stock alerts"
+          title={t('dashboard.lowStockAlerts')}
           actions={
             lowStock.length > 0 ? (
               <button
@@ -266,7 +268,7 @@ export function DashboardPage() {
                 className="filter-pill"
                 onClick={() => navigate('/inventory/supplies')}
               >
-                View supplies
+                {t('nav.supplies')}
               </button>
             ) : null
           }
@@ -274,13 +276,13 @@ export function DashboardPage() {
           {lowStockQ.isLoading ? (
             <div className="loading-block">
               <span className="spinner" />
-              Loading…
+              {t('common.loading')}…
             </div>
           ) : lowStock.length === 0 ? (
             <EmptyState
               icon="🔔"
-              message="No alerts"
-              sub="Every supply is above its configured minimum."
+              message={t('common.ok')}
+              sub={t('dashboard.lowStockAlerts')}
             />
           ) : (
             <Table
@@ -295,14 +297,14 @@ export function DashboardPage() {
 
       <div className="mt-16">
         <Card
-          title="Recent orders"
+          title={t('dashboard.recentOrders')}
           actions={
             <button
               type="button"
               className="filter-pill"
               onClick={() => navigate('/orders')}
             >
-              View all
+              {t('common.all')}
             </button>
           }
         >
@@ -313,8 +315,8 @@ export function DashboardPage() {
             onRowClick={(o) => navigate(`/orders?id=${o.id}`)}
             isInitialLoad={recentQ.isLoading}
             error={recentQ.error as Error | null}
-            emptyMessage="No orders yet"
-            emptySub="Orders created in the POS will appear here."
+            emptyMessage={t('orders.empty')}
+            emptySub={t('dashboard.recentOrders')}
           />
         </Card>
       </div>

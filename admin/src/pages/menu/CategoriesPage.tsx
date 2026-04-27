@@ -6,6 +6,7 @@ import {
 } from '../../hooks/useProductCategories';
 import type { ProductCategory } from '../../types/menu';
 import { CategoryFormModal } from './CategoryFormModal';
+import { useTranslation } from '../../i18n';
 
 interface TreeNode {
   category: ProductCategory;
@@ -38,6 +39,7 @@ function buildTree(categories: ProductCategory[]): TreeNode[] {
 }
 
 export function CategoriesPage() {
+  const { t } = useTranslation();
   const categoriesQ = useProductCategories();
   const deleteM = useDeleteProductCategory();
 
@@ -63,11 +65,11 @@ export function CategoriesPage() {
   };
 
   const onDelete = async (c: ProductCategory) => {
-    if (!confirm(`Delete category "${c.name}"?`)) return;
+    if (!confirm(`${t('categories.deleteConfirm')} "${c.name}"`)) return;
     try {
       await deleteM.mutateAsync(c.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
+      alert(err instanceof Error ? err.message : t('error.somethingWrong'));
     }
   };
 
@@ -75,7 +77,7 @@ export function CategoriesPage() {
     return (
       <div className="loading-block">
         <span className="spinner" />
-        Loading categories…
+        {t('common.loading')}…
       </div>
     );
   }
@@ -84,7 +86,7 @@ export function CategoriesPage() {
     return (
       <EmptyState
         icon="⚠"
-        message="Couldn't load categories"
+        message={t('error.failedLoad')}
         sub={(categoriesQ.error as Error).message}
       />
     );
@@ -95,17 +97,17 @@ export function CategoriesPage() {
       <div className="toolbar">
         <div style={{ flex: 1 }} />
         <Button variant="primary" onClick={() => openCreate(null)}>
-          + New category
+          + {t('categories.newCategory')}
         </Button>
       </div>
 
       {roots.length === 0 ? (
         <EmptyState
-          message="No categories yet"
-          sub="Create categories like Hot Coffee, Cold Coffee, Food to organize the menu."
+          message={t('categories.empty')}
+          sub={t('categories.subtitle')}
           action={
             <Button variant="primary" onClick={() => openCreate(null)}>
-              + New category
+              + {t('categories.newCategory')}
             </Button>
           }
         />
@@ -154,6 +156,7 @@ function TreeRow({
   onAddChild,
   deleting,
 }: TreeRowProps) {
+  const { t } = useTranslation();
   const c = node.category;
   const hasChildren = node.children.length > 0;
 
@@ -180,8 +183,8 @@ function TreeRow({
         </div>
 
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
-          <span className="fs-11 text-muted">order {c.display_order}</span>
-          {!c.visible_in_pos && <Badge tone="gray">Hidden</Badge>}
+          <span className="fs-11 text-muted">{t('categories.displayOrder')} {c.display_order}</span>
+          {!c.visible_in_pos && <Badge tone="gray">{t('common.disabled')}</Badge>}
           {hasChildren && (
             <span className="fs-11 text-muted">
               {node.children.length} sub{node.children.length === 1 ? '' : 's'}
@@ -191,23 +194,23 @@ function TreeRow({
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => onAddChild(c.id)}
-            title="Add subcategory"
+            title={t('categories.newCategory')}
           >
-            + Sub
+            + {t('common.add')}
           </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => onEdit(c)}
           >
-            Edit
+            {t('common.edit')}
           </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => onDelete(c)}
             disabled={deleting}
-            title="Delete"
+            title={t('common.delete')}
           >
             ✕
           </button>

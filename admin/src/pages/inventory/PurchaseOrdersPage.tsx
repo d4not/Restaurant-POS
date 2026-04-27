@@ -7,12 +7,14 @@ import { useSuppliers } from '../../hooks/useSuppliers';
 import { useStorages } from '../../hooks/useStorages';
 import { formatDate, formatMoney } from '../../utils/format';
 import type { Purchase, PurchaseStatus } from '../../types/inventory';
+import { useTranslation } from '../../i18n';
+import type { TranslationKey } from '../../i18n/en';
 
-const STATUS_OPTIONS: { value: PurchaseStatus | ''; label: string }[] = [
-  { value: '', label: 'All statuses' },
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'CONFIRMED', label: 'Confirmed' },
-  { value: 'CANCELLED', label: 'Cancelled' },
+const STATUS_OPTIONS: { value: PurchaseStatus | ''; labelKey: TranslationKey }[] = [
+  { value: '', labelKey: 'common.all' },
+  { value: 'DRAFT', labelKey: 'purchases.statusDraft' },
+  { value: 'CONFIRMED', labelKey: 'purchases.statusConfirmed' },
+  { value: 'CANCELLED', labelKey: 'purchases.statusCancelled' },
 ];
 
 function statusClass(status: PurchaseStatus): string {
@@ -27,6 +29,7 @@ function statusClass(status: PurchaseStatus): string {
 }
 
 export function PurchaseOrdersPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [status, setStatus] = useState<PurchaseStatus | ''>('');
   const [supplierId, setSupplierId] = useState('');
@@ -54,7 +57,7 @@ export function PurchaseOrdersPage() {
   const columns: TableColumn<Purchase>[] = [
     {
       key: 'date',
-      header: 'Date',
+      header: t('purchases.colDate'),
       width: '140px',
       render: (p) => (
         <span className="fs-13 fw-600">{formatDate(p.date)}</span>
@@ -62,7 +65,7 @@ export function PurchaseOrdersPage() {
     },
     {
       key: 'supplier',
-      header: 'Supplier',
+      header: t('purchases.colSupplier'),
       width: '1.5fr',
       render: (p) => (
         <span className="fs-13">{p.supplier?.name ?? '—'}</span>
@@ -70,7 +73,7 @@ export function PurchaseOrdersPage() {
     },
     {
       key: 'storage',
-      header: 'Receiving storage',
+      header: t('purchases.colStorage'),
       width: '1fr',
       render: (p) => (
         <span className="fs-12 text-muted">{p.storage?.name ?? '—'}</span>
@@ -78,7 +81,7 @@ export function PurchaseOrdersPage() {
     },
     {
       key: 'items',
-      header: 'Items',
+      header: t('purchases.colItems'),
       width: '90px',
       render: (p) => (
         <span className="fs-13">{p.items?.length ?? 0}</span>
@@ -86,7 +89,7 @@ export function PurchaseOrdersPage() {
     },
     {
       key: 'total',
-      header: 'Total',
+      header: t('purchases.colTotal'),
       width: '130px',
       render: (p) => (
         <span className="fs-13 fw-600">{formatMoney(Number(p.total))}</span>
@@ -94,7 +97,7 @@ export function PurchaseOrdersPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '130px',
       render: (p) => (
         <span className={`po-status-pill ${statusClass(p.status)}`}>
@@ -114,7 +117,7 @@ export function PurchaseOrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Status
+            {t('common.status')}
           </label>
           <select
             className="search-box"
@@ -124,7 +127,7 @@ export function PurchaseOrdersPage() {
           >
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
-                {o.label}
+                {t(o.labelKey)}
               </option>
             ))}
           </select>
@@ -135,7 +138,7 @@ export function PurchaseOrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Supplier
+            {t('purchases.colSupplier')}
           </label>
           <select
             className="search-box"
@@ -144,7 +147,7 @@ export function PurchaseOrdersPage() {
             disabled={suppliersQ.isLoading}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All suppliers</option>
+            <option value="">{t('common.all')}</option>
             {suppliersQ.data?.pages
               .flatMap((p) => p.items)
               .map((s) => (
@@ -160,7 +163,7 @@ export function PurchaseOrdersPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Storage
+            {t('purchases.colStorage')}
           </label>
           <select
             className="search-box"
@@ -169,7 +172,7 @@ export function PurchaseOrdersPage() {
             disabled={storagesQ.isLoading}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All storages</option>
+            <option value="">{t('common.all')}</option>
             {storagesQ.data?.items.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -188,7 +191,7 @@ export function PurchaseOrdersPage() {
               setStorageId('');
             }}
           >
-            Clear filters
+            {t('common.cancel')}
           </button>
         )}
 
@@ -196,7 +199,7 @@ export function PurchaseOrdersPage() {
           variant="primary"
           onClick={() => navigate('/inventory/purchases/new')}
         >
-          + New purchase order
+          + {t('purchases.newPurchase')}
         </Button>
       </div>
 
@@ -207,23 +210,15 @@ export function PurchaseOrdersPage() {
         onRowClick={(p) => navigate(`/inventory/purchases/${p.id}`)}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage={
-          hasActiveFilters
-            ? 'No purchase orders match these filters'
-            : 'No purchase orders yet'
-        }
-        emptySub={
-          hasActiveFilters
-            ? 'Try clearing filters.'
-            : 'Create a draft purchase order to register supplier purchases.'
-        }
+        emptyMessage={t('purchases.empty')}
+        emptySub={t('purchases.subtitle')}
         emptyAction={
           !hasActiveFilters && (
             <Button
               variant="primary"
               onClick={() => navigate('/inventory/purchases/new')}
             >
-              + New purchase order
+              + {t('purchases.newPurchase')}
             </Button>
           )
         }

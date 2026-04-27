@@ -8,16 +8,20 @@ import type { Employee } from '../../types/staff';
 import type { UserRole } from '../../types/api';
 import { formatDate, formatMoney } from '../../utils/format';
 import { EmployeeFormModal } from './EmployeeFormModal';
+import { useTranslation } from '../../i18n';
 
 const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'];
 
-function roleLabel(role: UserRole): string {
-  switch (role) {
-    case 'ADMIN':   return 'Administrator';
-    case 'MANAGER': return 'Manager';
-    case 'CASHIER': return 'Cashier';
-    case 'BARISTA': return 'Barista';
-  }
+function useRoleLabel() {
+  const { t } = useTranslation();
+  return (role: UserRole): string => {
+    switch (role) {
+      case 'ADMIN':   return t('role.admin');
+      case 'MANAGER': return t('role.manager');
+      case 'CASHIER': return t('role.cashier');
+      case 'BARISTA': return t('role.barista');
+    }
+  };
 }
 
 function roleTone(role: UserRole) {
@@ -30,6 +34,8 @@ function roleTone(role: UserRole) {
 }
 
 export function EmployeesPage() {
+  const { t } = useTranslation();
+  const roleLabel = useRoleLabel();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
@@ -55,7 +61,7 @@ export function EmployeesPage() {
   const columns: TableColumn<Employee>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('employees.colName'),
       width: '1.4fr',
       render: (e) => (
         <div>
@@ -66,7 +72,7 @@ export function EmployeesPage() {
     },
     {
       key: 'position',
-      header: 'Position',
+      header: t('employees.position'),
       width: '1fr',
       render: (e) => (
         <span className="fs-13">{e.position ?? '—'}</span>
@@ -74,7 +80,7 @@ export function EmployeesPage() {
     },
     {
       key: 'role',
-      header: 'Role',
+      header: t('employees.colRole'),
       width: '130px',
       render: (e) => (
         <Badge tone={roleTone(e.role)}>{roleLabel(e.role)}</Badge>
@@ -82,7 +88,7 @@ export function EmployeesPage() {
     },
     {
       key: 'salary',
-      header: 'Weekly salary',
+      header: t('employees.colSalary'),
       width: '140px',
       render: (e) => (
         <span className="fw-600 fs-13">
@@ -92,7 +98,7 @@ export function EmployeesPage() {
     },
     {
       key: 'hire',
-      header: 'Hired',
+      header: t('employees.colHired'),
       width: '130px',
       render: (e) => (
         <span className="fs-12 text-muted">
@@ -102,11 +108,11 @@ export function EmployeesPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '100px',
       render: (e) => (
         <Badge tone={e.active ? 'green' : 'gray'}>
-          {e.active ? 'Active' : 'Inactive'}
+          {e.active ? t('common.active') : t('common.inactive')}
         </Badge>
       ),
     },
@@ -117,25 +123,25 @@ export function EmployeesPage() {
       <div className="flex-between mb-12">
         <div />
         <Button variant="primary" onClick={() => setFormOpen(true)}>
-          + New employee
+          + {t('employees.newEmployee')}
         </Button>
       </div>
 
       <div className="toolbar" style={{ alignItems: 'flex-end', gap: 10 }}>
         <div style={{ flex: '1 1 260px', minWidth: 220 }}>
           <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-            Search
+            {t('common.search')}
           </label>
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Name, email, or position…"
+            placeholder={t('common.search')}
           />
         </div>
 
         <div style={{ flex: '0 0 200px' }}>
           <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-            Role
+            {t('employees.colRole')}
           </label>
           <select
             className="search-box"
@@ -143,7 +149,7 @@ export function EmployeesPage() {
             onChange={(e) => setRole(e.target.value as UserRole | '')}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All roles</option>
+            <option value="">{t('common.all')}</option>
             {ROLES.map((r) => (
               <option key={r} value={r}>{roleLabel(r)}</option>
             ))}
@@ -159,7 +165,7 @@ export function EmployeesPage() {
             checked={showInactive}
             onChange={(e) => setShowInactive(e.target.checked)}
           />
-          Include inactive
+          {t('supplies.showInactive')}
         </label>
       </div>
 
@@ -170,8 +176,8 @@ export function EmployeesPage() {
         onRowClick={(e) => navigate(`/staff/employees/${e.id}`)}
         isInitialLoad={q.isLoading}
         error={q.error as Error | null}
-        emptyMessage="No employees found"
-        emptySub="Create one with the + New employee button."
+        emptyMessage={t('employees.empty')}
+        emptySub={t('employees.subtitle')}
         hasMore={!!q.hasNextPage}
         isLoadingMore={q.isFetchingNextPage}
         onLoadMore={() => q.fetchNextPage()}

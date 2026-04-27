@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { OrderRow } from './OrderRow';
 import { type ActiveOrder, type TakeoutChannel } from '../api/orders';
 import { formatElapsed, minutesSince } from '../utils/format';
+import { useTranslation } from '../i18n';
 
 interface SubBucket {
   channel: TakeoutChannel | 'UNSPECIFIED';
@@ -136,6 +137,7 @@ export function ZoneSection({
   defaultOpen = true,
   subBuckets,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
 
   const avgWait = orders.length === 0
@@ -154,18 +156,18 @@ export function ZoneSection({
           <span style={arrowStyle(open)}>▶</span>
           <span style={styles.name}>{zoneName}</span>
           <span style={styles.countPill}>
-            {orders.length} active
+            {orders.length} {t('orders.zoneActive')}
           </span>
         </div>
         <div style={styles.meta}>
-          <span>avg {formatElapsed(avgWait)}</span>
+          <span>{t('orders.zoneAvg')} {formatElapsed(avgWait)}</span>
         </div>
       </header>
 
       {open && (
         <>
           {orders.length === 0 ? (
-            <div style={styles.empty}>No active orders in this zone.</div>
+            <div style={styles.empty}>{t('orders.empty')}</div>
           ) : subBuckets && subBuckets.length > 0 ? (
             subBuckets.map((bucket) => (
               <div key={bucket.channel}>

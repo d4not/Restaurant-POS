@@ -11,6 +11,7 @@ import { usePurchases } from '../../hooks/usePurchases';
 import type { Purchase } from '../../api/purchases';
 import type { Order } from '../../types/operations';
 import { formatDate, formatMoney } from '../../utils/format';
+import { useTranslation } from '../../i18n';
 
 /* ── Month helpers ────────────────────────────────────────── */
 
@@ -45,6 +46,7 @@ function monthsBack(count: number): MonthBucket[] {
 }
 
 export function ExpensesReport() {
+  const { t } = useTranslation();
   // The six-month window that drives both the headline chart and the KPIs.
   // "This month" = the last bucket; "last 6 months" = full list.
   const buckets = useMemo(() => monthsBack(6), []);
@@ -147,34 +149,34 @@ export function ExpensesReport() {
   const columns: TableColumn<Purchase>[] = [
     {
       key: 'concept',
-      header: 'Concept',
+      header: t('common.description'),
       width: '1.4fr',
       render: (p) => (
         <div className="fw-600 fs-13">
-          {p.notes ?? `Purchase · ${p.supplier?.name ?? 'Supplier'}`}
+          {p.notes ?? `${t('purchases.title')} · ${p.supplier?.name ?? t('suppliers.title')}`}
         </div>
       ),
     },
     {
       key: 'category',
-      header: 'Category',
+      header: t('common.category'),
       width: '1fr',
-      render: () => <Badge tone="gray">Supplies</Badge>,
+      render: () => <Badge tone="gray">{t('nav.supplies')}</Badge>,
     },
     {
       key: 'description',
-      header: 'Description',
+      header: t('common.description'),
       width: '1.2fr',
       render: (p) => (
         <span className="text-muted fs-12">
-          {p.supplier?.name ?? 'Supplier'}
+          {p.supplier?.name ?? t('suppliers.title')}
           {p.storage?.name ? ` → ${p.storage.name}` : ''}
         </span>
       ),
     },
     {
       key: 'amount',
-      header: 'Amount',
+      header: t('common.amount'),
       width: '120px',
       render: (p) => (
         <span className="fw-600 fs-13 text-red">
@@ -184,7 +186,7 @@ export function ExpensesReport() {
     },
     {
       key: 'date',
-      header: 'Date',
+      header: t('common.date'),
       width: '110px',
       render: (p) => (
         <span className="text-muted fs-12">{formatDate(p.date, 'MMM d')}</span>
@@ -199,39 +201,39 @@ export function ExpensesReport() {
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <KPICard
           accent
-          label="Income this month"
+          label={t('expenses.income')}
           value={formatMoney(last.income)}
-          sub={bothLoading ? 'Loading…' : `Paid orders · ${current.label}`}
+          sub={bothLoading ? `${t('common.loading')}…` : `${t('orders.statusPaid')} · ${current.label}`}
         />
         <KPICard
-          label="Expenses this month"
+          label={t('expenses.expense')}
           value={formatMoney(last.expenses)}
-          sub={bothLoading ? 'Loading…' : 'Confirmed purchases'}
+          sub={bothLoading ? `${t('common.loading')}…` : t('purchases.statusConfirmed')}
         />
         <KPICard
-          label="Net profit"
+          label={t('expenses.profit')}
           value={formatMoney(last.profit)}
           valueColor={last.profit >= 0 ? 'green' : 'red'}
           sub={
             last.income > 0
-              ? `${marginPct.toFixed(0)}% margin`
-              : 'No income yet'
+              ? `${marginPct.toFixed(0)}%`
+              : t('orders.empty')
           }
         />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="Income vs Expenses — last 6 months">
+        <Card title={t('expenses.last6Months')}>
           {bothLoading ? (
             <div className="loading-block">
               <span className="spinner" />
-              Loading chart…
+              {t('common.loading')}…
             </div>
           ) : chartData.every((d) => d.income === 0 && d.expenses === 0) ? (
             <EmptyState
               icon="📊"
-              message="No financial activity in the last 6 months"
-              sub="Paid orders and confirmed purchases will chart here."
+              message={t('orders.empty')}
+              sub={t('expenses.subtitle')}
             />
           ) : (
             <IncomeExpenseChart data={chartData} />
@@ -239,27 +241,27 @@ export function ExpensesReport() {
         </Card>
 
         <Card
-          title="Expense breakdown"
+          title={t('expenses.breakdown')}
           actions={
             <button
               type="button"
               className="filter-pill"
               onClick={() => setShowCurrentMonthOnly((v) => !v)}
             >
-              {showCurrentMonthOnly ? 'This month' : 'Last 6 months'}
+              {showCurrentMonthOnly ? current.label : t('expenses.last6Months')}
             </button>
           }
         >
           {bothLoading ? (
             <div className="loading-block">
               <span className="spinner" />
-              Loading…
+              {t('common.loading')}…
             </div>
           ) : breakdown.length === 0 ? (
             <EmptyState
               icon="📦"
-              message="No expenses recorded"
-              sub="Confirmed purchases grouped by supplier will appear here."
+              message={t('orders.empty')}
+              sub={t('expenses.subtitle')}
             />
           ) : (
             <MiniBars
@@ -271,10 +273,10 @@ export function ExpensesReport() {
       </div>
 
       <Card
-        title="Recorded expenses"
+        title={t('expenses.title')}
         actions={
           <span className="fs-12 text-muted">
-            {showCurrentMonthOnly ? current.label : 'Last 6 months'}
+            {showCurrentMonthOnly ? current.label : t('expenses.last6Months')}
           </span>
         }
       >
@@ -284,8 +286,8 @@ export function ExpensesReport() {
           getRowKey={(p) => p.id}
           isInitialLoad={purchasesQ.isLoading}
           error={purchasesQ.error as Error | null}
-          emptyMessage="No expenses in this range"
-          emptySub="Confirmed purchases from suppliers will appear here."
+          emptyMessage={t('expenses.title')}
+          emptySub={t('expenses.subtitle')}
           hasMore={!!purchasesQ.hasNextPage}
           isLoadingMore={purchasesQ.isFetchingNextPage}
           onLoadMore={() => purchasesQ.fetchNextPage()}

@@ -18,6 +18,8 @@ import {
   saveServerUrl,
 } from '../store/serverUrl';
 import { getPlatformId } from '../platform';
+import { useTranslation, type Language } from '../i18n';
+import type { TranslationKey } from '../i18n/en';
 
 // Sections the user can switch between in the modal's left rail. General /
 // Appearance / Printers ship in Phase 5; Users / Register depend on backend
@@ -34,18 +36,18 @@ type Section =
 
 interface SectionDef {
   id: Section;
-  label: string;
+  labelKey: TranslationKey;
   ready: boolean;
   adminOnly?: boolean;
 }
 
 const SECTIONS: SectionDef[] = [
-  { id: 'general', label: 'General', ready: true },
-  { id: 'appearance', label: 'Appearance', ready: true },
-  { id: 'printers', label: 'Printers', ready: true },
-  { id: 'suggestions', label: 'Suggested Changes', ready: true, adminOnly: true },
-  { id: 'users', label: 'Users', ready: false },
-  { id: 'register', label: 'Register', ready: false },
+  { id: 'general', labelKey: 'settings.tabGeneral', ready: true },
+  { id: 'appearance', labelKey: 'settings.tabAppearance', ready: true },
+  { id: 'printers', labelKey: 'settings.tabPrinters', ready: true },
+  { id: 'suggestions', labelKey: 'settings.tabSuggestions', ready: true, adminOnly: true },
+  { id: 'users', labelKey: 'settings.tabUsers', ready: false },
+  { id: 'register', labelKey: 'settings.tabRegister', ready: false },
 ];
 
 const PRINTER_TYPES = ['epson', 'star', 'tanca', 'daruma', 'brother', 'custom'] as const;
@@ -357,6 +359,7 @@ const resultBannerStyle = (ok: boolean): React.CSSProperties => ({
 });
 
 export function SettingsModal() {
+  const { t } = useTranslation();
   const open = useUi((s) => s.settingsOpen);
   const close = useUi((s) => s.closeSettings);
   const role = useSession((s) => s.user?.role ?? 'WAITER');
@@ -392,7 +395,7 @@ export function SettingsModal() {
     <div style={styles.scrim} onClick={close}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <aside style={styles.nav}>
-          <div style={styles.navHead}>Settings</div>
+          <div style={styles.navHead}>{t('settings.title')}</div>
           {visibleSections.map((s) => (
             <button
               key={s.id}
@@ -401,15 +404,15 @@ export function SettingsModal() {
               onClick={() => s.ready && setSection(s.id)}
               disabled={!s.ready}
             >
-              <span>{s.label}</span>
-              {!s.ready && <span style={styles.navItemTag}>Soon</span>}
+              <span>{t(s.labelKey)}</span>
+              {!s.ready && <span style={styles.navItemTag}>{t('settings.comingSoon')}</span>}
             </button>
           ))}
         </aside>
         <div style={styles.body}>
           <header style={styles.bodyHead}>
-            <h2 style={styles.bodyTitle}>{activeSection?.label ?? 'Settings'}</h2>
-            <button type="button" style={styles.closeBtn} onClick={close} aria-label="Close">
+            <h2 style={styles.bodyTitle}>{activeSection ? t(activeSection.labelKey) : t('settings.title')}</h2>
+            <button type="button" style={styles.closeBtn} onClick={close} aria-label={t('common.close')}>
               ×
             </button>
           </header>
@@ -419,18 +422,10 @@ export function SettingsModal() {
             {section === 'printers' && <PrintersSection />}
             {section === 'suggestions' && isAdmin && <SuggestionsSection />}
             {section === 'users' && (
-              <div style={styles.empty}>
-                User PIN management lives in the admin panel — open
-                <br />
-                Personal · Empleados to add cashiers and reset PINs.
-              </div>
+              <div style={styles.empty}>{t('settings.usersPlaceholder')}</div>
             )}
             {section === 'register' && (
-              <div style={styles.empty}>
-                Register open / close is part of the cash drawer module.
-                <br />
-                Configure it from Personal · Caja in the admin panel.
-              </div>
+              <div style={styles.empty}>{t('settings.registerPlaceholder')}</div>
             )}
           </div>
         </div>
@@ -460,6 +455,7 @@ function GeneralSection() {
 // tablet may need to fix it on the spot. Connection test pings /health on the
 // server root to validate the URL before saving.
 function ServerUrlCard() {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<string>(getApiBase());
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState<boolean>(false);
@@ -533,7 +529,7 @@ function ServerUrlCard() {
           ? 'Timed out after 5s'
           : err instanceof Error
             ? err.message
-            : 'Could not reach server';
+            : t('settings.couldNotReach');
       setTestResult({ ok: false, error: reason });
     } finally {
       window.clearTimeout(timeout);
@@ -545,16 +541,13 @@ function ServerUrlCard() {
     <div style={styles.card}>
       <div style={styles.cardHead}>
         <div>
-          <h3 style={styles.cardTitle}>Server URL</h3>
-          <div style={styles.cardSub}>
-            Where this terminal sends API requests. Change to point at a
-            different backend on the local network — a restart isn't required.
-          </div>
+          <h3 style={styles.cardTitle}>{t('settings.serverUrlTitle')}</h3>
+          <div style={styles.cardSub}>{t('settings.serverUrlSub')}</div>
         </div>
       </div>
 
       <div style={styles.field}>
-        <label style={styles.label}>Backend base URL</label>
+        <label style={styles.label}>{t('settings.serverBaseLabel')}</label>
         <input
           style={styles.input}
           value={draft}
@@ -569,7 +562,7 @@ function ServerUrlCard() {
           autoCorrect="off"
         />
         <div style={styles.hint}>
-          Active URL: <code>{getServerRoot()}</code>
+          {t('settings.activeUrl')}: <code>{getServerRoot()}</code>
         </div>
       </div>
 
@@ -580,7 +573,7 @@ function ServerUrlCard() {
           onClick={save}
           disabled={!dirty || !valid}
         >
-          Save changes
+          {t('settings.saveChanges')}
         </button>
         <button
           type="button"
@@ -588,31 +581,81 @@ function ServerUrlCard() {
           onClick={runTest}
           disabled={!valid || testing}
         >
-          {testing ? <Spinner size={12} /> : '🔌'} Test connection
+          {testing ? <Spinner size={12} /> : '🔌'} {t('settings.testConnection')}
         </button>
       </div>
 
       {!valid && (
         <div style={resultBannerStyle(false)}>
-          URL must start with http:// or https://
+          {t('settings.urlMustStart')}
         </div>
       )}
-      {saved && <div style={resultBannerStyle(true)}>Saved.</div>}
+      {saved && <div style={resultBannerStyle(true)}>{t('settings.savedShort')}</div>}
       {testResult?.ok && (
         <div style={resultBannerStyle(true)}>
-          Connected — health responded in {testResult.latencyMs}ms.
+          {t('settings.connectedHealth')} {testResult.latencyMs}ms.
         </div>
       )}
       {testResult && !testResult.ok && (
         <div style={resultBannerStyle(false)}>
-          Could not reach server: {testResult.error}
+          {t('settings.couldNotReach')}: {testResult.error}
         </div>
       )}
     </div>
   );
 }
 
+// Language picker — saved on the backend so every device follows the operator's
+// choice. Shows the human label of each language; the actual codes live in the
+// i18n module.
+function LanguageCard() {
+  const { t, language, setLanguage } = useTranslation();
+  const [saving, setSaving] = useState<Language | null>(null);
+  const options: Array<{ value: Language; labelKey: TranslationKey }> = [
+    { value: 'en', labelKey: 'settings.languageEnglish' },
+    { value: 'es', labelKey: 'settings.languageSpanish' },
+  ];
+
+  async function pick(next: Language) {
+    if (next === language) return;
+    setSaving(next);
+    try {
+      await setLanguage(next, { persistRemote: true });
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHead}>
+        <div>
+          <h3 style={styles.cardTitle}>{t('settings.languageCard')}</h3>
+          <div style={styles.cardSub}>{t('settings.languageHint')}</div>
+        </div>
+      </div>
+      <div style={uiScaleStyles.row}>
+        {options.map((opt) => {
+          const active = language === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              style={uiScaleStyles.option(active)}
+              onClick={() => pick(opt.value)}
+              disabled={saving !== null}
+            >
+              {saving === opt.value ? <Spinner size={12} /> : t(opt.labelKey)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function BusinessInfoCard() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const configQuery = useQuery({
     queryKey: ['printer-config'],
@@ -635,16 +678,13 @@ function BusinessInfoCard() {
 
   if (!window.electron) {
     return (
-      <div style={styles.empty}>
-        Business info / printer settings only work inside the Electron app —
-        open the desktop terminal to configure.
-      </div>
+      <div style={styles.empty}>{t('settings.businessInfoElectronOnly')}</div>
     );
   }
   if (configQuery.isLoading || !draft) {
     return (
       <div style={styles.loading}>
-        <Spinner size={18} /> Loading business info…
+        <Spinner size={18} /> {t('settings.loadingBusiness')}
       </div>
     );
   }
@@ -653,14 +693,14 @@ function BusinessInfoCard() {
     <div style={styles.card}>
       <div style={styles.cardHead}>
         <div>
-          <h3 style={styles.cardTitle}>Business info</h3>
-          <div style={styles.cardSub}>Shown at the top of every printed receipt.</div>
+          <h3 style={styles.cardTitle}>{t('settings.businessInfo')}</h3>
+          <div style={styles.cardSub}>{t('settings.businessInfoSub')}</div>
         </div>
       </div>
 
       <div style={styles.fieldRow}>
         <div style={styles.field}>
-          <label style={styles.label}>Business name</label>
+          <label style={styles.label}>{t('settings.businessName')}</label>
           <input
             style={styles.input}
             value={draft.name}
@@ -668,7 +708,7 @@ function BusinessInfoCard() {
           />
         </div>
         <div style={styles.field}>
-          <label style={styles.label}>Tax ID / RFC</label>
+          <label style={styles.label}>{t('settings.taxId')}</label>
           <input
             style={styles.input}
             value={draft.tax_id}
@@ -677,7 +717,7 @@ function BusinessInfoCard() {
         </div>
       </div>
       <div style={styles.field}>
-        <label style={styles.label}>Address</label>
+        <label style={styles.label}>{t('settings.address')}</label>
         <input
           style={styles.input}
           value={draft.address}
@@ -693,16 +733,16 @@ function BusinessInfoCard() {
           disabled={saveMutation.isPending}
         >
           {saveMutation.isPending && <Spinner size={12} />}
-          Save changes
+          {t('settings.saveChanges')}
         </button>
       </div>
 
       {saveMutation.isSuccess && (
-        <div style={resultBannerStyle(true)}>Saved.</div>
+        <div style={resultBannerStyle(true)}>{t('settings.savedShort')}</div>
       )}
       {saveMutation.isError && (
         <div style={resultBannerStyle(false)}>
-          Could not save: {(saveMutation.error as Error).message}
+          {t('settings.couldNotSave')}: {(saveMutation.error as Error).message}
         </div>
       )}
     </div>
@@ -715,6 +755,7 @@ function BusinessInfoCard() {
 // the product menu have a long staleTime by design (read-mostly, rarely
 // edited mid-shift).
 function CacheCard() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
 
@@ -731,13 +772,8 @@ function CacheCard() {
     <div style={styles.card}>
       <div style={styles.cardHead}>
         <div>
-          <h3 style={styles.cardTitle}>Cache</h3>
-          <div style={styles.cardSub}>
-            The terminal caches the menu, categories, and other rarely-changed
-            data for up to 5 minutes. If admin just changed something on the
-            web panel and you need to see it now, clear the cache and reload.
-            In-progress orders are unaffected — they live on the server.
-          </div>
+          <h3 style={styles.cardTitle}>{t('settings.cache')}</h3>
+          <div style={styles.cardSub}>{t('settings.cacheSub')}</div>
         </div>
       </div>
       <div style={styles.cardActions}>
@@ -748,7 +784,7 @@ function CacheCard() {
           disabled={busy}
         >
           {busy && <Spinner size={12} />}
-          Clear cache &amp; reload
+          {t('settings.clearCache')}
         </button>
       </div>
     </div>
@@ -758,6 +794,7 @@ function CacheCard() {
 // ─── Printers section ──────────────────────────────────────────────────────
 
 function PrintersSection() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const configQuery = useQuery({
@@ -790,7 +827,7 @@ function PrintersSection() {
   if (configQuery.isLoading || !configQuery.data) {
     return (
       <div style={styles.loading}>
-        <Spinner size={18} /> Loading printer config…
+        <Spinner size={18} /> {t('settings.loadingPrinterConfig')}
       </div>
     );
   }
@@ -801,16 +838,16 @@ function PrintersSection() {
     <>
       <PrinterRoleCard
         role="receipt"
-        title="Receipt printer"
-        subtitle="Customer receipts at payment."
+        title={t('settings.receiptPrinter')}
+        subtitle={t('settings.receiptPrinterSub')}
         config={cfg.receipt}
         connected={statusQuery.data?.receipt ?? null}
         onSave={(next) => saveMutation.mutate({ receipt: next })}
       />
       <PrinterRoleCard
         role="kitchen"
-        title="Kitchen printer"
-        subtitle="Comanda printed when items are sent to the kitchen."
+        title={t('settings.kitchenPrinter')}
+        subtitle={t('settings.kitchenPrinterSub')}
         config={cfg.kitchen}
         connected={statusQuery.data?.kitchen ?? null}
         onSave={(next) => saveMutation.mutate({ kitchen: next })}
@@ -824,6 +861,7 @@ function PrintersSection() {
 // fetched from /print/status, with a pointer to the admin web for changes
 // (printer IPs / paper width are global business settings, not per-device).
 function RemotePrinterStatus() {
+  const { t } = useTranslation();
   const platform = getPlatformId();
   const remote = platform === 'capacitor';
 
@@ -836,25 +874,21 @@ function RemotePrinterStatus() {
 
   if (!remote) {
     return (
-      <div style={styles.empty}>
-        Printer setup only works inside the Electron or mobile app.
-      </div>
+      <div style={styles.empty}>{t('settings.printerElectronOnly')}</div>
     );
   }
 
   if (statusQuery.isLoading || !statusQuery.data) {
     return (
       <div style={styles.loading}>
-        <Spinner size={18} /> Checking printer status…
+        <Spinner size={18} /> {t('settings.loadingPrinterStatus')}
       </div>
     );
   }
 
   if (statusQuery.isError) {
     return (
-      <div style={styles.empty}>
-        Couldn't reach the server to check printer status.
-      </div>
+      <div style={styles.empty}>{t('settings.printerStatusError')}</div>
     );
   }
 
@@ -862,18 +896,17 @@ function RemotePrinterStatus() {
   return (
     <>
       <RemotePrinterCard
-        title="Receipt printer"
-        subtitle="Customer receipts at payment."
+        title={t('settings.receiptPrinter')}
+        subtitle={t('settings.receiptPrinterSub')}
         role={status.receipt}
       />
       <RemotePrinterCard
-        title="Kitchen printer"
-        subtitle="Comanda printed when items are sent to the kitchen."
+        title={t('settings.kitchenPrinter')}
+        subtitle={t('settings.kitchenPrinterSub')}
         role={status.kitchen}
       />
       <div style={{ ...styles.cardSub, marginTop: 4 }}>
-        Printer IPs and paper width are configured in the admin web panel
-        (Settings → Printers). Changes apply to every device.
+        {t('settings.printersAdminConfig')}
       </div>
     </>
   );
@@ -886,16 +919,17 @@ interface RemotePrinterCardProps {
 }
 
 function RemotePrinterCard({ title, subtitle, role }: RemotePrinterCardProps) {
+  const { t } = useTranslation();
   const dotColor = !role.configured
     ? 'var(--text3)'
     : role.connected
       ? 'var(--green)'
       : 'var(--red)';
   const label = !role.configured
-    ? 'Not configured'
+    ? t('settings.printerNotConfigured')
     : role.connected
-      ? 'Connected'
-      : 'Unreachable';
+      ? t('settings.printerConnected')
+      : t('settings.printerUnreachable');
   return (
     <div style={styles.card}>
       <div style={styles.cardHead}>
@@ -940,6 +974,7 @@ interface PrinterRoleCardProps {
 }
 
 function PrinterRoleCard(props: PrinterRoleCardProps) {
+  const { t } = useTranslation();
   const { role, title, subtitle, config, connected, onSave } = props;
   const [draft, setDraft] = useState<PrinterRoleConfig>(config);
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
@@ -984,12 +1019,12 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
         <span style={statusPillStyle(config.enabled ? connected : null)}>
           <span style={statusDotStyle(config.enabled ? connected : null)} />
           {!config.enabled
-            ? 'Disabled'
+            ? t('settings.printerDisabled')
             : connected === null
-              ? 'Checking…'
+              ? t('settings.printerChecking')
               : connected
-                ? 'Connected'
-                : 'Offline'}
+                ? t('settings.printerConnected')
+                : t('settings.printerOffline')}
         </span>
       </div>
 
@@ -1002,13 +1037,13 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
           style={{ width: 18, height: 18, cursor: 'pointer' }}
         />
         <label htmlFor={`enable-${role}`} style={styles.toggleLabel}>
-          Enable {role} printing
+          {t('settings.printerEnable').replace('{role}', role)}
         </label>
       </div>
 
       <div style={{ ...styles.fieldRow, marginTop: 16 }}>
         <div style={styles.field}>
-          <label style={styles.label}>Connection</label>
+          <label style={styles.label}>{t('settings.connection')}</label>
           <select
             style={styles.select}
             value={draft.connection}
@@ -1016,12 +1051,12 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
               setDraft({ ...draft, connection: e.target.value as PrinterConnection })
             }
           >
-            <option value="network">Network (TCP)</option>
-            <option value="usb">USB / Serial</option>
+            <option value="network">{t('settings.connectionNetwork')}</option>
+            <option value="usb">{t('settings.connectionUsb')}</option>
           </select>
         </div>
         <div style={styles.field}>
-          <label style={styles.label}>Printer model</label>
+          <label style={styles.label}>{t('settings.printerModel')}</label>
           <select
             style={styles.select}
             value={draft.type}
@@ -1029,9 +1064,9 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
               setDraft({ ...draft, type: e.target.value as PrinterRoleConfig['type'] })
             }
           >
-            {PRINTER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+            {PRINTER_TYPES.map((p) => (
+              <option key={p} value={p}>
+                {p.charAt(0).toUpperCase() + p.slice(1)}
               </option>
             ))}
           </select>
@@ -1040,7 +1075,7 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
 
       <div style={styles.field}>
         <label style={styles.label}>
-          {draft.connection === 'network' ? 'IP address (host or host:port)' : 'Device path'}
+          {draft.connection === 'network' ? t('settings.ipLabel') : t('settings.deviceLabel')}
         </label>
         <input
           style={styles.input}
@@ -1052,26 +1087,26 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
         />
         <div style={styles.hint}>
           {draft.connection === 'network'
-            ? 'Default port is 9100 if you leave it off.'
-            : 'On Linux, ESC/POS USB printers typically appear as /dev/usb/lp0.'}
+            ? t('settings.printerIpHint')
+            : t('settings.devicePathHint')}
         </div>
       </div>
 
       <div style={{ ...styles.fieldRow, marginTop: 12 }}>
         <div style={styles.field}>
-          <label style={styles.label}>Paper width (chars)</label>
+          <label style={styles.label}>{t('settings.paperWidthChars')}</label>
           <select
             style={styles.select}
             value={draft.width}
             onChange={(e) => setDraft({ ...draft, width: Number(e.target.value) })}
           >
-            <option value={32}>32 — 58mm paper</option>
-            <option value={42}>42 — 76mm paper</option>
-            <option value={48}>48 — 80mm paper</option>
+            <option value={32}>32 — 58mm</option>
+            <option value={42}>42 — 76mm</option>
+            <option value={48}>48 — 80mm</option>
           </select>
         </div>
         <div style={styles.field}>
-          <label style={styles.label}>Character set</label>
+          <label style={styles.label}>{t('settings.charset')}</label>
           <select
             style={styles.select}
             value={draft.characterSet}
@@ -1093,7 +1128,7 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
           onClick={() => onSave(draft)}
           disabled={!dirty}
         >
-          Save changes
+          {t('settings.saveChanges')}
         </button>
         <button
           type="button"
@@ -1101,7 +1136,7 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
           onClick={() => setDraft(config)}
           disabled={!dirty}
         >
-          Reset
+          {t('settings.reset')}
         </button>
         <button
           type="button"
@@ -1109,15 +1144,15 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
           onClick={runTest}
           disabled={testing || !config.enabled || !config.address}
         >
-          {testing ? <Spinner size={12} /> : '🖨'} Test print
+          {testing ? <Spinner size={12} /> : '🖨'} {t('settings.testPrint')}
         </button>
       </div>
 
       {testResult && (
         <div style={resultBannerStyle(testResult.ok)}>
           {testResult.ok
-            ? 'Test page sent — check the paper.'
-            : `Test failed: ${testResult.error ?? 'unknown error'}`}
+            ? t('settings.testSent')
+            : `${t('settings.testFailed')}: ${testResult.error ?? '—'}`}
         </div>
       )}
     </div>
@@ -1129,6 +1164,7 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
 // spec, so this section only owns the lock interval. Set 0 to disable.
 
 function AppearanceSection() {
+  const { t } = useTranslation();
   const idleLockMinutes = usePreferences((s) => s.idleLockMinutes);
   const setIdleLockMinutes = usePreferences((s) => s.setIdleLockMinutes);
   const [draft, setDraft] = useState<string>(String(idleLockMinutes));
@@ -1144,22 +1180,20 @@ function AppearanceSection() {
 
   return (
     <>
+      <LanguageCard />
       <UiScaleCard />
 
       <div style={styles.card}>
         <div style={styles.cardHead}>
           <div>
-            <h3 style={styles.cardTitle}>Auto-lock</h3>
-            <div style={styles.cardSub}>
-              Lock the terminal after inactivity. The cash register stays open;
-              the cashier just re-enters their PIN to resume.
-            </div>
+            <h3 style={styles.cardTitle}>{t('settings.autoLockTitle')}</h3>
+            <div style={styles.cardSub}>{t('settings.autoLockSub')}</div>
           </div>
         </div>
 
         <div style={styles.fieldRow}>
           <div style={styles.field}>
-            <label style={styles.label}>Lock after (minutes)</label>
+            <label style={styles.label}>{t('settings.lockAfter')}</label>
             <input
               type="number"
               min={0}
@@ -1171,8 +1205,10 @@ function AppearanceSection() {
             />
             <div style={styles.hint}>
               {parsed === 0
-                ? 'Auto-lock disabled — the cashier must lock manually.'
-                : `Lock after ${parsed} minute${parsed === 1 ? '' : 's'} of inactivity.`}
+                ? t('settings.lockDisabled')
+                : t('settings.lockAfterMinutes')
+                    .replace('{n}', String(parsed))
+                    .replace('{s}', parsed === 1 ? '' : 's')}
             </div>
           </div>
           <div />
@@ -1185,7 +1221,7 @@ function AppearanceSection() {
             disabled={!dirty}
             onClick={() => valid && setIdleLockMinutes(parsed)}
           >
-            Save changes
+            {t('settings.saveChanges')}
           </button>
           <button
             type="button"
@@ -1193,13 +1229,13 @@ function AppearanceSection() {
             onClick={() => setDraft(String(idleLockMinutes))}
             disabled={!dirty}
           >
-            Reset
+            {t('settings.reset')}
           </button>
         </div>
 
         {!valid && (
           <div style={resultBannerStyle(false)}>
-            Enter a number between 0 and 60.
+            {t('settings.invalidLockRange')}
           </div>
         )}
       </div>
@@ -1207,12 +1243,8 @@ function AppearanceSection() {
       <div style={styles.card}>
         <div style={styles.cardHead}>
           <div>
-            <h3 style={styles.cardTitle}>Theme</h3>
-            <div style={styles.cardSub}>
-              The warm light palette is the only supported theme — designed to
-              stay readable under café lighting and reduce print-vs-screen
-              colour mismatches.
-            </div>
+            <h3 style={styles.cardTitle}>{t('settings.themeTitle')}</h3>
+            <div style={styles.cardSub}>{t('settings.themeSub')}</div>
           </div>
         </div>
       </div>
@@ -1233,6 +1265,7 @@ const UI_SCALE_OPTIONS: Array<{ label: string; value: number }> = [
 ];
 
 function UiScaleCard() {
+  const { t } = useTranslation();
   const uiScale = usePreferences((s) => s.uiScale);
   const setUiScale = usePreferences((s) => s.setUiScale);
 
@@ -1240,11 +1273,8 @@ function UiScaleCard() {
     <div style={styles.card}>
       <div style={styles.cardHead}>
         <div>
-          <h3 style={styles.cardTitle}>Interface scale</h3>
-          <div style={styles.cardSub}>
-            Resize every screen at once. 100% matches the default tablet layout;
-            increase if text feels small, decrease to fit more on screen.
-          </div>
+          <h3 style={styles.cardTitle}>{t('settings.uiScaleTitle')}</h3>
+          <div style={styles.cardSub}>{t('settings.uiScaleSub')}</div>
         </div>
       </div>
 
@@ -1265,7 +1295,7 @@ function UiScaleCard() {
       </div>
 
       <div style={styles.hint}>
-        Currently at {Math.round(uiScale * 100)}%. Saved per device.
+        {t('settings.uiScaleCurrent').replace('{pct}', String(Math.round(uiScale * 100)))}
       </div>
     </div>
   );
@@ -1302,19 +1332,19 @@ const uiScaleStyles: {
 // the underlying resource service so domain rules apply at apply-time, not
 // just at submit-time.
 
-const SUGGESTION_TYPE_LABELS: Record<Suggestion['type'], string> = {
-  TABLE_CREATE: 'New table',
-  TABLE_UPDATE: 'Edit table',
-  TABLE_DELETE: 'Delete table',
-  PRODUCT_CREATE: 'New product',
-  PRODUCT_UPDATE: 'Edit product',
-  PRODUCT_DELETE: 'Delete product',
+const SUGGESTION_TYPE_LABEL_KEY: Record<Suggestion['type'], TranslationKey> = {
+  TABLE_CREATE: 'settings.suggestionTypeTableCreate',
+  TABLE_UPDATE: 'settings.suggestionTypeTableUpdate',
+  TABLE_DELETE: 'settings.suggestionTypeTableDelete',
+  PRODUCT_CREATE: 'settings.suggestionTypeProductCreate',
+  PRODUCT_UPDATE: 'settings.suggestionTypeProductUpdate',
+  PRODUCT_DELETE: 'settings.suggestionTypeProductDelete',
 };
 
-const STATUS_FILTERS: Array<{ id: 'PENDING' | 'APPROVED' | 'REJECTED'; label: string }> = [
-  { id: 'PENDING', label: 'Pending' },
-  { id: 'APPROVED', label: 'Approved' },
-  { id: 'REJECTED', label: 'Rejected' },
+const STATUS_FILTERS: Array<{ id: 'PENDING' | 'APPROVED' | 'REJECTED'; labelKey: TranslationKey }> = [
+  { id: 'PENDING', labelKey: 'settings.suggestionFilterPending' },
+  { id: 'APPROVED', labelKey: 'settings.suggestionFilterApproved' },
+  { id: 'REJECTED', labelKey: 'settings.suggestionFilterRejected' },
 ];
 
 const suggestionStyles: Record<string, React.CSSProperties> = {
@@ -1443,6 +1473,7 @@ const filterPillStyle = (active: boolean): React.CSSProperties => ({
 });
 
 function SuggestionsSection() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
 
@@ -1470,7 +1501,7 @@ function SuggestionsSection() {
             style={filterPillStyle(statusFilter === f.id)}
             onClick={() => setStatusFilter(f.id)}
           >
-            {f.label}
+            {t(f.labelKey)}
           </button>
         ))}
       </div>
@@ -1483,7 +1514,7 @@ function SuggestionsSection() {
 
       {query.data && query.data.items.length === 0 && (
         <div style={styles.empty}>
-          No {statusFilter.toLowerCase()} suggestions.
+          {t('settings.suggestionEmpty').replace('{status}', t(`settings.suggestionFilter${statusFilter.charAt(0)}${statusFilter.slice(1).toLowerCase()}` as TranslationKey).toLowerCase())}
         </div>
       )}
 
@@ -1504,6 +1535,7 @@ interface SuggestionCardProps {
 }
 
 function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
+  const { t } = useTranslation();
   const [reviewNote, setReviewNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -1513,7 +1545,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
       setError(null);
       onChanged();
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Approve failed'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('settings.suggestionApproveFailed')),
   });
   const rejectMutation = useMutation({
     mutationFn: () => rejectSuggestion(suggestion.id, reviewNote.trim() || undefined),
@@ -1521,7 +1553,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
       setError(null);
       onChanged();
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Reject failed'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('settings.suggestionRejectFailed')),
   });
 
   const busy = approveMutation.isPending || rejectMutation.isPending;
@@ -1529,34 +1561,35 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
 
   // Friendly summary of what the suggestion proposes — first line of the card.
   const summary = (() => {
+    const tablePrefix = t('orders.tablePrefix');
     switch (suggestion.type) {
       case 'TABLE_CREATE': {
         const p = suggestion.payload as { number?: number };
-        return `Add table${p.number ? ` #${p.number}` : ''}`;
+        return `${t('settings.suggestionTypeTableCreate')}${p.number ? ` #${p.number}` : ''}`;
       }
       case 'TABLE_UPDATE':
-        return `Edit ${suggestion.table?.label || `Table ${suggestion.table?.number ?? '—'}`}`;
+        return `${t('settings.suggestionTypeTableUpdate')} ${suggestion.table?.label || `${tablePrefix} ${suggestion.table?.number ?? '—'}`}`;
       case 'TABLE_DELETE':
-        return `Delete ${suggestion.table?.label || `Table ${suggestion.table?.number ?? '—'}`}`;
+        return `${t('settings.suggestionTypeTableDelete')} ${suggestion.table?.label || `${tablePrefix} ${suggestion.table?.number ?? '—'}`}`;
       case 'PRODUCT_CREATE': {
         const p = suggestion.payload as { name?: string };
-        return `Add product${p.name ? ` "${p.name}"` : ''}`;
+        return `${t('settings.suggestionTypeProductCreate')}${p.name ? ` "${p.name}"` : ''}`;
       }
       case 'PRODUCT_UPDATE':
-        return `Edit product "${suggestion.product?.name ?? '—'}"`;
+        return `${t('settings.suggestionTypeProductUpdate')} "${suggestion.product?.name ?? '—'}"`;
       case 'PRODUCT_DELETE':
-        return `Delete product "${suggestion.product?.name ?? '—'}"`;
+        return `${t('settings.suggestionTypeProductDelete')} "${suggestion.product?.name ?? '—'}"`;
     }
   })();
 
   return (
     <div style={suggestionStyles.card}>
       <div style={suggestionStyles.head}>
-        <span style={suggestionStyles.typePill}>{SUGGESTION_TYPE_LABELS[suggestion.type]}</span>
+        <span style={suggestionStyles.typePill}>{t(SUGGESTION_TYPE_LABEL_KEY[suggestion.type])}</span>
         <strong style={{ fontSize: 14 }}>{summary}</strong>
         <span style={{ flex: 1 }} />
         <span style={suggestionStyles.metaLine}>
-          by {suggestion.creator.name} · {new Date(suggestion.created_at).toLocaleString()}
+          {t('settings.suggestionBy')} {suggestion.creator.name} · {new Date(suggestion.created_at).toLocaleString()}
         </span>
       </div>
 
@@ -1568,7 +1601,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
 
       {!isPending && suggestion.reviewer && (
         <div style={suggestionStyles.reviewNote}>
-          {suggestion.status === 'APPROVED' ? '✓ Approved' : '✕ Rejected'} by{' '}
+          {suggestion.status === 'APPROVED' ? t('settings.suggestionApproved') : t('settings.suggestionRejected')} {t('settings.suggestionBy')}{' '}
           {suggestion.reviewer.name}
           {suggestion.reviewed_at &&
             ` · ${new Date(suggestion.reviewed_at).toLocaleString()}`}
@@ -1580,7 +1613,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
         <>
           <textarea
             style={suggestionStyles.noteInput}
-            placeholder="Optional note for the audit log…"
+            placeholder={t('settings.optionalAuditNote')}
             value={reviewNote}
             onChange={(e) => setReviewNote(e.target.value)}
             disabled={busy}
@@ -1594,7 +1627,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
               onClick={() => approveMutation.mutate()}
               disabled={busy}
             >
-              {approveMutation.isPending ? <Spinner size={12} /> : '✓ Approve'}
+              {approveMutation.isPending ? <Spinner size={12} /> : t('settings.suggestionApprove')}
             </button>
             <button
               type="button"
@@ -1602,7 +1635,7 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
               onClick={() => rejectMutation.mutate()}
               disabled={busy}
             >
-              {rejectMutation.isPending ? <Spinner size={12} /> : '✕ Reject'}
+              {rejectMutation.isPending ? <Spinner size={12} /> : t('settings.suggestionReject')}
             </button>
           </div>
         </>

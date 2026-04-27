@@ -1,8 +1,11 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PageLayout } from './components/layout/PageLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { usePreferencesStore } from './store/preferences';
+import { useAuthStore } from './store/auth';
+import { syncLanguageFromServer } from './i18n';
 import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { SuppliesPage } from './pages/inventory/SuppliesPage';
@@ -51,6 +54,14 @@ export default function App() {
   // not hooks, so the subscription must live somewhere React can observe.
   usePreferencesStore((s) => s.currency);
   usePreferencesStore((s) => s.dateFormat);
+
+  // Pull the operator's language preference from the backend once we have a
+  // token. Local persisted value is shown until this resolves, so the login
+  // page renders in the device's last-known language without a flash.
+  const token = useAuthStore((s) => s.token);
+  useEffect(() => {
+    if (token) void syncLanguageFromServer();
+  }, [token]);
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -10,13 +10,15 @@ import { ApiError } from '../api/client';
 import { MetricCard } from '../components/MetricCard';
 import { Spinner } from '../components/Spinner';
 import { formatMoney } from '../utils/format';
+import { useTranslation } from '../i18n';
+import type { TranslationKey } from '../i18n/en';
 
 type StatusFilter = 'ALL' | 'PAID' | 'CANCELLED';
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: 'ALL', label: 'All' },
-  { value: 'PAID', label: 'Paid' },
-  { value: 'CANCELLED', label: 'Cancelled' },
+const STATUS_FILTERS: { value: StatusFilter; labelKey: TranslationKey }[] = [
+  { value: 'ALL', labelKey: 'history.filterAll' },
+  { value: 'PAID', labelKey: 'history.filterPaid' },
+  { value: 'CANCELLED', labelKey: 'history.filterCancelled' },
 ];
 
 // Default to today (local-time start of day → end of day). The backend
@@ -404,7 +406,10 @@ function formatHistoryDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function summarizePayments(order: ActiveOrder): { label: string; tag: string } {
+function summarizePayments(
+  order: ActiveOrder,
+  t: (key: string) => string,
+): { label: string; tag: string } {
   if (order.status === 'CANCELLED' || order.payments.length === 0) {
     return { label: '—', tag: '—' };
   }
@@ -412,16 +417,16 @@ function summarizePayments(order: ActiveOrder): { label: string; tag: string } {
   if (methods.length === 1) {
     const m = methods[0];
     return {
-      label: m === 'CASH' ? 'Cash' : m === 'CARD' ? 'Card' : 'Transfer',
+      label: m === 'CASH' ? t('payment.cash') : m === 'CARD' ? t('payment.card') : t('payment.transfer'),
       tag: m,
     };
   }
-  return { label: 'Split', tag: 'split' };
+  return { label: t('history.split'), tag: 'split' };
 }
 
-function tableLabel(order: ActiveOrder): string {
-  if (order.order_type === 'TAKEOUT') return `Takeout`;
-  if (order.table) return `Table ${order.table.number}`;
+function tableLabel(order: ActiveOrder, t: (key: string) => string): string {
+  if (order.order_type === 'TAKEOUT') return t('detail.takeoutLabel');
+  if (order.table) return `${t('detail.tableLabel')} ${order.table.number}`;
   return '—';
 }
 
@@ -438,6 +443,7 @@ function matchesSearch(order: ActiveOrder, query: string): boolean {
 }
 
 export function OrderHistory() {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [from, setFrom] = useState<Date>(startOfToday());
   const [to, setTo] = useState<Date>(endOfToday());
@@ -525,17 +531,17 @@ export function OrderHistory() {
       const today = startOfToday();
       const isToday = today.getTime() === from.getTime();
       return isToday
-        ? "Today's settled orders"
-        : from.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        ? t('history.subtitle')
+        : from.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
     }
     return `${formatHistoryDate(from.toISOString())} – ${formatHistoryDate(to.toISOString())}`;
-  }, [from, to]);
+  }, [from, to, t]);
 
   return (
     <div style={styles.root}>
       <header style={styles.head}>
         <div style={styles.titleBlock}>
-          <h1 style={styles.title}>Order History</h1>
+          <h1 style={styles.title}>{t('history.title')}</h1>
           <div style={styles.sub}>{subtitle}</div>
         </div>
       </header>
@@ -545,13 +551,13 @@ export function OrderHistory() {
           <span style={{ color: 'var(--text3)', fontSize: 14 }}>⌕</span>
           <input
             style={styles.searchInput}
-            placeholder="Search by order #, waiter, table"
+            placeholder={t('history.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <div style={styles.dateGroup}>
-          <span style={styles.dateLabel}>From</span>
+          <span style={styles.dateLabel}>{t('history.from')}</span>
           <input
             type="date"
             style={styles.dateInput}
@@ -564,7 +570,7 @@ export function OrderHistory() {
           />
         </div>
         <div style={styles.dateGroup}>
-          <span style={styles.dateLabel}>To</span>
+          <span style={styles.dateLabel}>{t('history.to')}</span>
           <input
             type="date"
             style={styles.dateInput}
@@ -584,7 +590,7 @@ export function OrderHistory() {
               style={pillStyle(statusFilter === f.value)}
               onClick={() => setStatusFilter(f.value)}
             >
-              {f.label}
+              {t(f.labelKey)}
             </button>
           ))}
         </div>
@@ -592,15 +598,15 @@ export function OrderHistory() {
 
       <div style={styles.body}>
         <div style={styles.metrics}>
-          <MetricCard label="Orders" value={summary.total.toString()} />
-          <MetricCard label="Revenue" value={formatMoney(String(summary.revenue))} />
+          <MetricCard label={t('history.metricsOrders')} value={summary.total.toString()} />
+          <MetricCard label={t('history.metricsRevenue')} value={formatMoney(String(summary.revenue))} />
           <MetricCard
-            label="Avg Ticket"
+            label={t('history.metricsAvgTicket')}
             value={summary.paidCount > 0 ? formatMoney(String(summary.avg)) : '—'}
-            hint={summary.paidCount > 0 ? `${summary.paidCount} paid` : undefined}
+            hint={summary.paidCount > 0 ? `${summary.paidCount} ${t('payment.paid').toLowerCase()}` : undefined}
           />
           <MetricCard
-            label="Cancelled"
+            label={t('history.metricsCancelled')}
             value={summary.cancelledCount.toString()}
             tone={summary.cancelledCount > 0 ? 'red' : 'default'}
           />
@@ -609,20 +615,20 @@ export function OrderHistory() {
         {isLoading && (
           <div style={styles.loadingState}>
             <Spinner size={26} />
-            <div>Loading order history…</div>
+            <div>{t('common.loading')}…</div>
           </div>
         )}
 
         {!isLoading && error && (
           <div style={styles.errorState}>
-            {error instanceof ApiError ? error.message : 'Failed to load orders'}
+            {error instanceof ApiError ? error.message : t('orders.failedLoad')}
             <div style={{ marginTop: 12 }}>
               <button
                 type="button"
                 style={styles.loadMore}
                 onClick={() => refetch()}
               >
-                Retry
+                {t('common.retry')}
               </button>
             </div>
           </div>
@@ -631,28 +637,26 @@ export function OrderHistory() {
         {!isLoading && !error && (
           <div style={styles.table}>
             <div style={styles.th}>
-              <span>Order #</span>
-              <span>Time</span>
-              <span>Table</span>
-              <span style={styles.cellNum}>Items</span>
-              <span>Waiter</span>
-              <span>Payment</span>
-              <span style={styles.cellNum}>Total</span>
-              <span>Status</span>
+              <span>{t('history.colOrder')} #</span>
+              <span>{t('history.colTime')}</span>
+              <span>{t('history.colTable')}</span>
+              <span style={styles.cellNum}>{t('history.colItems')}</span>
+              <span>{t('history.colWaiter')}</span>
+              <span>{t('history.colPayment')}</span>
+              <span style={styles.cellNum}>{t('history.colTotal')}</span>
+              <span>{t('history.colStatus')}</span>
               <span />
             </div>
 
             {visible.length === 0 && (
               <div style={styles.empty}>
-                {orders.length === 0
-                  ? 'No orders in this date range yet.'
-                  : 'No orders match your search.'}
+                {t('history.empty')}
               </div>
             )}
 
             {visible.map((order, idx) => {
               const isOpen = expanded === order.id;
-              const pay = summarizePayments(order);
+              const pay = summarizePayments(order, t);
               const itemCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
               const rowBg =
                 idx % 2 === 0 ? 'transparent' : 'rgba(168,152,136,0.04)';
@@ -672,7 +676,7 @@ export function OrderHistory() {
                   >
                     <span style={styles.cellOrderNum}>#{order.order_number}</span>
                     <span style={styles.cellMuted}>{formatHistoryTime(order.created_at)}</span>
-                    <span>{tableLabel(order)}</span>
+                    <span>{tableLabel(order, t)}</span>
                     <span style={{ ...styles.cellNum, ...styles.cellMuted }}>{itemCount}</span>
                     <span style={styles.cellMuted}>{order.user.name}</span>
                     <span style={styles.cellMuted}>{pay.label}</span>
@@ -704,7 +708,7 @@ export function OrderHistory() {
             disabled={isFetchingNextPage}
           >
             {isFetchingNextPage ? <Spinner size={14} /> : null}
-            {isFetchingNextPage ? 'Loading…' : 'Load more orders'}
+            {isFetchingNextPage ? `${t('common.loading')}…` : t('history.loadMore')}
           </button>
         )}
       </div>
@@ -713,16 +717,17 @@ export function OrderHistory() {
 }
 
 function ExpandedOrder({ order }: { order: ActiveOrder }) {
+  const { t } = useTranslation();
   const items: ActiveOrderItem[] = order.items;
 
   return (
     <div style={styles.expandedBody}>
       <div style={styles.expandedGrid}>
         <div style={styles.expandedSection}>
-          <div style={styles.expandedHd}>Items ({items.length})</div>
+          <div style={styles.expandedHd}>{t('orders.itemsLabel')} ({items.length})</div>
           {items.length === 0 ? (
             <div style={{ padding: 18, color: 'var(--text3)', fontSize: 13, fontStyle: 'italic' }}>
-              No items recorded.
+              {t('orders.noItemsAdded')}
             </div>
           ) : (
             items.map((item) => (
@@ -738,39 +743,39 @@ function ExpandedOrder({ order }: { order: ActiveOrder }) {
                       {item.modifiers.map((m) => m.name).join(' · ')}
                     </div>
                   )}
-                  {item.notes && <div style={styles.itemNote}>Note: {item.notes}</div>}
+                  {item.notes && <div style={styles.itemNote}>{t('orders.note')}: {item.notes}</div>}
                 </div>
                 <span style={styles.itemPrice}>{formatMoney(item.line_total)}</span>
               </div>
             ))
           )}
-          {order.notes && <div style={styles.noteBlock}>Order notes: {order.notes}</div>}
+          {order.notes && <div style={styles.noteBlock}>{t('orders.notes')}: {order.notes}</div>}
         </div>
 
         <div>
           <div style={styles.expandedSection}>
-            <div style={styles.expandedHd}>Totals</div>
+            <div style={styles.expandedHd}>{t('history.totals')}</div>
             <div style={styles.totalsBlock}>
-              <span>Subtotal</span>
+              <span>{t('payment.subtotal')}</span>
               <span style={styles.totalsAmt}>{formatMoney(order.subtotal)}</span>
-              <span>Tax</span>
+              <span>{t('payment.tax')}</span>
               <span style={styles.totalsAmt}>{formatMoney(order.tax_amount)}</span>
               {Number(order.discount_amount) > 0 && (
                 <>
-                  <span>Discount</span>
+                  <span>{t('detail.discount')}</span>
                   <span style={{ ...styles.totalsAmt, color: 'var(--red)' }}>
                     – {formatMoney(order.discount_amount)}
                   </span>
                 </>
               )}
-              <span style={styles.grandLabel}>Total</span>
+              <span style={styles.grandLabel}>{t('payment.total')}</span>
               <span style={styles.grandAmt}>{formatMoney(order.total)}</span>
             </div>
           </div>
 
           <div style={{ ...styles.expandedSection, marginTop: 14 }}>
             <div style={styles.expandedHd}>
-              Payments ({order.payments.length})
+              {t('history.colPayment')} ({order.payments.length})
             </div>
             {order.payments.length === 0 ? (
               <div
@@ -781,13 +786,13 @@ function ExpandedOrder({ order }: { order: ActiveOrder }) {
                   fontStyle: 'italic',
                 }}
               >
-                {order.status === 'CANCELLED' ? 'Order cancelled.' : 'No payments yet.'}
+                {order.status === 'CANCELLED' ? t('history.orderCancelled') : t('history.noPayments')}
               </div>
             ) : (
               order.payments.map((p) => (
                 <div key={p.id} style={styles.paymentRow}>
                   <span style={{ color: 'var(--text2)' }}>
-                    {p.method === 'CASH' ? 'Cash' : p.method === 'CARD' ? 'Card' : 'Transfer'}
+                    {p.method === 'CASH' ? t('payment.cash') : p.method === 'CARD' ? t('payment.card') : t('payment.transfer')}
                   </span>
                   <span
                     style={{

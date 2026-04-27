@@ -4,8 +4,10 @@ import { useAuthStore } from '../../store/auth';
 import { useUiStore } from '../../store/ui';
 import { useCurrentUserRegister } from '../../hooks/useRegisters';
 import { initials } from '../../utils/format';
+import { useTranslation } from '../../i18n';
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const { pathname } = useLocation();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -13,15 +15,15 @@ export function Sidebar() {
   const toggleGroup = useUiStore((s) => s.toggleGroup);
   const currentShiftQ = useCurrentUserRegister(user?.id);
 
-  const userName = user?.name ?? 'Administrator';
+  const userName = user?.name ?? t('auth.administrator');
   const userRole = user?.role ?? 'ADMIN';
-  const shiftLabel = currentShiftQ.data ? 'Shift active' : 'No open shift';
+  const shiftLabel = currentShiftQ.data ? t('auth.shiftActive') : t('auth.noShift');
 
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="name">Restaurant POS</div>
-        <div className="sub">ADMIN PANEL</div>
+        <div className="name">{t('nav.brand')}</div>
+        <div className="sub">{t('auth.adminPanel').toUpperCase()}</div>
       </div>
 
       <nav className="nav">
@@ -35,7 +37,7 @@ export function Sidebar() {
                 className={({ isActive }) => `nav-single${isActive ? ' active' : ''}`}
               >
                 <span>{entry.icon}</span>
-                {entry.label}
+                {t(entry.labelKey)}
               </NavLink>
             );
           }
@@ -54,7 +56,7 @@ export function Sidebar() {
                 onClick={() => toggleGroup(entry.id)}
               >
                 <span className="label">
-                  {entry.icon} {entry.label}
+                  {entry.icon} {t(entry.labelKey)}
                 </span>
                 <span className="arrow">▶</span>
               </button>
@@ -68,7 +70,7 @@ export function Sidebar() {
                       `nav-item${isActive ? ' active' : ''}`
                     }
                   >
-                    {item.label}
+                    {t(item.labelKey)}
                   </NavLink>
                 ))}
 
@@ -82,14 +84,14 @@ export function Sidebar() {
         <div className="avatar">{initials(userName)}</div>
         <div className="user-info">
           <div className="user-name">{userName}</div>
-          <div className="user-role">{roleLabel(userRole)} · {shiftLabel}</div>
+          <div className="user-role">{roleLabel(userRole, t)} · {shiftLabel}</div>
         </div>
         <button
           type="button"
           className="logout-btn"
           onClick={logout}
-          title="Sign out"
-          aria-label="Sign out"
+          title={t('common.signOut')}
+          aria-label={t('common.signOut')}
         >
           ⇥
         </button>
@@ -98,12 +100,13 @@ export function Sidebar() {
   );
 }
 
-function roleLabel(role: string): string {
+function roleLabel(role: string, t: (key: string) => string): string {
   switch (role) {
-    case 'ADMIN':   return 'Administrator';
-    case 'MANAGER': return 'Manager';
-    case 'CASHIER': return 'Cashier';
-    case 'BARISTA': return 'Barista';
+    case 'ADMIN':   return t('role.admin');
+    case 'MANAGER': return t('role.manager');
+    case 'CASHIER': return t('role.cashier');
+    case 'BARISTA': return t('role.barista');
+    case 'WAITER':  return t('role.waiter');
     default:        return role;
   }
 }

@@ -6,8 +6,10 @@ import { SearchInput } from '../../components/forms/SearchInput';
 import { useModifierGroups } from '../../hooks/useModifierGroups';
 import type { ModifierGroup } from '../../types/menu';
 import { ModifierGroupFormModal } from './ModifierGroupFormModal';
+import { useTranslation } from '../../i18n';
 
 export function ModifierGroupsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -27,14 +29,14 @@ export function ModifierGroupsPage() {
   const columns: TableColumn<ModifierGroup>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('modifierGroups.colName'),
       width: '1.8fr',
       render: (g) => (
         <div>
           <div className="fw-600 fs-13">{g.name}</div>
           {g.required && (
             <div className="fs-11 mt-4">
-              <Badge tone="gold">Required</Badge>
+              <Badge tone="gold">{t('modifierGroups.required')}</Badge>
             </div>
           )}
         </div>
@@ -42,7 +44,7 @@ export function ModifierGroupsPage() {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '90px',
       render: (g) =>
         g.type === 'SWAP' ? (
@@ -53,7 +55,7 @@ export function ModifierGroupsPage() {
     },
     {
       key: 'default',
-      header: 'Default',
+      header: t('common.none'),
       width: '1.5fr',
       render: (g) => {
         if (g.type !== 'SWAP') return <span className="fs-12 text-muted">—</span>;
@@ -65,7 +67,7 @@ export function ModifierGroupsPage() {
     },
     {
       key: 'selection',
-      header: 'Min / Max',
+      header: `${t('modifierGroups.colMin')} / ${t('modifierGroups.colMax')}`,
       width: '120px',
       render: (g) => (
         <span className="fs-12">
@@ -75,7 +77,7 @@ export function ModifierGroupsPage() {
     },
     {
       key: 'modifiers',
-      header: 'Modifiers',
+      header: t('modifierGroups.modifiers'),
       width: '110px',
       render: (g) => (
         <span className="fs-13">{g.modifiers?.length ?? 0}</span>
@@ -83,7 +85,7 @@ export function ModifierGroupsPage() {
     },
     {
       key: 'linked',
-      header: 'Linked products',
+      header: t('nav.products'),
       width: '140px',
       render: (g) => (
         <span className="fs-13">{g._count?.product_links ?? 0}</span>
@@ -97,11 +99,11 @@ export function ModifierGroupsPage() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search modifier groups…"
+          placeholder={t('common.search')}
         />
 
         <Button variant="primary" onClick={() => setModalOpen(true)}>
-          + New group
+          + {t('modifierGroups.newGroup')}
         </Button>
       </div>
 
@@ -112,11 +114,11 @@ export function ModifierGroupsPage() {
         onRowClick={(g) => navigate(`/menu/modifier-groups/${g.id}`)}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage="No modifier groups yet"
-        emptySub="Create a group (e.g. Milk Type, Extras) to offer customizable items."
+        emptyMessage={t('modifierGroups.empty')}
+        emptySub={t('modifierGroups.subtitle')}
         emptyAction={
           <Button variant="primary" onClick={() => setModalOpen(true)}>
-            + New group
+            + {t('modifierGroups.newGroup')}
           </Button>
         }
       />

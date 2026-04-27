@@ -24,9 +24,19 @@ export const SETTING_KEYS = {
   PRINTER_PAPER_WIDTH: 'printer_paper_width',
   BUSINESS_NAME: 'business_name',
   BUSINESS_ADDRESS: 'business_address',
+  LANGUAGE: 'language',
 } as const;
 
 export const PRINTER_DEFAULTS = {
   PORT: '9100',
   PAPER_WIDTH: '80',
 } as const;
+
+export const LANGUAGE_DEFAULT = 'en';
+export const LANGUAGE_VALUES = ['en', 'es'] as const;
+export type LanguageCode = (typeof LANGUAGE_VALUES)[number];
+
+export const updateLanguageSchema = z.object({
+  value: z.enum(LANGUAGE_VALUES),
+});
+export type UpdateLanguageInput = z.infer<typeof updateLanguageSchema>;

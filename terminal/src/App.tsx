@@ -15,6 +15,7 @@ import { usePreferences } from './store/preferences';
 import { fetchMe } from './api/auth';
 import { useAutoLock } from './hooks/useAutoLock';
 import { useNetworkSync } from './hooks/useNetworkSync';
+import { syncLanguageFromServer } from './i18n';
 
 // Use 100% (not 100vw/100vh) so the shell tracks #root's size — important on
 // terminal-mobile, where mobile.css transforms #root and counter-sizes its
@@ -86,6 +87,13 @@ export function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(uiScale));
   }, [uiScale]);
+
+  // Pull the operator's preferred language from the backend once we have a
+  // token. The local persisted value is used until this resolves, so the PIN
+  // screen renders in the device's last-known language without a flash.
+  useEffect(() => {
+    if (token && user) void syncLanguageFromServer();
+  }, [token, user]);
 
   if (!authed) {
     return (

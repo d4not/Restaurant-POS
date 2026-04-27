@@ -20,20 +20,22 @@ import { ApiError } from '../api/client';
 import { createOrder, fetchOrder, type TakeoutChannel } from '../api/orders';
 import { fetchOpenRegister } from '../api/registers';
 import { fetchSettings } from '../api/settings';
-import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
+import { useTakeoutChannelLabel } from './TakeoutChannelPicker';
 import { TakeoutChannelPicker } from './TakeoutChannelPicker';
 import { IconChevronLeft } from './Icons';
+import { useTranslation } from '../i18n';
+import type { TranslationKey } from '../i18n/en';
 
 interface NavTab {
   view: TerminalView;
-  label: string;
+  labelKey: TranslationKey;
   icon: typeof IconGrid;
 }
 
 const TABS: NavTab[] = [
-  { view: 'orders', label: 'Active Orders', icon: IconList },
-  { view: 'floor', label: 'Floor Plan', icon: IconGrid },
-  { view: 'history', label: 'Order History', icon: IconClock },
+  { view: 'orders', labelKey: 'nav.activeOrders', icon: IconList },
+  { view: 'floor', labelKey: 'nav.floorPlan', icon: IconGrid },
+  { view: 'history', labelKey: 'nav.orderHistory', icon: IconClock },
 ];
 
 const styles: Record<string, React.CSSProperties> = {
@@ -316,6 +318,8 @@ const navBtnStyle = (active: boolean): React.CSSProperties => ({
 const HISTORY_ROLES: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
 
 export function TopBar() {
+  const { t } = useTranslation();
+  const channelLabel = useTakeoutChannelLabel();
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
   const menuOpen = useUi((s) => s.menuOpen);
@@ -377,16 +381,16 @@ export function TopBar() {
   });
   const detailOrder = detailOrderQuery.data ?? null;
   const detailTitle = detailOrder
-    ? `Order #${detailOrder.order_number}`
-    : 'Order';
+    ? `${t('detail.orderNumber')}${detailOrder.order_number}`
+    : t('detail.orderNumber').replace('#', '').trim() || 'Order';
   const detailSub = detailOrder
     ? detailOrder.order_type === 'TAKEOUT'
       ? detailOrder.takeout_channel
-        ? TAKEOUT_CHANNEL_LABEL[detailOrder.takeout_channel]
-        : 'Takeout'
+        ? channelLabel(detailOrder.takeout_channel)
+        : t('detail.takeoutLabel')
       : detailOrder.table
-        ? `Table ${detailOrder.table.number} · ${detailOrder.table.zone.name}`
-        : 'Open ticket'
+        ? `${t('detail.tableLabel')} ${detailOrder.table.number} · ${detailOrder.table.zone.name}`
+        : t('history.statusOpen')
     : '';
 
   const takeoutMutation = useMutation({
@@ -394,10 +398,7 @@ export function TopBar() {
       const reg = registerQuery.data;
       if (!reg) {
         return Promise.reject(
-          new ApiError(
-            'No open shift — tap the shift pill to open one.',
-            409,
-          ),
+          new ApiError(t('takeout.noShift'), 409),
         );
       }
       return createOrder({
@@ -413,7 +414,7 @@ export function TopBar() {
       openOrderDetail(order.id);
     },
     onError: (err) => {
-      setTakeoutError(err instanceof ApiError ? err.message : 'Could not start takeout order');
+      setTakeoutError(err instanceof ApiError ? err.message : t('error.somethingWrong'));
     },
   });
 
@@ -438,7 +439,7 @@ export function TopBar() {
       setView('history');
     } catch (e) {
       setHistoryPinError(
-        e instanceof ApiError ? e.message : 'Could not verify PIN',
+        e instanceof ApiError ? e.message : t('pin.invalid'),
       );
     } finally {
       setHistoryPinBusy(false);
@@ -473,10 +474,10 @@ export function TopBar() {
             type="button"
             style={styles.detailBackBtn}
             onClick={closeOrderDetail}
-            aria-label="Back to orders"
+            aria-label={t('common.back')}
           >
             <IconChevronLeft style={{ fontSize: 18 }} />
-            <span>Back</span>
+            <span>{t('common.back')}</span>
           </button>
         </div>
       ) : (
@@ -500,10 +501,10 @@ export function TopBar() {
               setPickerOpen(true);
             }}
             disabled={takeoutMutation.isPending}
-            title="Open a takeout or delivery order"
+            title={t('takeout.newTakeout')}
           >
             <IconPlus />
-            <span className="topbar-takeout-label">{takeoutMutation.isPending ? 'Opening…' : 'Takeout/Delivery Order'}</span>
+            <span className="topbar-takeout-label">{takeoutMutation.isPending ? `${t('common.loading')}…` : t('takeout.newTakeout')}</span>
           </button>
           {takeoutError && !pickerOpen && (
             <span style={styles.newOrderError}>{takeoutError}</span>
@@ -529,7 +530,7 @@ export function TopBar() {
                 onClick={() => handleTabClick(tab)}
               >
                 <Icon style={{ fontSize: 18 }} />
-                <span>{tab.label}</span>
+                <span>{t(tab.labelKey)}</span>
               </button>
             );
           })}
@@ -548,7 +549,7 @@ export function TopBar() {
             {user ? getInitials(user.name) : '·'}
           </div>
           <div className="topbar-user-text" style={styles.userText}>
-            <span style={styles.userName}>{user?.name ?? 'Signed out'}</span>
+            <span style={styles.userName}>{user?.name ?? t('nav.signOut')}</span>
             <span style={styles.userMeta}>{user?.role ?? '—'}</span>
           </div>
         </div>
@@ -557,7 +558,7 @@ export function TopBar() {
           type="button"
           style={styles.hamburger}
           onClick={toggleMenu}
-          aria-label="Open menu"
+          aria-label={t('nav.menu')}
         >
           <IconMenu />
         </button>
@@ -579,9 +580,9 @@ export function TopBar() {
 
       {historyPinOpen && (
         <PinConfirmModal
-          title="Open Order History"
-          message="Enter your PIN to access the day's settled tickets."
-          confirmLabel="Unlock"
+          title={t('nav.orderHistory')}
+          message={t('pin.selfSub')}
+          confirmLabel={t('common.confirm')}
           busy={historyPinBusy}
           error={historyPinError}
           onClose={() => setHistoryPinOpen(false)}
@@ -593,10 +594,10 @@ export function TopBar() {
         <>
           <div style={styles.scrim} onClick={closeMenu} />
           <div ref={drawerRef} style={styles.drawer} role="menu">
-            <div style={styles.drawerSection}>Account</div>
+            <div style={styles.drawerSection}>{t('login.signedInAs')}</div>
             <button type="button" style={styles.drawerItem} onClick={openSettings}>
               <IconSettings />
-              <span>Settings</span>
+              <span>{t('nav.settings')}</span>
             </button>
             <button
               type="button"
@@ -607,7 +608,7 @@ export function TopBar() {
               }}
             >
               <IconLock />
-              <span>Lock Screen</span>
+              <span>{t('nav.lockScreen')}</span>
             </button>
             <div style={styles.drawerDivider} />
             <button
@@ -619,7 +620,7 @@ export function TopBar() {
               }}
             >
               <IconSignOut />
-              <span>Sign Out</span>
+              <span>{t('nav.signOut')}</span>
             </button>
           </div>
         </>

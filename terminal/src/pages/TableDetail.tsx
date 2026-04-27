@@ -46,6 +46,7 @@ import {
   formatMoneyPlain,
   minutesSince,
 } from '../utils/format';
+import { useTranslation } from '../i18n';
 
 const ALL_CATEGORIES = '__all__';
 
@@ -995,6 +996,7 @@ type PinPromptAction =
 const ROLES_THAT_PAY: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
 
 export function TableDetail() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const orderId = useUi((s) => s.detailOrderId);
   const closeDetail = useUi((s) => s.closeOrderDetail);
@@ -1474,13 +1476,13 @@ export function TableDetail() {
       return;
     }
     const ok = await confirmDialog({
-      title: `Cancel ${tableLabel}?`,
+      title: `${t('orders.cancelTitle')} ${tableLabel}`,
       message:
         order.items.length === 0
-          ? 'The empty ticket will be voided and the table released.'
-          : 'No items have been sent to the kitchen yet, so this can be cancelled freely. Continue?',
-      confirmLabel: 'Cancel order',
-      cancelLabel: 'Keep order',
+          ? t('orders.cancelEmptyMsg')
+          : t('orders.cancelUnsentMsg'),
+      confirmLabel: t('cancel.confirmButton'),
+      cancelLabel: t('cancel.keepOrder'),
       danger: true,
     });
     if (ok) cancelMutation.mutate({ reason: '', pin: '' });
@@ -1541,9 +1543,9 @@ export function TableDetail() {
     if (!order) return;
     if (order.discount_amount && Number(order.discount_amount) > 0) {
       const ok = await confirmDialog({
-        title: 'Remove discount?',
+        title: t('detail.removeDiscountQ'),
         message: `The current discount of ${formatMoney(order.discount_amount)} will be cleared.`,
-        confirmLabel: 'Remove discount',
+        confirmLabel: t('detail.removeDiscount'),
       });
       if (ok) discountMutation.mutate({ amount: 0, reason: null });
       return;
@@ -1708,13 +1710,15 @@ export function TableDetail() {
         {/* ───────── RIGHT: ticket sidebar ───────── */}
         <section style={styles.ticketCol}>
           <div style={styles.ticketHead}>
-            <h2 style={styles.ticketTitle}>Current Ticket</h2>
+            <h2 style={styles.ticketTitle}>{t('detail.currentTicket')}</h2>
             <div style={styles.ticketSub}>
               {itemCount === 0
-                ? `Empty · ${elapsed} elapsed`
-                : `${itemCount} item${itemCount === 1 ? '' : 's'} · ${elapsed} elapsed · ${
-                    hasUnsent ? 'unsent items' : 'all sent'
-                  }`}
+                ? t('detail.empty.elapsed').replace('{elapsed}', elapsed)
+                : t('detail.summary')
+                    .replace('{n}', String(itemCount))
+                    .replace('{s}', itemCount === 1 ? '' : 's')
+                    .replace('{elapsed}', elapsed)
+                    .replace('{state}', hasUnsent ? t('detail.unsentItems') : t('detail.allSent'))}
             </div>
           </div>
 
@@ -1729,9 +1733,9 @@ export function TableDetail() {
 
           {order.items.length > 0 && (
             <div style={styles.ticketColHeader}>
-              <span>Item</span>
-              <span style={styles.ticketColHeaderCenter}>Qty</span>
-              <span style={styles.ticketColHeaderRight}>Total</span>
+              <span>{t('detail.colItem')}</span>
+              <span style={styles.ticketColHeaderCenter}>{t('detail.colQty')}</span>
+              <span style={styles.ticketColHeaderRight}>{t('detail.colTotal')}</span>
               <span />
             </div>
           )}
@@ -1739,7 +1743,7 @@ export function TableDetail() {
           <div style={styles.ticketBody}>
             {order.items.length === 0 ? (
               <div style={styles.emptyTicket}>
-                Tap a product to start the ticket.
+                {t('detail.tapStart')}
               </div>
             ) : (
               ticketBuckets.map((it) => {
@@ -1765,7 +1769,7 @@ export function TableDetail() {
                     onClick={editable ? () => handleTicketRowTap(it.raw) : undefined}
                     role={editable ? 'button' : undefined}
                     aria-label={
-                      editable ? `Edit ${it.raw.product.name}` : undefined
+                      editable ? `${t('detail.editItem')} ${it.raw.product.name}` : undefined
                     }
                   >
                     {/* Name + (variant) on line 1; modifiers indented on a
@@ -1776,7 +1780,7 @@ export function TableDetail() {
                         {it.raw.variant && ` · ${it.raw.variant.name}`}
                         {it.isVoided && (
                           <span style={{ marginLeft: 6, color: 'var(--red)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em' }}>
-                            REMOVED
+                            {t('detail.removed')}
                           </span>
                         )}
                       </span>
@@ -1787,12 +1791,12 @@ export function TableDetail() {
                       )}
                       {it.raw.notes && (
                         <span style={{ ...styles.itemNoteLine, ...voidedText }}>
-                          Note: {it.raw.notes}
+                          {t('detail.note')}: {it.raw.notes}
                         </span>
                       )}
                       {it.isVoided && it.raw.void_reason && (
                         <span style={{ ...styles.itemNoteLine, color: 'var(--red)' }}>
-                          Reason: {it.raw.void_reason}
+                          {t('detail.reason')}: {it.raw.void_reason}
                         </span>
                       )}
                     </div>
@@ -1806,7 +1810,7 @@ export function TableDetail() {
                           style={styles.qtyStepperBtn}
                           onClick={() => handleStepQty(it.raw, -1)}
                           disabled={updateItemMutation.isPending}
-                          aria-label="Decrease quantity"
+                          aria-label={t('detail.decreaseQty')}
                         >
                           −
                         </button>
@@ -1816,7 +1820,7 @@ export function TableDetail() {
                           style={styles.qtyStepperBtn}
                           onClick={() => handleStepQty(it.raw, 1)}
                           disabled={updateItemMutation.isPending}
-                          aria-label="Increase quantity"
+                          aria-label={t('detail.increaseQty')}
                         >
                           +
                         </button>
@@ -1840,8 +1844,8 @@ export function TableDetail() {
                           handleRestoreItem(it.raw);
                         }}
                         disabled={restoreItemMutation.isPending}
-                        aria-label="Restore item"
-                        title="Restore"
+                        aria-label={t('detail.restoreItem')}
+                        title={t('detail.restore')}
                       >
                         ↺
                       </button>
@@ -1856,14 +1860,14 @@ export function TableDetail() {
                             return;
                           }
                           const ok = await confirmDialog({
-                            title: 'Remove item?',
+                            title: t('detail.removeQ'),
                             message: `${it.raw.product.name} will be removed from the ticket.`,
                             confirmLabel: 'Remove',
                             danger: true,
                           });
                           if (ok) handleRemoveItem(it.raw);
                         }}
-                        aria-label="Remove item"
+                        aria-label={t('detail.removeAria')}
                       >
                         <IconClose style={{ fontSize: 13 }} />
                       </button>
@@ -1955,7 +1959,7 @@ export function TableDetail() {
                   type="button"
                   style={styles.smallActionBtn}
                   onClick={() => setMoreOpen((v) => !v)}
-                  aria-label="More actions"
+                  aria-label={t('detail.moreActions')}
                   aria-expanded={moreOpen}
                 >
                   <IconMore style={{ fontSize: 20 }} />
@@ -1966,8 +1970,8 @@ export function TableDetail() {
                 style={styles.smallActionBtn}
                 onClick={handlePrintReceipt}
                 disabled={printingReceipt || order.items.length === 0}
-                aria-label="Print ticket"
-                title="Print ticket"
+                aria-label={t('detail.printTicket')}
+                title={t('detail.printTicket')}
               >
                 {printingReceipt ? (
                   <Spinner size={14} />
@@ -2071,7 +2075,7 @@ export function TableDetail() {
               <span style={{ color: 'var(--text3)', fontSize: 13 }}>⌕</span>
               <input
                 style={styles.menuSearchInput}
-                placeholder="Search products"
+                placeholder={t('detail.searchProductsPh')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -2246,7 +2250,7 @@ export function TableDetail() {
                 ‹ Back
               </button>
               <div style={styles.hTitleBlock}>
-                <h2 style={styles.hTitle}>{paidOrder ? 'Order paid' : 'Payment'}</h2>
+                <h2 style={styles.hTitle}>{paidOrder ? t('detail.orderPaid') : t('payment.title')}</h2>
                 <div style={styles.hMeta}>
                   <span>{tableLabel}</span>
                   <span style={styles.metaSep} />
@@ -2330,7 +2334,7 @@ export function TableDetail() {
                     maxLength={6}
                     value={cashierPin}
                     onChange={(e) => setCashierPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Cashier PIN"
+                    placeholder={t('detail.cashierPin')}
                     style={{
                       width: '100%',
                       minHeight: 'var(--tap-lg)',
@@ -2411,7 +2415,7 @@ export function TableDetail() {
                             cursor: 'pointer',
                           }}
                           onClick={() => removeSplit(p.id)}
-                          aria-label="Remove split"
+                          aria-label={t('detail.removeSplit')}
                         >
                           ✕
                         </button>
@@ -2464,7 +2468,7 @@ export function TableDetail() {
                     <input
                       inputMode="decimal"
                       style={styles.amountInput}
-                      placeholder={`Amount · ${formatMoney(String(remaining - stagedPaid))}`}
+                      placeholder={t('detail.amountFmt').replace('{amount}', formatMoney(String(remaining - stagedPaid)))}
                       value={amountInput}
                       onChange={(e) => setAmountInput(e.target.value)}
                       disabled={!splitMode}
@@ -2472,7 +2476,7 @@ export function TableDetail() {
                     <div style={styles.refRow}>
                       <input
                         style={styles.refInput}
-                        placeholder="Reference (optional)"
+                        placeholder={t('detail.referenceOptional')}
                         value={reference}
                         onChange={(e) => setReference(e.target.value)}
                       />

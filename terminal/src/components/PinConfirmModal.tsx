@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { IconBackspace, IconClose, IconShield } from './Icons';
 import { Spinner } from './Spinner';
+import { useTranslation } from '../i18n';
 
 const PIN_MIN_LENGTH = 4;
 
@@ -184,13 +185,15 @@ const styles: Record<string, React.CSSProperties> = {
 export function PinConfirmModal({
   title,
   message,
-  confirmLabel = 'Confirm',
+  confirmLabel,
   busy,
   error,
   onClose,
   onConfirm,
 }: PinConfirmModalProps) {
+  const { t } = useTranslation();
   const [pin, setPin] = useState('');
+  const resolvedConfirmLabel = confirmLabel ?? t('common.confirm');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -247,7 +250,7 @@ export function PinConfirmModal({
             style={styles.closeBtn}
             onClick={onClose}
             disabled={busy}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <IconClose style={{ fontSize: 14 }} />
           </button>
@@ -277,7 +280,7 @@ export function PinConfirmModal({
               onClick={() => setPin('')}
               disabled={busy}
             >
-              Clear
+              {t('login.clear')}
             </button>
             <button
               type="button"
@@ -292,7 +295,7 @@ export function PinConfirmModal({
               style={styles.numKeyMuted}
               onClick={pressBackspace}
               disabled={busy}
-              aria-label="Backspace"
+              aria-label={t('login.backspace')}
             >
               <IconBackspace style={{ fontSize: 18 }} />
             </button>
@@ -308,7 +311,7 @@ export function PinConfirmModal({
             onClick={onClose}
             disabled={busy}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -317,7 +320,7 @@ export function PinConfirmModal({
             disabled={!canSubmit}
           >
             {busy ? <Spinner size={14} /> : <IconShield style={{ fontSize: 16 }} />}
-            {confirmLabel}
+            {resolvedConfirmLabel}
           </button>
         </div>
       </div>

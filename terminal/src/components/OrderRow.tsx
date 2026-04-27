@@ -21,7 +21,8 @@ import { PulsingDot, Spinner } from './Spinner';
 import { IconClose, IconPrinter } from './Icons';
 import { CancelOrderModal } from './CancelOrderModal';
 import { confirmDialog } from './ConfirmDialog';
-import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
+import { useTakeoutChannelLabel } from './TakeoutChannelPicker';
+import { useTranslation } from '../i18n';
 
 // Discount + cashier-only actions stay gated; cancel is open to everyone now
 // — the *backend* gate kicks in only when at least one line was sent to the
@@ -392,6 +393,8 @@ function totalQty(items: ActiveOrderItem[]): number {
 }
 
 export function OrderRow({ order }: Props) {
+  const { t } = useTranslation();
+  const channelLabel = useTakeoutChannelLabel();
   const [expanded, setExpanded] = useState(false);
   const queryClient = useQueryClient();
   const openOrderDetail = useUi((s) => s.openOrderDetail);
@@ -408,21 +411,21 @@ export function OrderRow({ order }: Props) {
   const summary = itemSummary(order.items);
 
   const tableLabel = order.order_type === 'TAKEOUT'
-    ? `Takeout #${order.order_number}`
+    ? `${t('orders.takeoutHash')} #${order.order_number}`
     : order.table
-      ? `Table ${order.table.number}`
-      : `Order #${order.order_number}`;
+      ? `${t('orders.tablePrefix')} ${order.table.number}`
+      : `${t('detail.orderNumber')}${order.order_number}`;
 
   // Subtitle below "Takeout #N" — show the channel name (and customer when
   // we have one) so the cashier can pick the right ticket without expanding.
   const zoneLabel = (() => {
     if (order.order_type !== 'TAKEOUT') return order.table?.zone.name ?? '—';
-    const channelLabel = order.takeout_channel
-      ? TAKEOUT_CHANNEL_LABEL[order.takeout_channel]
-      : 'Takeout';
-    if (order.customer_name) return `${channelLabel} · ${order.customer_name}`;
-    if (order.delivery_app_order_id) return `${channelLabel} · ${order.delivery_app_order_id}`;
-    return channelLabel;
+    const label = order.takeout_channel
+      ? channelLabel(order.takeout_channel)
+      : t('detail.takeoutLabel');
+    if (order.customer_name) return `${label} · ${order.customer_name}`;
+    if (order.delivery_app_order_id) return `${label} · ${order.delivery_app_order_id}`;
+    return label;
   })();
 
   const sendKitchenMutation = useMutation({
@@ -442,9 +445,9 @@ export function OrderRow({ order }: Props) {
               order_number: result.order.order_number,
               table:
                 result.order.order_type === 'TAKEOUT'
-                  ? `Takeout #${result.order.order_number}`
+                  ? `${t('orders.takeoutHash')} #${result.order.order_number}`
                   : result.order.table
-                    ? `Table ${result.order.table.number}`
+                    ? `${t('orders.tablePrefix')} ${result.order.table.number}`
                     : null,
               waiter: result.order.user.name,
               printed_at: result.printed_at,
@@ -484,13 +487,13 @@ export function OrderRow({ order }: Props) {
 
   let statusEl: React.ReactNode;
   if (summary.total === 0) {
-    statusEl = <span style={statusBadgeStyle('pending')}>Empty</span>;
+    statusEl = <span style={statusBadgeStyle('pending')}>{t('orders.empty.short')}</span>;
   } else if (summary.allSent) {
-    statusEl = <span style={statusBadgeStyle('sent')}>Sent · {summary.total}/{summary.total}</span>;
+    statusEl = <span style={statusBadgeStyle('sent')}>{t('orders.statusSent')} · {summary.total}/{summary.total}</span>;
   } else if (summary.ready === 0) {
-    statusEl = <span style={statusBadgeStyle('pending')}>Waiting</span>;
+    statusEl = <span style={statusBadgeStyle('pending')}>{t('orders.waiting')}</span>;
   } else {
-    statusEl = <span style={statusBadgeStyle('sent')}>{summary.ready}/{summary.total} sent</span>;
+    statusEl = <span style={statusBadgeStyle('sent')}>{summary.ready}/{summary.total} {t('orders.sentCount')}</span>;
   }
 
   async function handleCancel() {
@@ -501,13 +504,13 @@ export function OrderRow({ order }: Props) {
       return;
     }
     const ok = await confirmDialog({
-      title: `Cancel ${tableLabel}?`,
+      title: `${t('orders.cancelTitle')} ${tableLabel}`,
       message:
         order.items.length === 0
-          ? 'The empty ticket will be voided and the table released.'
-          : 'No items have been sent to the kitchen yet, so this can be cancelled freely. Continue?',
-      confirmLabel: 'Cancel order',
-      cancelLabel: 'Keep order',
+          ? t('orders.cancelEmptyMsg')
+          : t('orders.cancelUnsentMsg'),
+      confirmLabel: t('cancel.confirmButton'),
+      cancelLabel: t('cancel.keepOrder'),
       danger: true,
     });
     if (ok) cancelMutation.mutate({});
@@ -537,7 +540,7 @@ export function OrderRow({ order }: Props) {
         </div>
 
         <div style={styles.itemsCol}>
-          {totalItems} item{totalItems === 1 ? '' : 's'}
+          {totalItems} {totalItems === 1 ? t('orders.itemCount') : t('orders.itemsCount')}
         </div>
 
         <div style={styles.totalCol}>{formatMoney(order.total)}</div>
@@ -551,10 +554,10 @@ export function OrderRow({ order }: Props) {
                 e.stopPropagation();
                 clearAttentionMutation.mutate();
               }}
-              title={order.attention_reason ?? 'Waiter requested help'}
+              title={order.attention_reason ?? t('orders.helpRequested')}
             >
               <PulsingDot color="var(--red)" size={8} />
-              Help
+              {t('orders.helpShort')}
             </span>
           )}
         </div>
@@ -565,12 +568,12 @@ export function OrderRow({ order }: Props) {
               summary.total === 0 ? 'empty' : summary.allSent ? 'pay' : 'send';
             const label =
               variant === 'empty'
-                ? 'Open Order'
+                ? t('orders.openOrder')
                 : variant === 'pay'
-                  ? 'Pay Order'
+                  ? t('orders.payOrder')
                   : sendKitchenMutation.isPending
-                    ? 'Sending…'
-                    : 'Send Order';
+                    ? t('orders.sending')
+                    : t('orders.sendOrder');
             // Send Order fires the kitchen mutation in place — no need to
             // detour through the order detail. Pay Order pops the payment
             // modal directly. Empty orders still need the workspace to add
@@ -602,7 +605,7 @@ export function OrderRow({ order }: Props) {
                   style={styles.viewFullBtn}
                   onClick={() => openOrderDetail(order.id)}
                 >
-                  View Full
+                  {t('orders.viewFull')}
                 </button>
               </>
             );
@@ -612,9 +615,9 @@ export function OrderRow({ order }: Props) {
 
       {expanded && (
         <div style={styles.detail} onClick={(e) => e.stopPropagation()}>
-          <div style={styles.detailHd}>Items ({order.items.length})</div>
+          <div style={styles.detailHd}>{t('orders.itemsLabel')} ({order.items.length})</div>
           {order.items.length === 0 ? (
-            <div style={{ ...styles.notes, fontStyle: 'normal' }}>No items added yet.</div>
+            <div style={{ ...styles.notes, fontStyle: 'normal' }}>{t('orders.noItemsAdded')}</div>
           ) : (
             <div style={styles.itemList}>
               {order.items.map((item) => {
@@ -635,7 +638,7 @@ export function OrderRow({ order }: Props) {
                           {item.modifiers.map((m) => m.name).join(' · ')}
                         </div>
                       )}
-                      {item.notes && <div style={styles.detailNote}>Note: {item.notes}</div>}
+                      {item.notes && <div style={styles.detailNote}>{t('orders.note')}: {item.notes}</div>}
                     </div>
                     <span style={styles.detailPrice}>{formatMoney(item.line_total)}</span>
                     <span />
@@ -656,7 +659,7 @@ export function OrderRow({ order }: Props) {
                 : null) ??
                 (cancelMutation.error instanceof ApiError
                   ? cancelMutation.error.message
-                  : 'Action failed')}
+                  : t('orders.actionFailed'))}
             </div>
           )}
 
@@ -668,14 +671,14 @@ export function OrderRow({ order }: Props) {
               onClick={() => sendKitchenMutation.mutate()}
             >
               {reprintBusy ? <Spinner size={14} /> : <IconPrinter style={{ fontSize: 16 }} />}
-              Send / Reprint
+              {t('orders.sendReprint')}
             </button>
             <button
               type="button"
               style={styles.actionBtn}
               onClick={() => openOrderDetail(order.id)}
             >
-              View Full
+              {t('orders.viewFull')}
             </button>
             {canCancel && (
               <button
@@ -685,7 +688,7 @@ export function OrderRow({ order }: Props) {
                 onClick={handleCancel}
               >
                 {cancelBusy ? <Spinner size={14} /> : <IconClose style={{ fontSize: 14 }} />}
-                Cancel Order
+                {t('orders.cancelOrder')}
               </button>
             )}
           </div>
@@ -700,7 +703,7 @@ export function OrderRow({ order }: Props) {
             cancelMutation.error instanceof ApiError
               ? cancelMutation.error.message
               : cancelMutation.error
-                ? 'Cancel failed'
+                ? t('orders.cancelFailed')
                 : null
           }
           onClose={() => {

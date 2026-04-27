@@ -16,6 +16,7 @@ import {
   toIsoDayEnd,
   toIsoDayStart,
 } from './date-range';
+import { useTranslation } from '../../i18n';
 
 interface PaymentBreakdown {
   method: PaymentMethod;
@@ -24,6 +25,7 @@ interface PaymentBreakdown {
 }
 
 export function SalesReport() {
+  const { t } = useTranslation();
   const [from, setFrom] = useState<string>(daysAgoYMD(6));
   const [to, setTo] = useState<string>(todayYMD());
 
@@ -87,7 +89,7 @@ export function SalesReport() {
     },
     {
       key: 'date',
-      header: 'Date / time',
+      header: t('common.date'),
       width: '170px',
       render: (o) => (
         <span className="fs-12 text-muted">{formatDateTime(o.created_at)}</span>
@@ -95,13 +97,13 @@ export function SalesReport() {
     },
     {
       key: 'cashier',
-      header: 'Cashier',
+      header: t('role.cashier'),
       width: '1fr',
       render: (o) => <span className="fs-13">{o.user?.name ?? '—'}</span>,
     },
     {
       key: 'items',
-      header: 'Items',
+      header: t('orders.colItems'),
       width: '90px',
       render: (o) => {
         const n = (o.items ?? []).reduce((sum, i) => sum + i.quantity, 0);
@@ -110,7 +112,7 @@ export function SalesReport() {
     },
     {
       key: 'payment',
-      header: 'Payment',
+      header: t('orders.colPayment'),
       width: '130px',
       render: (o) => {
         const methods = Array.from(new Set((o.payments ?? []).map((p) => p.method)));
@@ -124,7 +126,7 @@ export function SalesReport() {
     },
     {
       key: 'total',
-      header: 'Total',
+      header: t('common.total'),
       width: '120px',
       render: (o) => (
         <span className="fw-600 fs-13">{formatMoney(Number(o.total))}</span>
@@ -140,7 +142,7 @@ export function SalesReport() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            From
+            {t('common.from')}
           </label>
           <input
             type="date"
@@ -154,7 +156,7 @@ export function SalesReport() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            To
+            {t('common.to')}
           </label>
           <input
             type="date"
@@ -169,61 +171,61 @@ export function SalesReport() {
           className="filter-pill"
           onClick={() => { setFrom(daysAgoYMD(6));  setTo(todayYMD()); }}
         >
-          Last 7 days
+          {t('dashboard.salesLast7')}
         </button>
         <button
           type="button"
           className="filter-pill"
           onClick={() => { setFrom(daysAgoYMD(29)); setTo(todayYMD()); }}
         >
-          Last 30 days
+          30
         </button>
       </div>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <KPICard
           accent
-          label="Total sales"
+          label={t('salesReport.totalSales')}
           value={formatMoney(totalSales)}
-          sub={query.isLoading ? 'Loading…' : `${count} paid order${count === 1 ? '' : 's'}`}
+          sub={query.isLoading ? `${t('common.loading')}…` : `${count} ${t('orders.statusPaid').toLowerCase()}`}
         />
         <KPICard
-          label="Revenue (before tax)"
+          label={t('expenses.income')}
           value={formatMoney(totalRevenue)}
-          sub="For P&L reporting"
+          sub={t('salesReport.subtitle')}
         />
         <KPICard
-          label="Tax collected"
+          label={t('common.tax')}
           value={formatMoney(totalTax)}
-          sub="For SAT / remittance"
+          sub={t('salesReport.subtitle')}
         />
       </div>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
         <KPICard
-          label="Orders"
+          label={t('salesReport.orderCount')}
           value={count}
-          sub="Paid orders only"
+          sub={t('orders.statusPaid')}
         />
         <KPICard
-          label="Average ticket"
+          label={t('salesReport.avgTicket')}
           value={formatMoney(avgTicket)}
-          sub={count > 0 ? 'Per paid order' : 'No orders in range'}
+          sub={count > 0 ? t('orders.statusPaid') : t('orders.empty')}
         />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="Payment method breakdown">
+        <Card title={t('salesReport.byMethod')}>
           {query.isLoading ? (
             <div className="loading-block">
               <span className="spinner" />
-              Loading…
+              {t('common.loading')}…
             </div>
           ) : breakdown.length === 0 ? (
             <EmptyState
               icon="💳"
-              message="No payments in range"
-              sub="Paid orders captured by method will appear here."
+              message={t('orders.empty')}
+              sub={t('salesReport.subtitle')}
             />
           ) : (
             <MiniBars
@@ -236,28 +238,25 @@ export function SalesReport() {
           )}
         </Card>
 
-        <Card title="Summary">
-          {/* Prices include tax. Customer pays Total; revenue + tax = total
-              (before discount). Kept here for a quick sanity cross-check —
-              the KPIs above carry the accountant-friendly numbers. */}
+        <Card title={t('salesReport.title')}>
           <div className="detail-grid">
             <div className="detail-row cols-2">
               <div className="detail-cell">
-                <div className="dk">Revenue (before tax)</div>
+                <div className="dk">{t('expenses.income')}</div>
                 <div className="dv">{formatMoney(totalRevenue)}</div>
               </div>
               <div className="detail-cell">
-                <div className="dk">Tax collected</div>
+                <div className="dk">{t('common.tax')}</div>
                 <div className="dv">{formatMoney(totalTax)}</div>
               </div>
             </div>
             <div className="detail-row cols-2">
               <div className="detail-cell">
-                <div className="dk">Discounts</div>
+                <div className="dk">{t('common.discount')}</div>
                 <div className="dv red">−{formatMoney(totalDiscounts)}</div>
               </div>
               <div className="detail-cell">
-                <div className="dk">Total (customer paid)</div>
+                <div className="dk">{t('common.total')}</div>
                 <div className="dv gold">{formatMoney(totalSales)}</div>
               </div>
             </div>
@@ -265,15 +264,15 @@ export function SalesReport() {
         </Card>
       </div>
 
-      <Card title="Orders in range">
+      <Card title={t('salesReport.title')}>
         <Table
           columns={columns}
           rows={orders}
           getRowKey={(o) => o.id}
           isInitialLoad={query.isLoading}
           error={query.error as Error | null}
-          emptyMessage="No paid orders in this range"
-          emptySub="Adjust the date range to see sales."
+          emptyMessage={t('orders.empty')}
+          emptySub={t('salesReport.subtitle')}
           hasMore={!!query.hasNextPage}
           isLoadingMore={query.isFetchingNextPage}
           onLoadMore={() => query.fetchNextPage()}

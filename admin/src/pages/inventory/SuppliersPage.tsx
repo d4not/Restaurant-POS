@@ -5,8 +5,10 @@ import { SearchInput } from '../../components/forms/SearchInput';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import type { Supplier } from '../../types/inventory';
 import { SupplierFormModal } from './SupplierFormModal';
+import { useTranslation } from '../../i18n';
 
 export function SuppliersPage() {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
@@ -59,7 +61,7 @@ export function SuppliersPage() {
   const columns: TableColumn<Supplier>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('suppliers.colName'),
       sortable: true,
       width: '2fr',
       render: (s) => (
@@ -68,7 +70,7 @@ export function SuppliersPage() {
     },
     {
       key: 'contact',
-      header: 'Contact',
+      header: t('suppliers.colContact'),
       sortable: true,
       width: '1.2fr',
       render: (s) => (
@@ -77,7 +79,7 @@ export function SuppliersPage() {
     },
     {
       key: 'phone',
-      header: 'Phone',
+      header: t('suppliers.colPhone'),
       width: '1fr',
       render: (s) => (
         <span className="fs-12 text-muted">{s.phone ?? '—'}</span>
@@ -85,7 +87,7 @@ export function SuppliersPage() {
     },
     {
       key: 'email',
-      header: 'Email',
+      header: t('suppliers.colEmail'),
       width: '1.3fr',
       render: (s) => (
         <span className="fs-12 text-muted">{s.email ?? '—'}</span>
@@ -93,20 +95,20 @@ export function SuppliersPage() {
     },
     {
       key: 'credit_days',
-      header: 'Credit days',
+      header: t('suppliers.colCreditDays'),
       sortable: true,
       width: '120px',
       render: (s) => <span className="fs-13">{s.credit_days}</span>,
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (s) =>
         s.active ? (
-          <Badge tone="green">Active</Badge>
+          <Badge tone="green">{t('common.active')}</Badge>
         ) : (
-          <Badge tone="red">Inactive</Badge>
+          <Badge tone="red">{t('common.inactive')}</Badge>
         ),
     },
   ];
@@ -117,7 +119,7 @@ export function SuppliersPage() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search suppliers…"
+          placeholder={t('common.search')}
         />
 
         <button
@@ -125,11 +127,11 @@ export function SuppliersPage() {
           className={`filter-pill ${showInactive ? 'active' : ''}`}
           onClick={() => setShowInactive((v) => !v)}
         >
-          {showInactive ? '✓ Inactive visible' : 'Show inactive'}
+          {showInactive ? `✓ ${t('common.inactive')}` : t('supplies.showInactive')}
         </button>
 
         <Button variant="primary" onClick={openCreate}>
-          + New supplier
+          + {t('suppliers.newSupplier')}
         </Button>
       </div>
 
@@ -142,11 +144,11 @@ export function SuppliersPage() {
         onSortChange={setSort}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage="No suppliers yet"
-        emptySub="Add your first supplier to start registering purchases."
+        emptyMessage={t('suppliers.empty')}
+        emptySub={t('suppliers.subtitle')}
         emptyAction={
           <Button variant="primary" onClick={openCreate}>
-            + New supplier
+            + {t('suppliers.newSupplier')}
           </Button>
         }
         hasMore={!!query.hasNextPage}

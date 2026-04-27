@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { create } from 'zustand';
+import { useTranslation } from '../i18n';
 
 // Imperative confirm dialog. Replaces window.confirm so destructive prompts
 // (cancel order, remove sent item, sign out, etc.) match the warm theme and
@@ -140,6 +141,7 @@ const styles: Record<string, React.CSSProperties> = {
 };
 
 export function ConfirmDialogHost() {
+  const { t } = useTranslation();
   const open = useConfirm((s) => s.open);
   const options = useConfirm((s) => s.options);
   const resolveWith = useConfirm((s) => s.resolveWith);
@@ -195,7 +197,7 @@ export function ConfirmDialogHost() {
             style={styles.cancelBtn}
             onClick={() => resolveWith(false)}
           >
-            {options.cancelLabel ?? 'Cancel'}
+            {options.cancelLabel ?? t('common.cancel')}
           </button>
           <button
             ref={confirmRef}
@@ -203,7 +205,7 @@ export function ConfirmDialogHost() {
             style={confirmStyle}
             onClick={() => resolveWith(true)}
           >
-            {options.confirmLabel ?? 'Confirm'}
+            {options.confirmLabel ?? t('common.confirm')}
           </button>
         </div>
       </div>

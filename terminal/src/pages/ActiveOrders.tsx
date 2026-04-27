@@ -10,7 +10,8 @@ import { ApiError } from '../api/client';
 import { ZoneSection } from '../components/ZoneSection';
 import { MetricCard } from '../components/MetricCard';
 import { Spinner } from '../components/Spinner';
-import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
+import { useTranslation } from '../i18n';
+import type { TranslationKey } from '../i18n/en';
 
 const TAKEOUT_KEY = '__takeout__';
 // Channel sub-buckets render inside the Takeout zone section, not as their own
@@ -22,12 +23,18 @@ const TAKEOUT_CHANNEL_ORDER: TakeoutChannel[] = [
   'DELIVERY_APP',
 ];
 
+const TAKEOUT_CHANNEL_LABEL_KEY: Record<TakeoutChannel, TranslationKey> = {
+  LOCAL: 'takeout.channelLocal',
+  DELIVERY_LOCAL: 'takeout.channelDeliveryLocal',
+  DELIVERY_APP: 'takeout.channelDeliveryApp',
+};
+
 type FilterValue = 'ALL' | OrderType;
 
-const FILTERS: { value: FilterValue; label: string }[] = [
-  { value: 'ALL', label: 'All' },
-  { value: 'DINE_IN', label: 'Dine-in' },
-  { value: 'TAKEOUT', label: 'Takeout' },
+const FILTERS: { value: FilterValue; labelKey: TranslationKey }[] = [
+  { value: 'ALL', labelKey: 'orders.filterAll' },
+  { value: 'DINE_IN', labelKey: 'orders.filterDineIn' },
+  { value: 'TAKEOUT', labelKey: 'orders.filterTakeout' },
 ];
 
 const styles: Record<string, React.CSSProperties> = {
@@ -190,7 +197,11 @@ interface ZoneBucket {
   subBuckets?: TakeoutSubBucket[];
 }
 
-function buildTakeoutSubBuckets(orders: ActiveOrder[]): TakeoutSubBucket[] {
+function buildTakeoutSubBuckets(
+  orders: ActiveOrder[],
+  channelLabel: (ch: TakeoutChannel) => string,
+  otherLabel: string,
+): TakeoutSubBucket[] {
   const byChannel = new Map<TakeoutChannel | 'UNSPECIFIED', ActiveOrder[]>();
   for (const o of orders) {
     const ch = o.takeout_channel ?? 'UNSPECIFIED';
@@ -202,25 +213,30 @@ function buildTakeoutSubBuckets(orders: ActiveOrder[]): TakeoutSubBucket[] {
   for (const ch of TAKEOUT_CHANNEL_ORDER) {
     const list = byChannel.get(ch);
     if (list && list.length > 0) {
-      buckets.push({ channel: ch, label: TAKEOUT_CHANNEL_LABEL[ch], orders: list });
+      buckets.push({ channel: ch, label: channelLabel(ch), orders: list });
     }
   }
   // Legacy / mid-flight rows without a channel still need a home — render them
   // under a generic "Other" sub-header so they don't silently disappear.
   const legacy = byChannel.get('UNSPECIFIED');
   if (legacy && legacy.length > 0) {
-    buckets.push({ channel: 'UNSPECIFIED', label: 'Other', orders: legacy });
+    buckets.push({ channel: 'UNSPECIFIED', label: otherLabel, orders: legacy });
   }
   return buckets;
 }
 
-function bucketByZone(orders: ActiveOrder[]): ZoneBucket[] {
+function bucketByZone(
+  orders: ActiveOrder[],
+  takeoutLabel: string,
+  channelLabel: (ch: TakeoutChannel) => string,
+  otherLabel: string,
+): ZoneBucket[] {
   const map = new Map<string, ZoneBucket>();
   let counter = 0;
   for (const o of orders) {
     const isTakeout = o.order_type === 'TAKEOUT' || !o.table;
     const key = isTakeout ? TAKEOUT_KEY : o.table!.zone.id;
-    const name = isTakeout ? 'Takeout' : o.table!.zone.name;
+    const name = isTakeout ? takeoutLabel : o.table!.zone.name;
     let bucket = map.get(key);
     if (!bucket) {
       bucket = {
@@ -235,7 +251,7 @@ function bucketByZone(orders: ActiveOrder[]): ZoneBucket[] {
   }
   const out = [...map.values()].sort((a, b) => a.sort - b.sort);
   const takeout = out.find((b) => b.key === TAKEOUT_KEY);
-  if (takeout) takeout.subBuckets = buildTakeoutSubBuckets(takeout.orders);
+  if (takeout) takeout.subBuckets = buildTakeoutSubBuckets(takeout.orders, channelLabel, otherLabel);
   return out;
 }
 
@@ -256,6 +272,7 @@ function filterOrders(orders: ActiveOrder[], filter: FilterValue, search: string
 }
 
 export function ActiveOrders() {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterValue>('ALL');
   const [search, setSearch] = useState('');
 
@@ -270,7 +287,16 @@ export function ActiveOrders() {
 
   const orders = data ?? [];
   const visible = useMemo(() => filterOrders(orders, filter, search), [orders, filter, search]);
-  const buckets = useMemo(() => bucketByZone(visible), [visible]);
+  const buckets = useMemo(
+    () =>
+      bucketByZone(
+        visible,
+        t('orders.takeoutZone'),
+        (ch) => t(TAKEOUT_CHANNEL_LABEL_KEY[ch]),
+        t('orders.takeoutOther'),
+      ),
+    [visible, t],
+  );
 
   const summary = useMemo(() => {
     const total = orders.length;
@@ -283,10 +309,10 @@ export function ActiveOrders() {
     <div style={styles.root}>
       <header style={styles.head}>
         <div style={styles.titleBlock}>
-          <h1 style={styles.title}>Active Orders</h1>
+          <h1 style={styles.title}>{t('orders.title')}</h1>
           <div style={styles.sub}>
             <span style={styles.pulseDot} />
-            Real-time overview
+            {t('orders.realtimeOverview')}
             {isFetching && (
               <span style={{ marginLeft: 8 }}>
                 <Spinner size={12} />
@@ -294,7 +320,7 @@ export function ActiveOrders() {
             )}
             {dataUpdatedAt > 0 && !isFetching && (
               <span style={{ marginLeft: 8, color: 'var(--text3)' }}>
-                · Updated {new Date(dataUpdatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                · {t('orders.updated')} {new Date(dataUpdatedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
           </div>
@@ -307,14 +333,14 @@ export function ActiveOrders() {
               style={pillStyle(filter === f.value)}
               onClick={() => setFilter(f.value)}
             >
-              {f.label}
+              {t(f.labelKey)}
             </button>
           ))}
           <div style={styles.search}>
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>⌕</span>
             <input
               style={styles.searchInput}
-              placeholder="Search by table, waiter, order #"
+              placeholder={t('orders.searchActive')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -325,40 +351,40 @@ export function ActiveOrders() {
       <div style={styles.body}>
         <div style={styles.metrics}>
           <MetricCard
-            label="Active Orders"
+            label={t('orders.metricActive')}
             value={summary.total.toString()}
             hint={
               filter !== 'ALL'
-                ? `${visible.length} match filter`
+                ? `${visible.length} ${t('orders.matchFilter')}`
                 : undefined
             }
           />
           <MetricCard
-            label="Need Attention"
+            label={t('orders.metricNeedsAttention')}
             value={summary.attention.toString()}
             tone={summary.attention > 0 ? 'red' : 'default'}
-            hint={summary.attention > 0 ? 'Waiters flagged for help' : undefined}
+            hint={summary.attention > 0 ? t('orders.waitersFlagged') : undefined}
           />
         </div>
 
         {isLoading && (
           <div style={styles.loadingState}>
             <Spinner size={26} />
-            <div>Loading active orders…</div>
+            <div>{t('orders.loadingActive')}</div>
           </div>
         )}
 
         {error && (
           <div style={styles.errorState}>
-            {error instanceof ApiError ? error.message : 'Failed to load orders'}
+            {error instanceof ApiError ? error.message : t('orders.failedLoad')}
           </div>
         )}
 
         {!isLoading && !error && buckets.length === 0 && (
           <div style={styles.empty}>
             {orders.length === 0
-              ? 'No active orders right now.'
-              : 'No orders match this filter.'}
+              ? t('orders.noActiveNow')
+              : t('orders.noneMatchFilter')}
           </div>
         )}
 
@@ -376,11 +402,11 @@ export function ActiveOrders() {
       <footer style={styles.footer}>
         <div style={styles.footerCell}>
           <span style={styles.footerNum}>{summary.total}</span>
-          <span>active</span>
+          <span>{t('orders.activeShort')}</span>
         </div>
         <div style={{ ...styles.footerCell, justifyContent: 'center' }}>
           <span style={styles.footerNum}>{summary.pendingPayment}</span>
-          <span>pending payment</span>
+          <span>{t('orders.pendingPayment')}</span>
         </div>
         <div style={{ ...styles.footerCell, justifyContent: 'flex-end' }} />
       </footer>

@@ -21,8 +21,10 @@ import {
 import { CashMovementModal } from './CashMovementModal';
 import { CloseShiftModal } from './CloseShiftModal';
 import { OpenShiftModal } from './OpenShiftModal';
+import { useTranslation } from '../../i18n';
 
 export function CashRegistersPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
 
@@ -42,7 +44,7 @@ export function CashRegistersPage() {
   const columns: TableColumn<CashRegister>[] = [
     {
       key: 'date',
-      header: 'Opened',
+      header: t('cashRegisters.colDate'),
       width: '170px',
       render: (r) => (
         <span className="fs-12 text-muted">{formatDateTime(r.opened_at)}</span>
@@ -50,7 +52,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'user',
-      header: 'User',
+      header: t('cashRegisters.colUser'),
       width: '1.2fr',
       render: (r) => (
         <span className="fw-600 fs-13">{r.user?.name ?? '—'}</span>
@@ -58,7 +60,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'opening',
-      header: 'Opening',
+      header: t('cashRegisters.colOpening'),
       width: '120px',
       render: (r) => (
         <span className="fs-13">{formatMoney(Number(r.opening_amount))}</span>
@@ -66,7 +68,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'expected',
-      header: 'Expected',
+      header: t('cashRegisters.colExpected'),
       width: '120px',
       render: (r) => (
         <span className="fs-13">{formatMoney(Number(r.expected_amount))}</span>
@@ -74,7 +76,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'actual',
-      header: 'Actual',
+      header: t('cashRegisters.colActual'),
       width: '120px',
       render: (r) =>
         r.actual_amount == null ? (
@@ -87,7 +89,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'difference',
-      header: 'Difference',
+      header: t('cashRegisters.colDifference'),
       width: '130px',
       render: (r) => {
         if (r.difference == null) return <span className="fs-12 text-muted">—</span>;
@@ -107,7 +109,7 @@ export function CashRegistersPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '100px',
       render: (r) => (
         <Badge tone={registerStatusTone(r.status)}>{r.status}</Badge>
@@ -126,7 +128,7 @@ export function CashRegistersPage() {
       />
 
       <div className="flex-between mb-12 mt-16">
-        <h2>Shift history</h2>
+        <h2>{t('cashRegisters.title')}</h2>
       </div>
 
       <Table
@@ -136,8 +138,8 @@ export function CashRegistersPage() {
         onRowClick={(r) => navigate(`/staff/cash-registers/${r.id}`)}
         isInitialLoad={historyQ.isLoading}
         error={historyQ.error as Error | null}
-        emptyMessage="No closed shifts yet"
-        emptySub="Closed shifts will appear here once you close your first cash register."
+        emptyMessage={t('cashRegisters.empty')}
+        emptySub={t('cashRegisters.subtitle')}
         hasMore={!!historyQ.hasNextPage}
         isLoadingMore={historyQ.isFetchingNextPage}
         onLoadMore={() => historyQ.fetchNextPage()}
@@ -182,12 +184,13 @@ function CurrentShiftSection({
   onClose,
   onAddMovement,
 }: CurrentShiftSectionProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <Card>
         <div className="loading-block">
           <span className="spinner" />
-          Loading current shift…
+          {t('common.loading')}…
         </div>
       </Card>
     );
@@ -198,11 +201,11 @@ function CurrentShiftSection({
       <Card>
         <EmptyState
           icon="◈"
-          message="No open shift"
-          sub="Open a shift to start taking orders and tracking cash movements."
+          message={t('auth.noShift')}
+          sub={t('cashRegisters.subtitle')}
           action={
             <Button variant="primary" onClick={onOpen}>
-              Open shift
+              {t('cashRegisters.openShift')}
             </Button>
           }
         />
@@ -213,14 +216,14 @@ function CurrentShiftSection({
   return (
     <>
       <Card
-        title="Current shift"
+        title={t('cashRegisters.shiftOf')}
         actions={
           <div style={{ display: 'flex', gap: 8 }}>
             <Button variant="secondary" onClick={onAddMovement}>
-              + Cash in / out
+              + {t('cashRegisters.movementTitle')}
             </Button>
             <Button variant="danger" onClick={onClose}>
-              Close shift
+              {t('cashRegisters.closeShift')}
             </Button>
           </div>
         }
@@ -228,31 +231,29 @@ function CurrentShiftSection({
         <div className="kpi-grid" style={{ marginBottom: 0 }}>
           <KPICard
             accent
-            label="Status"
+            label={t('common.status')}
             value={<Badge tone={registerStatusTone(register.status)}>{register.status}</Badge>}
-            sub={register.user?.name ? `Opened by ${register.user.name}` : undefined}
+            sub={register.user?.name ? `${t('cashRegisters.colUser')}: ${register.user.name}` : undefined}
           />
           <KPICard
-            label="Opening amount"
+            label={t('cashRegisters.openingAmount')}
             value={formatMoney(Number(register.opening_amount))}
             sub={formatDateTime(register.opened_at)}
           />
           <KPICard
-            label="Expected in drawer"
+            label={t('cashRegisters.colExpected')}
             value={formatMoney(Number(register.expected_amount))}
             valueColor="gold"
-            sub="Opening + cash sales − change − net cash out"
           />
           <KPICard
-            label="Elapsed"
+            label={t('common.date')}
             value={<ElapsedValue from={register.opened_at} />}
-            sub="Since shift opened"
           />
         </div>
 
         {register.notes && (
           <p className="fs-12 text-muted mt-16">
-            <span className="fw-600">Notes · </span>
+            <span className="fw-600">{t('common.notes')} · </span>
             {register.notes}
           </p>
         )}
@@ -278,6 +279,7 @@ function ElapsedValue({ from }: { from: string }) {
 /* ── Cash-movements list card ───────────────────────────────────────── */
 
 function CurrentCashMovementsCard({ registerId }: { registerId: string }) {
+  const { t } = useTranslation();
   const q = useRegisterCashMovements(registerId);
   const rows = useMemo<CashMovement[]>(
     () => q.data?.pages.flatMap((p) => p.items) ?? [],
@@ -287,7 +289,7 @@ function CurrentCashMovementsCard({ registerId }: { registerId: string }) {
   const columns: TableColumn<CashMovement>[] = [
     {
       key: 'date',
-      header: 'Time',
+      header: t('common.date'),
       width: '160px',
       render: (m) => (
         <span className="fs-12 text-muted">{formatDateTime(m.created_at)}</span>
@@ -295,23 +297,23 @@ function CurrentCashMovementsCard({ registerId }: { registerId: string }) {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '110px',
       render: (m) => (
         <Badge tone={cashMovementTypeTone(m.type)}>
-          {m.type === 'CASH_IN' ? 'Cash in' : 'Cash out'}
+          {m.type === 'CASH_IN' ? t('cashRegisters.cashIn') : t('cashRegisters.cashOut')}
         </Badge>
       ),
     },
     {
       key: 'reason',
-      header: 'Reason',
+      header: t('common.notes'),
       width: '1fr',
       render: (m) => <span className="fs-13">{m.reason}</span>,
     },
     {
       key: 'amount',
-      header: 'Amount',
+      header: t('common.amount'),
       width: '130px',
       render: (m) => {
         const n = Number(m.amount);
@@ -328,15 +330,14 @@ function CurrentCashMovementsCard({ registerId }: { registerId: string }) {
   ];
 
   return (
-    <Card title="Cash movements">
+    <Card title={t('cashRegisters.movementTitle')}>
       <Table
         columns={columns}
         rows={rows}
         getRowKey={(m) => m.id}
         isInitialLoad={q.isLoading}
         error={q.error as Error | null}
-        emptyMessage="No cash movements recorded yet"
-        emptySub="Record cash in or cash out for tips, petty cash, float top-ups, etc."
+        emptyMessage={t('common.noResults')}
         hasMore={!!q.hasNextPage}
         isLoadingMore={q.isFetchingNextPage}
         onLoadMore={() => q.fetchNextPage()}

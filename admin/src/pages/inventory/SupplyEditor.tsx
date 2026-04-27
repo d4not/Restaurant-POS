@@ -300,8 +300,9 @@ export function SupplyEditor({
     () => suppliersQ.data?.pages.flatMap((p) => p.items) ?? [],
     [suppliersQ.data],
   );
-  const supplierName = (id: string): string | null =>
-    suppliers.find((s) => s.id === id)?.name ?? null;
+  // Kept for reference; not currently displayed in the editor header.
+  void ((id: string): string | null =>
+    suppliers.find((s) => s.id === id)?.name ?? null);
 
   const visibleRows = useMemo(() => rows.filter((r) => !r.removed), [rows]);
 
@@ -593,7 +594,7 @@ export function SupplyEditor({
     );
   }
 
-  const editingExisting = mode === 'edit' && supplyQ.data;
+  const editingExisting = mode === 'edit' ? supplyQ.data : null;
   const headerName =
     editingExisting?.name ?? (mode === 'create' ? 'New supply' : 'Quick add supply');
   const submitLabel =

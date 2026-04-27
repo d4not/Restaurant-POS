@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { EmptyState } from './EmptyState';
 import { Button } from './Button';
+import { useTranslation } from '../../i18n';
 
 export interface TableColumn<T> {
   key: string;
@@ -48,7 +49,7 @@ export function Table<T>({
   isLoading,
   isInitialLoad,
   error,
-  emptyMessage = 'No records found',
+  emptyMessage,
   emptySub,
   emptyAction,
   hasMore,
@@ -57,14 +58,16 @@ export function Table<T>({
   sort,
   onSortChange,
 }: TableProps<T>) {
+  const { t } = useTranslation();
   const gridTemplate = columns.map((c) => c.width ?? '1fr').join(' ');
+  const resolvedEmpty = emptyMessage ?? t('common.noResults');
 
   if (error) {
     return (
       <div className="table-wrap">
         <EmptyState
           icon="⚠"
-          message="Couldn't load the data"
+          message={t('error.failedLoad')}
           sub={error.message}
         />
       </div>
@@ -76,7 +79,7 @@ export function Table<T>({
       <div className="table-wrap">
         <div className="loading-block">
           <span className="spinner" />
-          Loading…
+          {t('common.loading')}…
         </div>
       </div>
     );
@@ -85,7 +88,7 @@ export function Table<T>({
   if (rows.length === 0) {
     return (
       <div className="table-wrap">
-        <EmptyState message={emptyMessage} sub={emptySub} action={emptyAction} />
+        <EmptyState message={resolvedEmpty} sub={emptySub} action={emptyAction} />
       </div>
     );
   }
@@ -146,7 +149,7 @@ export function Table<T>({
             loading={isLoadingMore}
             onClick={() => onLoadMore?.()}
           >
-            Load more
+            {t('common.next')}
           </Button>
         </div>
       )}

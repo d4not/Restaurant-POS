@@ -18,6 +18,7 @@ import {
 } from '../../store/preferences';
 import type { Tax } from '../../types/menu';
 import { formatDate, formatMoney } from '../../utils/format';
+import { useTranslation, type Language } from '../../i18n';
 
 const CURRENCY_OPTIONS = [
   { value: 'MXN', label: 'Mexican Peso (MXN)' },
@@ -37,6 +38,41 @@ export function SettingsPage() {
       <TakeoutChannelsCard />
       <PrinterSettingsCard />
       <TaxConfigurationCard />
+    </div>
+  );
+}
+
+/* ───────────────── Language picker (lives inside Display preferences) ── */
+
+function LanguagePicker() {
+  const { t, language, setLanguage } = useTranslation();
+  const [saving, setSaving] = useState<Language | null>(null);
+
+  async function pick(next: string | undefined) {
+    if (!next || next === language) return;
+    const lang = next as Language;
+    setSaving(lang);
+    try {
+      await setLanguage(lang, { persistRemote: true });
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const options = [
+    { value: 'en', label: t('settings.languageEnglish') },
+    { value: 'es', label: t('settings.languageSpanish') },
+  ];
+
+  return (
+    <div className="detail-cell">
+      <Select
+        label={t('settings.language')}
+        options={options}
+        value={language}
+        onValueChange={pick}
+        disabled={saving !== null}
+      />
     </div>
   );
 }
@@ -495,16 +531,17 @@ function DefaultTaxCard() {
 /* ───────────────── Display preferences ─────────────────── */
 
 function DisplayPreferencesCard() {
+  const { t } = useTranslation();
   const { currency, dateFormat, setCurrency, setDateFormat } = usePreferencesStore();
   const preview = 1234567; // 12,345.67 in the chosen currency
 
   return (
-    <Card title="Display preferences">
+    <Card title={t('settings.tabDisplay')}>
       <div className="detail-grid">
         <div className="detail-row cols-2">
           <div className="detail-cell">
             <Select
-              label="Currency"
+              label={t('settings.currency')}
               options={[...CURRENCY_OPTIONS]}
               value={currency}
               onValueChange={(v) => v && setCurrency(v as Currency)}
@@ -512,12 +549,16 @@ function DisplayPreferencesCard() {
           </div>
           <div className="detail-cell">
             <Select
-              label="Date format"
+              label={t('settings.dateFormat')}
               options={[...DATE_FORMAT_OPTIONS]}
               value={dateFormat}
               onValueChange={(v) => v && setDateFormat(v as DateFormat)}
             />
           </div>
+        </div>
+        <div className="detail-row cols-2">
+          <LanguagePicker />
+          <div className="detail-cell" />
         </div>
         <div className="detail-row cols-2">
           <div className="detail-cell">
@@ -531,8 +572,7 @@ function DisplayPreferencesCard() {
         </div>
       </div>
       <div className="fs-11 text-muted mt-12">
-        Preferences are stored in this browser. They apply immediately everywhere
-        money or dates appear in the admin panel.
+        {t('settings.languageHint')}
       </div>
     </Card>
   );

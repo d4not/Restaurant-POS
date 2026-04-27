@@ -19,6 +19,7 @@ import {
 import type { ProductCostRow } from '../../api/reports';
 import { formatMoney, formatNumber } from '../../utils/format';
 import { daysAgoYMD, toIsoDayEnd, toIsoDayStart, todayYMD } from './date-range';
+import { useTranslation } from '../../i18n';
 
 /**
  * Flattened row — one per product (no variants) OR one per variant (the
@@ -87,6 +88,7 @@ function flatten(rows: ProductCostRow[]): FlatRow[] {
 }
 
 export function ProductCostsReport() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [activeOnly, setActiveOnly] = useState(true);
   const [search, setSearch] = useState('');
@@ -142,7 +144,7 @@ export function ProductCostsReport() {
   const columns: TableColumn<FlatRow>[] = [
     {
       key: 'product',
-      header: 'Product',
+      header: t('productCosts.colProduct'),
       width: '2fr',
       render: (r) => (
         <div>
@@ -155,7 +157,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'variant',
-      header: 'Variant',
+      header: t('products.tabVariants'),
       width: '1fr',
       render: (r) =>
         r.variant_name ? (
@@ -166,7 +168,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '100px',
       render: (r) => (
         <Badge tone={r.type === 'DISH' ? 'gold' : 'gray'}>{r.type}</Badge>
@@ -174,7 +176,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'cost',
-      header: 'Recipe cost',
+      header: t('productCosts.colRecipeCost'),
       width: '120px',
       render: (r) => (
         <span className="fs-13">{formatMoney(r.recipe_cost)}</span>
@@ -182,7 +184,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'price',
-      header: 'Sell price',
+      header: t('productCosts.colSellPrice'),
       width: '120px',
       render: (r) =>
         r.sell_price == null ? (
@@ -193,7 +195,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'food_cost',
-      header: 'Food cost',
+      header: t('productCosts.colFoodCostPct'),
       width: '130px',
       render: (r) => {
         if (!r.sell_price) return <span className="fs-12 text-muted">—</span>;
@@ -206,7 +208,7 @@ export function ProductCostsReport() {
     },
     {
       key: 'markup',
-      header: 'Markup',
+      header: t('productCosts.colMargin'),
       width: '100px',
       render: (r) =>
         r.markup > 0 ? (

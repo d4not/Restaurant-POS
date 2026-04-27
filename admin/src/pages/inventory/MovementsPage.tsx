@@ -16,6 +16,8 @@ import {
   formatNumber,
 } from '../../utils/format';
 import { movementTypeTone } from './movement-meta';
+import { useTranslation } from '../../i18n';
+import type { TranslationKey } from '../../i18n/en';
 
 function toIsoDayStart(value: string): string | undefined {
   if (!value) return undefined;
@@ -36,52 +38,52 @@ type CategoryId = 'all' | 'sales' | 'purchases' | 'transfers' | 'mermas' | 'adju
 
 interface CategoryDef {
   id: CategoryId;
-  label: string;
+  labelKey: TranslationKey;
   types: StockMovementType[];
-  description: string;
+  descriptionKey: TranslationKey;
 }
 
 const CATEGORIES: CategoryDef[] = [
   {
     id: 'all',
-    label: 'All',
+    labelKey: 'common.all',
     types: [],
-    description: 'Every movement, regardless of source.',
+    descriptionKey: 'movements.subtitle',
   },
   {
     id: 'sales',
-    label: 'Sales',
+    labelKey: 'movements.typeSale',
     types: ['SALE'],
-    description: 'Auto-deducted from product sales as orders are paid.',
+    descriptionKey: 'movements.subtitle',
   },
   {
     id: 'purchases',
-    label: 'Purchases',
+    labelKey: 'movements.typePurchase',
     types: ['PURCHASE'],
-    description: 'Stock added when a purchase order is confirmed.',
+    descriptionKey: 'movements.subtitle',
   },
   {
     id: 'transfers',
-    label: 'Transfers',
+    labelKey: 'movements.typeTransferIn',
     types: ['TRANSFER_OUT', 'TRANSFER_IN'],
-    description:
-      'Stock moved between two storages — recorded twice (out at source, in at destination).',
+    descriptionKey: 'movements.subtitle',
   },
   {
     id: 'mermas',
-    label: 'Mermas',
+    labelKey: 'movements.typeWriteOff',
     types: ['WRITE_OFF'],
-    description: 'Manual write-offs: spilled, expired, damaged, theft, etc.',
+    descriptionKey: 'movements.subtitle',
   },
   {
     id: 'adjustments',
-    label: 'Adjustments',
+    labelKey: 'movements.typeAdjustment',
     types: ['ADJUSTMENT'],
-    description: 'Diffs applied when an inventory check completes.',
+    descriptionKey: 'movements.subtitle',
   },
 ];
 
 export function MovementsPage() {
+  const { t } = useTranslation();
   const [urlParams, setUrlParams] = useSearchParams();
 
   const [category, setCategory] = useState<CategoryId>('all');
@@ -138,7 +140,7 @@ export function MovementsPage() {
   const columns: TableColumn<StockMovement>[] = [
     {
       key: 'date',
-      header: 'Date',
+      header: t('common.date'),
       width: '170px',
       render: (m) => (
         <span className="fs-12 text-muted">{formatDateTime(m.created_at)}</span>
@@ -146,7 +148,7 @@ export function MovementsPage() {
     },
     {
       key: 'supply',
-      header: 'Supply',
+      header: t('movements.colSupply'),
       width: '1.6fr',
       render: (m) => (
         <div className="fw-600 fs-13">{m.supply?.name ?? '—'}</div>
@@ -154,19 +156,19 @@ export function MovementsPage() {
     },
     {
       key: 'storage',
-      header: 'Storage',
+      header: t('movements.colStorage'),
       width: '1fr',
       render: (m) => <span className="fs-13">{m.storage?.name ?? '—'}</span>,
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       width: '130px',
       render: (m) => <Badge tone={movementTypeTone(m.type)}>{m.type}</Badge>,
     },
     {
       key: 'qty',
-      header: 'Qty',
+      header: t('common.qty'),
       width: '120px',
       render: (m) => {
         const qty = Number(m.quantity);
@@ -182,7 +184,7 @@ export function MovementsPage() {
     },
     {
       key: 'cost',
-      header: 'Unit cost',
+      header: t('movements.colCost'),
       width: '120px',
       render: (m) => (
         <span className="fs-12 text-muted">
@@ -192,7 +194,7 @@ export function MovementsPage() {
     },
     {
       key: 'ref',
-      header: 'Reference',
+      header: t('movements.colReference'),
       width: '1fr',
       render: (m) => (
         <span className="fs-11 text-muted" title={m.reference_id}>
@@ -232,12 +234,12 @@ export function MovementsPage() {
             className={`filter-pill ${category === c.id ? 'active' : ''}`}
             onClick={() => setCategory(c.id)}
           >
-            {c.label}
+            {t(c.labelKey)}
           </button>
         ))}
       </div>
       <p className="fs-12 text-muted" style={{ marginBottom: 14 }}>
-        {activeCategory.description}
+        {t(activeCategory.descriptionKey)}
       </p>
 
       {/* Action buttons — both flows live in the POS terminal app, the buttons
@@ -267,7 +269,7 @@ export function MovementsPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Storage
+            {t('movements.colStorage')}
           </label>
           <select
             className="search-box"
@@ -276,7 +278,7 @@ export function MovementsPage() {
             disabled={storagesQ.isLoading}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All storages</option>
+            <option value="">{t('common.all')}</option>
             {storagesQ.data?.items.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -290,12 +292,12 @@ export function MovementsPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            Supply
+            {t('movements.colSupply')}
           </label>
           <SearchInput
             value={supplySearch}
             onChange={setSupplySearch}
-            placeholder="Search supply…"
+            placeholder={t('common.search')}
           />
           <select
             className="search-box mt-4"
@@ -303,7 +305,7 @@ export function MovementsPage() {
             onChange={(e) => setSupplyId(e.target.value)}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">Any supply</option>
+            <option value="">{t('common.all')}</option>
             {selectedSupply &&
               !suppliesQ.data?.pages[0]?.items.some(
                 (s) => s.id === selectedSupply.id,
@@ -325,7 +327,7 @@ export function MovementsPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            From
+            {t('common.from')}
           </label>
           <input
             type="date"
@@ -339,7 +341,7 @@ export function MovementsPage() {
             className="fs-11 text-muted"
             style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
           >
-            To
+            {t('common.to')}
           </label>
           <input
             type="date"
@@ -356,7 +358,7 @@ export function MovementsPage() {
             onClick={clearAll}
             style={{ alignSelf: 'flex-end' }}
           >
-            Clear filters
+            {t('common.cancel')}
           </button>
         )}
       </div>
@@ -367,16 +369,8 @@ export function MovementsPage() {
         getRowKey={(m) => m.id}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage={
-          hasActiveFilters
-            ? 'No movements match these filters'
-            : 'No movements yet'
-        }
-        emptySub={
-          hasActiveFilters
-            ? 'Try a different category or clear the filters.'
-            : 'Movements are created automatically from purchases, sales, transfers, and inventory adjustments.'
-        }
+        emptyMessage={t('movements.empty')}
+        emptySub={t('movements.subtitle')}
         hasMore={!!query.hasNextPage}
         isLoadingMore={query.isFetchingNextPage}
         onLoadMore={() => query.fetchNextPage()}

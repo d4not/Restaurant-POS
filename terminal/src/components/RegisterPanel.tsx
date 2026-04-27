@@ -11,6 +11,7 @@ import { useSession } from '../store/session';
 import { Spinner } from './Spinner';
 import { confirmDialog } from './ConfirmDialog';
 import { formatMoney, formatMoneyPlain } from '../utils/format';
+import { useTranslation, t as tStatic } from '../i18n';
 
 // Roles that can open or close their own register from the terminal. Waiters
 // and baristas don't have a personal register — orders they create attach to a
@@ -189,6 +190,7 @@ const styles: Record<string, React.CSSProperties> = {
 // the modal short-circuits with a hint.
 
 export function ShiftPill({ onClick }: ShiftPillProps) {
+  const { t } = useTranslation();
   const userId = useSession((s) => s.user?.id ?? null);
   const role = useSession((s) => s.user?.role ?? 'WAITER');
   const canManage = ROLES_WITH_REGISTER.has(role);
@@ -219,10 +221,10 @@ export function ShiftPill({ onClick }: ShiftPillProps) {
       <span style={{ ...styles.pillDot, background: dotColor }} />
       <span>
         {isLoading
-          ? 'Shift…'
+          ? t('register.shiftLoading')
           : isOpen
-            ? 'Shift open'
-            : 'Open shift'}
+            ? t('register.shiftOpen')
+            : t('register.openShift')}
       </span>
     </button>
   );
@@ -238,6 +240,7 @@ interface ModalProps {
 }
 
 export function ShiftManagerModal({ open, onClose }: ModalProps) {
+  const { t } = useTranslation();
   const userId = useSession((s) => s.user?.id ?? null);
   const role = useSession((s) => s.user?.role ?? 'WAITER');
   const canManage = ROLES_WITH_REGISTER.has(role);
@@ -269,7 +272,7 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
       queryClient.setQueryData(['register', 'open', userId], reg);
       onClose();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Could not open shift'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotOpen')),
   });
 
   const closeMutation = useMutation({
@@ -279,7 +282,7 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
       queryClient.setQueryData(['register', 'open', userId], null);
       onClose();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Could not close shift'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotClose')),
   });
 
   // Esc closes the modal, Enter submits the active flow.
@@ -306,15 +309,12 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
       <div style={styles.scrim} onClick={onClose}>
         <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
           <div style={styles.head}>
-            <h2 style={styles.title}>Shift management</h2>
-            <div style={styles.sub}>
-              Only cashiers, managers, and admins can open or close a shift. Ask
-              a cashier to open one before creating orders.
-            </div>
+            <h2 style={styles.title}>{t('register.shiftMgmt')}</h2>
+            <div style={styles.sub}>{t('register.shiftMgmtSub')}</div>
           </div>
           <div style={styles.actions}>
             <button type="button" style={styles.primaryBtn} onClick={onClose}>
-              Close
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -340,14 +340,14 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
       // Closing an existing shift.
       const amt = parseAmount(actualInput);
       if (amt == null) {
-        setError('Enter the cash amount counted in the drawer.');
+        setError(t('register.enterCounted'));
         return;
       }
       closeMutation.mutate({ id: reg.id, amountCentavos: amt });
     } else {
       const amt = parseAmount(openingInput);
       if (amt == null) {
-        setError('Enter a non-negative starting amount.');
+        setError(t('register.enterStarting'));
         return;
       }
       openMutation.mutate(amt);
@@ -369,18 +369,16 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
     <div style={styles.scrim} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()} role="dialog">
         <div style={styles.head}>
-          <h2 style={styles.title}>{reg ? 'Close shift' : 'Open shift'}</h2>
+          <h2 style={styles.title}>{reg ? t('register.closeShift') : t('register.openShift')}</h2>
           <div style={styles.sub}>
-            {reg
-              ? 'Count the cash in the drawer and enter the total. The system computes the difference against expected.'
-              : 'Enter the starting cash in the drawer. Required before any order can be created or paid.'}
+            {reg ? t('register.closeShiftSub') : t('register.openShiftSub')}
           </div>
         </div>
 
         <div style={styles.body}>
           {registerQuery.isLoading ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text2)' }}>
-              <Spinner size={16} /> Checking shift state…
+              <Spinner size={16} /> {t('register.checkingState')}
             </div>
           ) : reg ? (
             <CloseShiftBody
@@ -398,7 +396,7 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
 
         <div style={styles.actions}>
           <button type="button" style={styles.cancelBtn} onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -407,7 +405,7 @@ export function ShiftManagerModal({ open, onClose }: ModalProps) {
             disabled={openMutation.isPending || closeMutation.isPending || registerQuery.isLoading}
           >
             {(openMutation.isPending || closeMutation.isPending) && <Spinner size={12} />}
-            {reg ? 'Close shift' : 'Open shift'}
+            {reg ? t('register.closeShift') : t('register.openShift')}
           </button>
         </div>
       </div>
@@ -421,9 +419,10 @@ interface OpenBodyProps {
 }
 
 function OpenShiftBody({ openingInput, setOpeningInput }: OpenBodyProps) {
+  const { t } = useTranslation();
   return (
     <div style={styles.field}>
-      <label style={styles.label}>Opening cash (MXN)</label>
+      <label style={styles.label}>{t('register.openingCash')} (MXN)</label>
       <input
         autoFocus
         inputMode="decimal"
@@ -432,7 +431,7 @@ function OpenShiftBody({ openingInput, setOpeningInput }: OpenBodyProps) {
         value={openingInput}
         onChange={(e) => setOpeningInput(e.target.value)}
       />
-      <span style={styles.hint}>Use 0 if the drawer starts empty.</span>
+      <span style={styles.hint}>{t('register.openingHint')}</span>
     </div>
   );
 }
@@ -445,16 +444,17 @@ interface CloseBodyProps {
 }
 
 function CloseShiftBody({ register, actualInput, setActualInput, diffPreview }: CloseBodyProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={styles.summaryGrid}>
-        <span>Opened with</span>
+        <span>{t('register.openedWith')}</span>
         <span style={styles.summaryAmt}>{formatMoney(register.opening_amount)}</span>
-        <span>Expected in drawer</span>
+        <span>{t('register.expectedDrawer')}</span>
         <span style={styles.summaryAmt}>{formatMoney(register.expected_amount)}</span>
       </div>
       <div style={styles.field}>
-        <label style={styles.label}>Counted cash (MXN)</label>
+        <label style={styles.label}>{t('register.countedCashLabel')} (MXN)</label>
         <input
           autoFocus
           inputMode="decimal"
@@ -476,7 +476,7 @@ function CloseShiftBody({ register, actualInput, setActualInput, diffPreview }: 
                 : {}),
           }}
         >
-          <span>Difference</span>
+          <span>{t('register.difference')}</span>
           <span style={{ ...styles.summaryAmt, color: 'inherit' }}>
             {diffPreview.value === 0
               ? formatMoney('0')
@@ -492,9 +492,9 @@ function CloseShiftBody({ register, actualInput, setActualInput, diffPreview }: 
 // $0 / default amount. Currently unused; left in for future "quick open" UX.
 export async function confirmAndOpenShift(): Promise<boolean> {
   const ok = await confirmDialog({
-    title: 'Open shift with $0?',
-    message: 'Starts a new register with no cash on hand. You can record movements later.',
-    confirmLabel: 'Open shift',
+    title: tStatic('register.openShiftZero'),
+    message: tStatic('register.openShiftZeroSub'),
+    confirmLabel: tStatic('register.openShift'),
   });
   if (!ok) return false;
   await openRegister({ opening_amount: 0 });

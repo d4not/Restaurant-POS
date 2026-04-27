@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { IconBackspace, IconClose, IconShield } from './Icons';
 import { Spinner } from './Spinner';
+import { useTranslation } from '../i18n';
 
 const REASON_MIN_LENGTH = 5;
 const PIN_LENGTH = 4;
@@ -224,6 +225,7 @@ export function CancelOrderModal({
   onClose,
   onConfirm,
 }: CancelOrderModalProps) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
   const reasonRef = useRef<HTMLTextAreaElement | null>(null);
@@ -281,18 +283,15 @@ export function CancelOrderModal({
             <IconShield style={{ fontSize: 20 }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={styles.title}>Cancel {tableLabel}?</h2>
-            <div style={styles.sub}>
-              The order will be marked CANCELLED and the table will be released.
-              This cannot be undone.
-            </div>
+            <h2 style={styles.title}>{t('orders.cancelTitle')} {tableLabel}</h2>
+            <div style={styles.sub}>{t('cancel.subDescription')}</div>
           </div>
           <button
             type="button"
             style={styles.closeBtn}
             onClick={onClose}
             disabled={busy}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <IconClose style={{ fontSize: 16 }} />
           </button>
@@ -300,12 +299,12 @@ export function CancelOrderModal({
 
         <div style={styles.body}>
           <div>
-            <div style={styles.fieldLabel}>Reason for cancellation</div>
+            <div style={styles.fieldLabel}>{t('cancel.reasonField')}</div>
             <textarea
               ref={reasonRef}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g., Customer changed their mind, wrong table, kitchen out of stock…"
+              placeholder={t('cancel.reasonInputPh')}
               style={styles.reasonInput}
               maxLength={500}
               disabled={busy}
@@ -313,8 +312,8 @@ export function CancelOrderModal({
             <div style={styles.reasonHint}>
               <span style={{ color: reasonValid ? 'var(--green)' : 'var(--text3)' }}>
                 {reasonValid
-                  ? 'Looks good'
-                  : `Minimum ${REASON_MIN_LENGTH} characters`}
+                  ? t('cancel.lengthOk')
+                  : t('cancel.lengthMin').replace('{n}', String(REASON_MIN_LENGTH))}
               </span>
               <span>{reasonClean.length}/500</span>
             </div>
@@ -323,7 +322,7 @@ export function CancelOrderModal({
           <div>
             <div style={styles.fieldLabel}>
               <IconShield style={{ fontSize: 14 }} />
-              Confirm with your PIN
+              {t('cancel.confirmPin')}
             </div>
             <div style={styles.pinDots}>
               {[0, 1, 2, 3].map((i) => (
@@ -348,7 +347,7 @@ export function CancelOrderModal({
                 onClick={() => setPin('')}
                 disabled={busy}
               >
-                Clear
+                {t('login.clear')}
               </button>
               <button
                 type="button"
@@ -363,7 +362,7 @@ export function CancelOrderModal({
                 style={styles.numKeyMuted}
                 onClick={pressBackspace}
                 disabled={busy}
-                aria-label="Backspace"
+                aria-label={t('login.backspace')}
               >
                 <IconBackspace style={{ fontSize: 18 }} />
               </button>
@@ -380,7 +379,7 @@ export function CancelOrderModal({
             onClick={onClose}
             disabled={busy}
           >
-            Keep order
+            {t('cancel.keepOrder')}
           </button>
           <button
             type="button"
@@ -389,7 +388,7 @@ export function CancelOrderModal({
             disabled={!canSubmit}
           >
             {busy ? <Spinner size={14} /> : <IconClose style={{ fontSize: 16 }} />}
-            Cancel order
+            {t('cancel.confirmButton')}
           </button>
         </div>
       </div>

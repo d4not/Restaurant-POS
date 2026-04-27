@@ -1,11 +1,32 @@
 import {
   ALL_TAKEOUT_CHANNELS,
-  TAKEOUT_CHANNEL_HINT,
-  TAKEOUT_CHANNEL_LABEL,
   channelEnabled,
   type SettingsMap,
 } from '../api/settings';
 import type { TakeoutChannel } from '../api/orders';
+import { useTranslation } from '../i18n';
+
+const CHANNEL_LABEL_KEY: Record<TakeoutChannel, string> = {
+  LOCAL: 'takeout.channelLocal',
+  DELIVERY_LOCAL: 'takeout.channelDeliveryLocal',
+  DELIVERY_APP: 'takeout.channelDeliveryApp',
+};
+
+const CHANNEL_HINT_KEY: Record<TakeoutChannel, string> = {
+  LOCAL: 'takeout.channelLocalHint',
+  DELIVERY_LOCAL: 'takeout.channelDeliveryLocalHint',
+  DELIVERY_APP: 'takeout.channelDeliveryAppHint',
+};
+
+/**
+ * Hook variant of TAKEOUT_CHANNEL_LABEL — returns a function that translates a
+ * channel into the active language. Components that need the label inside a
+ * render path can call this and forget about subscribing manually.
+ */
+export function useTakeoutChannelLabel() {
+  const { t } = useTranslation();
+  return (channel: TakeoutChannel) => t(CHANNEL_LABEL_KEY[channel]);
+}
 
 interface Props {
   open: boolean;
@@ -146,13 +167,14 @@ export function TakeoutChannelPicker({
   onCancel,
   onChoose,
 }: Props) {
+  const { t } = useTranslation();
   if (!open) return null;
   return (
     <div style={styles.scrim} onClick={() => !busy && onCancel()}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.head}>
-          <h3 style={styles.title}>New Takeout/Delivery Order</h3>
-          <div style={styles.sub}>Pick the channel for this order.</div>
+          <h3 style={styles.title}>{t('takeout.newTitle')}</h3>
+          <div style={styles.sub}>{t('takeout.pickChannel')}</div>
         </div>
         <div style={styles.body}>
           {ALL_TAKEOUT_CHANNELS.map((ch) => {
@@ -168,10 +190,10 @@ export function TakeoutChannelPicker({
               >
                 <span style={optionDotStyle(DOT_COLOR[ch])} />
                 <span style={styles.optionText}>
-                  <span style={styles.optionTitle}>{TAKEOUT_CHANNEL_LABEL[ch]}</span>
-                  <span style={styles.optionHint}>{TAKEOUT_CHANNEL_HINT[ch]}</span>
+                  <span style={styles.optionTitle}>{t(CHANNEL_LABEL_KEY[ch])}</span>
+                  <span style={styles.optionHint}>{t(CHANNEL_HINT_KEY[ch])}</span>
                 </span>
-                {!enabled && <span style={styles.optionStatus}>Disabled</span>}
+                {!enabled && <span style={styles.optionStatus}>{t('takeout.disabled')}</span>}
               </button>
             );
           })}
@@ -184,7 +206,7 @@ export function TakeoutChannelPicker({
             onClick={onCancel}
             disabled={busy}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       </div>

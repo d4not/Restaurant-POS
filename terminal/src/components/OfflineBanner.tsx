@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getBridge } from '../platform';
+import { useTranslation } from '../i18n';
 
 const styles: Record<string, React.CSSProperties> = {
   banner: {
@@ -31,6 +32,7 @@ const styles: Record<string, React.CSSProperties> = {
 // (navigator.onLine) and Capacitor (@capacitor/network's connectivity events).
 // Renders nothing while online to avoid stealing pixels from the topbar.
 export function OfflineBanner() {
+  const { t } = useTranslation();
   const [online, setOnline] = useState(true);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function OfflineBanner() {
   return (
     <div style={styles.banner} role="status" aria-live="polite">
       <span style={styles.dot} />
-      Offline — actions will fail until the connection is back.
+      {t('status.offlineBanner')}
     </div>
   );
 }

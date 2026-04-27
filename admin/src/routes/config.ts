@@ -1,12 +1,17 @@
 /**
  * Single source of truth for sidebar nav + router paths.
  * Matches the NAV array in mockup.html but mapped to real URLs.
+ *
+ * Labels are i18n keys (resolved at render time) instead of literal strings so
+ * a language switch updates the sidebar without remounting the layout.
  */
+
+import type { TranslationKey } from '../i18n/en';
 
 export interface NavSingle {
   kind: 'single';
   id: string;
-  label: string;
+  labelKey: TranslationKey;
   icon: string;
   path: string;
 }
@@ -14,9 +19,9 @@ export interface NavSingle {
 export interface NavGroup {
   kind: 'group';
   id: string;
-  label: string;
+  labelKey: TranslationKey;
   icon: string;
-  items: { id: string; label: string; path: string }[];
+  items: { id: string; labelKey: TranslationKey; path: string }[];
 }
 
 export type NavEntry = NavSingle | NavGroup;
@@ -25,86 +30,90 @@ export const NAV: NavEntry[] = [
   {
     kind: 'single',
     id: 'dashboard',
-    label: 'Dashboard',
+    labelKey: 'nav.dashboard',
     icon: '◈',
     path: '/',
   },
   {
     kind: 'group',
     id: 'reports',
-    label: 'Reports',
+    labelKey: 'nav.reports',
     icon: '📊',
     items: [
-      { id: 'sales',          label: 'Sales',              path: '/reports/sales' },
-      { id: 'product-costs',  label: 'Product costs',      path: '/reports/product-costs' },
-      { id: 'expenses',       label: 'Expenses & Income',  path: '/reports/expenses' },
+      { id: 'sales',          labelKey: 'nav.salesReport',  path: '/reports/sales' },
+      { id: 'product-costs',  labelKey: 'nav.productCosts', path: '/reports/product-costs' },
+      { id: 'expenses',       labelKey: 'nav.expenses',     path: '/reports/expenses' },
     ],
   },
   {
     kind: 'single',
     id: 'orders',
-    label: 'Orders',
+    labelKey: 'nav.orders',
     icon: '🧾',
     path: '/orders',
   },
   {
     kind: 'group',
     id: 'inventory',
-    label: 'Inventory',
+    labelKey: 'nav.inventory',
     icon: '📦',
     items: [
-      { id: 'supplies',  label: 'Supplies',        path: '/inventory/supplies' },
-      { id: 'movements', label: 'Movements',       path: '/inventory/movements' },
-      { id: 'purchases', label: 'Purchase Orders', path: '/inventory/purchases' },
-      { id: 'suppliers', label: 'Suppliers',       path: '/inventory/suppliers' },
+      { id: 'supplies',  labelKey: 'nav.supplies',  path: '/inventory/supplies' },
+      { id: 'movements', labelKey: 'nav.movements', path: '/inventory/movements' },
+      { id: 'purchases', labelKey: 'nav.purchases', path: '/inventory/purchases' },
+      { id: 'suppliers', labelKey: 'nav.suppliers', path: '/inventory/suppliers' },
     ],
   },
   {
     kind: 'group',
     id: 'menu',
-    label: 'Menu',
+    labelKey: 'nav.menu',
     icon: '🍽',
     items: [
-      { id: 'products',         label: 'Products',         path: '/menu/products' },
-      { id: 'modifier-groups',  label: 'Modifier Groups',  path: '/menu/modifier-groups' },
-      { id: 'categories',       label: 'Categories',       path: '/menu/categories' },
+      { id: 'products',         labelKey: 'nav.products',        path: '/menu/products' },
+      { id: 'modifier-groups',  labelKey: 'nav.modifierGroups',  path: '/menu/modifier-groups' },
+      { id: 'categories',       labelKey: 'nav.categories',      path: '/menu/categories' },
     ],
   },
   {
     kind: 'group',
     id: 'staff',
-    label: 'Staff',
+    labelKey: 'nav.staff',
     icon: '👥',
     items: [
-      { id: 'employees', label: 'Employees',      path: '/staff/employees' },
-      { id: 'cash',      label: 'Cash Registers', path: '/staff/cash-registers' },
+      { id: 'employees', labelKey: 'nav.employees',     path: '/staff/employees' },
+      { id: 'cash',      labelKey: 'nav.cashRegisters', path: '/staff/cash-registers' },
     ],
   },
   {
     kind: 'group',
     id: 'system',
-    label: 'System',
+    labelKey: 'nav.system',
     icon: '⚙',
     items: [
-      { id: 'tables-zones', label: 'Tables & Zones', path: '/system/tables-zones' },
-      { id: 'storages',     label: 'Storages',       path: '/system/storages' },
-      { id: 'settings',     label: 'Settings',       path: '/settings' },
+      { id: 'tables-zones', labelKey: 'nav.tablesZones', path: '/system/tables-zones' },
+      { id: 'storages',     labelKey: 'nav.storages',    path: '/system/storages' },
+      { id: 'settings',     labelKey: 'nav.settings',    path: '/settings' },
     ],
   },
 ];
 
-/** Find the breadcrumb group + label for a given path. */
-export function findBreadcrumb(pathname: string): { label: string; group?: string } {
+/** Find the breadcrumb group + label for a given path. Returns the i18n keys
+ *  that the caller should resolve via t(). */
+export function findBreadcrumb(pathname: string): {
+  labelKey: TranslationKey;
+  groupKey?: TranslationKey;
+} {
   for (const entry of NAV) {
     if (entry.kind === 'single' && entry.path === pathname) {
-      return { label: entry.label };
+      return { labelKey: entry.labelKey };
     }
     if (entry.kind === 'group') {
       const match = entry.items.find(
         (item) => item.path === pathname || pathname.startsWith(item.path + '/'),
       );
-      if (match) return { label: match.label, group: entry.label };
+      if (match) return { labelKey: match.labelKey, groupKey: entry.labelKey };
     }
   }
-  return { label: 'Admin' };
+  return { labelKey: 'topbar.admin' };
 }

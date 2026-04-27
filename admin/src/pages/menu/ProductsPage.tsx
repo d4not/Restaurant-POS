@@ -16,8 +16,10 @@ import {
 } from '../../types/menu';
 import { productTypeTone } from './product-meta';
 import { ProductFormModal } from './ProductFormModal';
+import { useTranslation } from '../../i18n';
 
 export function ProductsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
@@ -89,7 +91,7 @@ export function ProductsPage() {
   const columns: TableColumn<Product>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('products.colName'),
       sortable: true,
       width: '2fr',
       render: (p) => (
@@ -117,14 +119,14 @@ export function ProductsPage() {
     },
     {
       key: 'type',
-      header: 'Type',
+      header: t('common.type'),
       sortable: true,
       width: '130px',
       render: (p) => <Badge tone={productTypeTone(p.type)}>{p.type}</Badge>,
     },
     {
       key: 'category',
-      header: 'Category',
+      header: t('common.category'),
       sortable: true,
       width: '1fr',
       render: (p) => (
@@ -133,7 +135,7 @@ export function ProductsPage() {
     },
     {
       key: 'price',
-      header: 'Price',
+      header: t('common.price'),
       sortable: true,
       width: '140px',
       render: (p) => (
@@ -142,7 +144,7 @@ export function ProductsPage() {
     },
     {
       key: 'food_cost',
-      header: 'Food cost',
+      header: t('products.foodCost'),
       sortable: true,
       width: '120px',
       render: (p) => {
@@ -160,13 +162,13 @@ export function ProductsPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (p) =>
         p.active ? (
-          <Badge tone="green">Active</Badge>
+          <Badge tone="green">{t('common.active')}</Badge>
         ) : (
-          <Badge tone="red">Inactive</Badge>
+          <Badge tone="red">{t('common.inactive')}</Badge>
         ),
     },
   ];
@@ -177,7 +179,7 @@ export function ProductsPage() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search products by name or barcode…"
+          placeholder={t('products.searchPlaceholder')}
         />
 
         <div style={{ minWidth: 180 }}>
@@ -188,7 +190,7 @@ export function ProductsPage() {
             disabled={categoriesQ.isLoading}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All categories</option>
+            <option value="">{t('common.all')}</option>
             {categoriesQ.data?.items.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -204,10 +206,10 @@ export function ProductsPage() {
             onChange={(e) => setTypeFilter(e.target.value as ProductType | '')}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All types</option>
-            {PRODUCT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            <option value="">{t('common.all')}</option>
+            {PRODUCT_TYPES.map((typ) => (
+              <option key={typ} value={typ}>
+                {typ}
               </option>
             ))}
           </select>
@@ -218,11 +220,11 @@ export function ProductsPage() {
           className={`filter-pill ${showInactive ? 'active' : ''}`}
           onClick={() => setShowInactive((v) => !v)}
         >
-          {showInactive ? '✓ Inactive visible' : 'Show inactive'}
+          {showInactive ? `✓ ${t('common.inactive')}` : t('supplies.showInactive')}
         </button>
 
         <Button variant="primary" onClick={() => setModalOpen(true)}>
-          + New product
+          + {t('products.newProduct')}
         </Button>
       </div>
 
@@ -235,11 +237,11 @@ export function ProductsPage() {
         onSortChange={setSort}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage="No products yet"
-        emptySub="Create your first product to start building the menu."
+        emptyMessage={t('products.empty')}
+        emptySub={t('products.subtitle')}
         emptyAction={
           <Button variant="primary" onClick={() => setModalOpen(true)}>
-            + New product
+            + {t('products.newProduct')}
           </Button>
         }
         hasMore={!!query.hasNextPage}

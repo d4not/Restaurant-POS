@@ -5,6 +5,7 @@ import { login } from '../api/auth';
 import { ApiError } from '../api/client';
 import { useAuthStore } from '../store/auth';
 import type { User } from '../types/api';
+import { useTranslation } from '../i18n';
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -23,6 +24,7 @@ const DEV_USER: User = {
 const DEV_TOKEN = 'dev-local-bypass';
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const token = useAuthStore((s) => s.token);
@@ -55,7 +57,7 @@ export function LoginPage() {
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Unable to sign in.';
+            : t('auth.invalidCredentials');
       setError(message);
     } finally {
       setLoading(false);
@@ -67,15 +69,15 @@ export function LoginPage() {
       <div className="auth-card">
         <div className="auth-brand">
           <div className="brand-mark">R</div>
-          <h1>Restaurant POS</h1>
-          <div className="tag">Admin panel</div>
+          <h1>{t('nav.brand')}</h1>
+          <div className="tag">{t('auth.adminPanel')}</div>
         </div>
 
         {error && <div className="auth-alert">{error}</div>}
 
         <form onSubmit={onSubmit} noValidate>
           <div className="field">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">{t('auth.email')}</label>
             <input
               id="email"
               type="email"
@@ -88,7 +90,7 @@ export function LoginPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">{t('auth.password')}</label>
             <input
               id="password"
               type="password"
@@ -109,7 +111,7 @@ export function LoginPage() {
             loading={loading}
             disabled={!email || !password}
           >
-            Sign in
+            {t('auth.signIn')}
           </Button>
         </form>
 

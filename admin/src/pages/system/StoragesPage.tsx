@@ -5,8 +5,10 @@ import { SearchInput } from '../../components/forms/SearchInput';
 import { useStoragesInfinite } from '../../hooks/useStorages';
 import type { Storage } from '../../types/inventory';
 import { StorageFormModal } from './StorageFormModal';
+import { useTranslation } from '../../i18n';
 
 export function StoragesPage() {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
@@ -57,14 +59,14 @@ export function StoragesPage() {
   const columns: TableColumn<Storage>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('storages.colName'),
       sortable: true,
       width: '1.5fr',
       render: (s) => <div className="fw-600 fs-13">{s.name}</div>,
     },
     {
       key: 'address',
-      header: 'Address',
+      header: t('storages.colAddress'),
       sortable: true,
       width: '2fr',
       render: (s) => (
@@ -73,13 +75,13 @@ export function StoragesPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (s) =>
         s.active ? (
-          <Badge tone="green">Active</Badge>
+          <Badge tone="green">{t('common.active')}</Badge>
         ) : (
-          <Badge tone="red">Inactive</Badge>
+          <Badge tone="red">{t('common.inactive')}</Badge>
         ),
     },
   ];
@@ -90,7 +92,7 @@ export function StoragesPage() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search storages…"
+          placeholder={t('common.search')}
         />
 
         <button
@@ -98,11 +100,11 @@ export function StoragesPage() {
           className={`filter-pill ${showInactive ? 'active' : ''}`}
           onClick={() => setShowInactive((v) => !v)}
         >
-          {showInactive ? '✓ Inactive visible' : 'Show inactive'}
+          {showInactive ? `✓ ${t('common.inactive')}` : t('supplies.showInactive')}
         </button>
 
         <Button variant="primary" onClick={openCreate}>
-          + New storage
+          + {t('storages.newStorage')}
         </Button>
       </div>
 
@@ -115,11 +117,11 @@ export function StoragesPage() {
         onSortChange={setSort}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage="No storages yet"
-        emptySub="Add a storage location — bar, warehouse, fridge — to track stock against."
+        emptyMessage={t('storages.empty')}
+        emptySub={t('storages.subtitle')}
         emptyAction={
           <Button variant="primary" onClick={openCreate}>
-            + New storage
+            + {t('storages.newStorage')}
           </Button>
         }
         hasMore={!!query.hasNextPage}

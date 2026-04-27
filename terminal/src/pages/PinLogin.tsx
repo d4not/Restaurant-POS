@@ -8,6 +8,7 @@ import {
   defaultServerUrlForPlatform,
   saveServerUrl,
 } from '../store/serverUrl';
+import { useTranslation } from '../i18n';
 
 const PIN_LENGTH = 4;
 
@@ -176,6 +177,7 @@ const dotStyle = (filled: boolean): React.CSSProperties => ({
 });
 
 export function PinLogin() {
+  const { t } = useTranslation();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -197,8 +199,8 @@ export function PinLogin() {
     if (!sessionExpired) return;
     setExpiredToast(true);
     consumeSessionExpired();
-    const t = window.setTimeout(() => setExpiredToast(false), 6000);
-    return () => window.clearTimeout(t);
+    const handle = window.setTimeout(() => setExpiredToast(false), 6000);
+    return () => window.clearTimeout(handle);
   }, [sessionExpired, consumeSessionExpired]);
 
   // Submit as soon as the user has entered the full PIN. The PIN length is
@@ -217,7 +219,7 @@ export function PinLogin() {
         signIn(res.token, res.user);
       })
       .catch((err) => {
-        const message = err instanceof ApiError ? err.message : 'Could not sign in';
+        const message = err instanceof ApiError ? err.message : t('login.couldNotSignIn');
         haptics.error();
         setError(message);
         setPin('');
@@ -227,7 +229,7 @@ export function PinLogin() {
       .finally(() => {
         setBusy(false);
       });
-  }, [pin, signIn, haptics]);
+  }, [pin, signIn, haptics, t]);
 
   // Hardware keyboard support — handy for development and accessibility.
   useEffect(() => {
@@ -270,7 +272,7 @@ export function PinLogin() {
     const current = getApiBase();
     const example = defaultServerUrlForPlatform() || 'http://192.168.1.100:3000/api/v1';
     const next = window.prompt(
-      `Server URL\n\nExample: ${example}`,
+      `${t('login.serverPromptTitle')}\n\n${t('login.serverPromptExample')}: ${example}`,
       current,
     );
     if (next == null) return;
@@ -290,13 +292,13 @@ export function PinLogin() {
     <div style={{ ...styles.root, position: 'relative' }}>
       {expiredToast && (
         <div style={styles.expiredToast} role="alert">
-          Session expired. Please sign in again.
+          {t('login.sessionExpiredToast')}
         </div>
       )}
       <div style={styles.card}>
         <div style={styles.brand}>R</div>
-        <h1 style={styles.title}>Welcome back</h1>
-        <p style={styles.sub}>Enter your PIN to continue</p>
+        <h1 style={styles.title}>{t('login.welcomeBack')}</h1>
+        <p style={styles.sub}>{t('login.pinPrompt')}</p>
 
         <div style={styles.dots}>
           {Array.from({ length: PIN_LENGTH }).map((_, i) => (
@@ -324,7 +326,7 @@ export function PinLogin() {
             onClick={clearAll}
             disabled={busy}
           >
-            Clear
+            {t('login.clear')}
           </button>
           <button
             type="button"
@@ -339,19 +341,19 @@ export function PinLogin() {
             style={styles.keyAction}
             onClick={backspace}
             disabled={busy}
-            aria-label="Backspace"
+            aria-label={t('login.backspace')}
           >
             <IconBackspace style={{ fontSize: 20 }} />
           </button>
         </div>
 
-        {busy && <div style={styles.spinner}>Signing in…</div>}
+        {busy && <div style={styles.spinner}>{t('login.signingIn')}</div>}
 
         <div style={styles.serverFooter}>
-          <span style={styles.serverLabel}>Server</span>
-          <span style={styles.serverValue}>{serverUrl || 'Not configured'}</span>
+          <span style={styles.serverLabel}>{t('login.serverLabel')}</span>
+          <span style={styles.serverValue}>{serverUrl || t('login.serverNotConfigured')}</span>
           <button type="button" style={styles.serverButton} onClick={configureServer}>
-            Change server
+            {t('login.changeServer')}
           </button>
         </div>
       </div>

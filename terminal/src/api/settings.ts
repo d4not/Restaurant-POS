@@ -7,6 +7,22 @@ export function fetchSettings(): Promise<SettingsMap> {
   return api.get<SettingsMap>('/settings');
 }
 
+export type LanguageCode = 'en' | 'es';
+
+export async function fetchLanguageSetting(): Promise<LanguageCode> {
+  const data = await api.get<{ value: string }>('/settings/language');
+  return data.value === 'es' ? 'es' : 'en';
+}
+
+export async function updateLanguageSetting(
+  value: LanguageCode,
+): Promise<LanguageCode> {
+  const data = await api.patch<{ value: string }>('/settings/language', {
+    value,
+  });
+  return data.value === 'es' ? 'es' : 'en';
+}
+
 const CHANNEL_KEY: Record<TakeoutChannel, string> = {
   LOCAL: 'takeout_channel_local_active',
   DELIVERY_LOCAL: 'takeout_channel_delivery_local_active',

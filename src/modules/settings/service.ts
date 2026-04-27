@@ -1,7 +1,13 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError } from '../../lib/errors.js';
-import { SETTING_KEYS, type UpdateSettingsInput } from './schema.js';
+import {
+  LANGUAGE_DEFAULT,
+  LANGUAGE_VALUES,
+  SETTING_KEYS,
+  type LanguageCode,
+  type UpdateSettingsInput,
+} from './schema.js';
 
 type PrismaLike = Prisma.TransactionClient | typeof prisma;
 
@@ -58,4 +64,21 @@ export async function updateSettings(
   );
 
   return getAllSettings();
+}
+
+export async function getLanguage(): Promise<LanguageCode> {
+  const value = await getSetting(SETTING_KEYS.LANGUAGE);
+  if (value && (LANGUAGE_VALUES as readonly string[]).includes(value)) {
+    return value as LanguageCode;
+  }
+  return LANGUAGE_DEFAULT;
+}
+
+export async function setLanguage(value: LanguageCode): Promise<LanguageCode> {
+  await prisma.setting.upsert({
+    where: { key: SETTING_KEYS.LANGUAGE },
+    create: { key: SETTING_KEYS.LANGUAGE, value },
+    update: { value },
+  });
+  return value;
 }

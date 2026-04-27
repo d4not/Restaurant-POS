@@ -7,8 +7,10 @@ import { useSupplies } from '../../hooks/useSupplies';
 import { useSupplyCategories } from '../../hooks/useSupplyCategories';
 import { formatMoney, formatNumber } from '../../utils/format';
 import type { Supply } from '../../types/inventory';
+import { useTranslation } from '../../i18n';
 
 export function SuppliesPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
@@ -58,7 +60,7 @@ export function SuppliesPage() {
   const columns: TableColumn<Supply>[] = [
     {
       key: 'name',
-      header: 'Name',
+      header: t('supplies.colName'),
       sortable: true,
       width: '2fr',
       render: (row) => (
@@ -72,7 +74,7 @@ export function SuppliesPage() {
     },
     {
       key: 'category',
-      header: 'Category',
+      header: t('supplies.colCategory'),
       sortable: true,
       width: '1fr',
       render: (row) => (
@@ -81,14 +83,14 @@ export function SuppliesPage() {
     },
     {
       key: 'base_unit',
-      header: 'Base unit',
+      header: t('supplies.baseUnit'),
       sortable: true,
       width: '110px',
       render: (row) => <Badge tone="gray">{row.base_unit}</Badge>,
     },
     {
       key: 'content',
-      header: 'Content',
+      header: t('supplies.contentPerUnit'),
       width: '130px',
       render: (row) =>
         row.content_per_unit && row.content_unit ? (
@@ -101,7 +103,7 @@ export function SuppliesPage() {
     },
     {
       key: 'avg_cost',
-      header: 'Avg cost',
+      header: t('supplies.colCost'),
       sortable: true,
       width: '120px',
       render: (row) => (
@@ -112,13 +114,13 @@ export function SuppliesPage() {
     },
     {
       key: 'status',
-      header: 'Status',
+      header: t('common.status'),
       width: '110px',
       render: (row) =>
         row.active ? (
-          <Badge tone="green">Active</Badge>
+          <Badge tone="green">{t('common.active')}</Badge>
         ) : (
-          <Badge tone="red">Inactive</Badge>
+          <Badge tone="red">{t('common.inactive')}</Badge>
         ),
     },
   ];
@@ -129,7 +131,7 @@ export function SuppliesPage() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search supplies by name or barcode…"
+          placeholder={t('supplies.searchPlaceholder')}
         />
 
         <div style={{ minWidth: 180 }}>
@@ -140,7 +142,7 @@ export function SuppliesPage() {
             disabled={categoriesQ.isLoading}
             style={{ cursor: 'pointer' }}
           >
-            <option value="">All categories</option>
+            <option value="">{t('common.all')} — {t('supplies.colCategory')}</option>
             {categoriesQ.data?.items.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -154,17 +156,17 @@ export function SuppliesPage() {
           className={`filter-pill ${showInactive ? 'active' : ''}`}
           onClick={() => setShowInactive((v) => !v)}
         >
-          {showInactive ? '✓ Inactive visible' : 'Show inactive'}
+          {showInactive ? `✓ ${t('common.inactive')}` : t('supplies.showInactive')}
         </button>
 
         <Button
           variant="secondary"
           onClick={() => navigate('/inventory/supplies/quick-add')}
         >
-          ⚡ Quick add (scan)
+          ⚡ {t('supplies.quickAdd')}
         </Button>
         <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
-          + New supply
+          + {t('supplies.newSupply')}
         </Button>
       </div>
 
@@ -177,11 +179,11 @@ export function SuppliesPage() {
         onSortChange={setSort}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage="No supplies yet"
-        emptySub="Create your first supply to start tracking inventory."
+        emptyMessage={t('supplies.empty')}
+        emptySub={t('supplies.subtitle')}
         emptyAction={
           <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
-            + New supply
+            + {t('supplies.newSupply')}
           </Button>
         }
         hasMore={!!query.hasNextPage}
