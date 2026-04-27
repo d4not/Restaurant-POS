@@ -1,66 +1,187 @@
+<div align="center">
+
+<img src="docs/screenshots/logo.png" alt="Restaurant POS" width="120" />
+
 # Restaurant POS
 
-A self-hosted Point of Sale system for cafés and small restaurants. Designed to run on the local network: a Node.js backend, a web admin panel, an Electron POS terminal for the cashier station, and a Capacitor Android tablet app for waiters.
+A self-hosted Point of Sale system for cafés and small restaurants — runs on your local network, no cloud, no subscription.
+
+[![Node](https://img.shields.io/badge/Node-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![Capacitor](https://img.shields.io/badge/Capacitor-7-119EFF?logo=capacitor&logoColor=white)](https://capacitorjs.com/)
+
+</div>
+
+---
+
+## At a glance
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/screenshots/admin-dashboard.png" alt="Admin dashboard" />
+<p align="center"><sub><b>Admin panel</b> — sales, inventory, products, staff, reports</sub></p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/screenshots/terminal-floor-plan.png" alt="Terminal floor plan" />
+<p align="center"><sub><b>Terminal floor plan</b> — tap a table to open a ticket</sub></p>
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<img src="docs/screenshots/terminal-table-detail.png" alt="Terminal table detail" />
+<p align="center"><sub><b>Terminal order workspace</b> — products, ticket with course tracking, send to kitchen, split payment</sub></p>
+</td>
+</tr>
+</table>
+
+---
+
+## What's in the box
+
+| App                 | Stack                                     | Runs on                                     |
+| ------------------- | ----------------------------------------- | ------------------------------------------- |
+| **Backend API**     | Node 20 · Express · Prisma · Zod · JWT    | A LAN server (Linux / macOS / Windows)      |
+| **Admin panel**     | React 18 · Vite · TanStack Query          | Any modern browser                          |
+| **Terminal Desktop** | Electron 30 · React · `node-thermal-printer` | Cashier PC — drives USB / network printers |
+| **Terminal Mobile** | Capacitor 7 · React (shared with Desktop) | Android tablet — sideload the APK          |
+
+A single backend serves all three clients over the LAN. The two terminal builds share their UI through a thin platform-abstraction layer; only printing, storage, and haptics are implemented twice.
+
+---
 
 ## Architecture
 
 ```
-┌──────────────┐        ┌──────────────────┐
-│  /admin      │  HTTP  │                  │   PostgreSQL
-│  React/Vite  ├───────►│   /src           ├───────────────┐
-└──────────────┘        │   Express + JWT  │               │
-                        │   Prisma ORM     │               ▼
-┌──────────────┐  HTTP  │                  │           ┌──────┐
-│  /terminal   ├───────►│   :3000          │           │  DB  │
-│  Electron    │        └──────────────────┘           └──────┘
-└──────────────┘                ▲
-                                │ HTTP (LAN)
-┌──────────────────┐            │
-│ /terminal-mobile ├────────────┘
+┌──────────────┐        ┌────────────────────┐
+│  /admin      │  HTTPS │                    │      PostgreSQL
+│  React/Vite  ├───────►│   /src             ├───────────────────┐
+│  (browser)   │        │   Express + JWT    │                   │
+└──────────────┘        │   Prisma + Zod     │                   ▼
+                        │   ESC/POS printer  │              ┌──────────┐
+┌──────────────┐  HTTP  │                    │              │   DB     │
+│  /terminal   ├───────►│   :3000            │              └──────────┘
+│  Electron    │        └────────────────────┘
+│  (cashier)   │                  ▲
+└──────────────┘                  │ HTTP (LAN)
+                                  │
+┌──────────────────┐              │
+│ /terminal-mobile ├──────────────┘
 │ Capacitor (APK)  │
+│ (waiter tablet)  │
 └──────────────────┘
 ```
 
-| Folder              | Stack                                   | Role                                          |
-| ------------------- | --------------------------------------- | --------------------------------------------- |
-| `src/`              | Node.js 20 + Express + Prisma + Zod     | REST API (`/api/v1`), JWT auth, ESC/POS print |
-| `prisma/`           | PostgreSQL 16 schema + migrations + seed | Single source of truth for the data model     |
-| `admin/`            | React 18 + Vite + TanStack Query        | Back-office: products, supplies, reports      |
-| `terminal/`         | Electron 30 + React + node-thermal-printer | Cashier station — runs on a local PC      |
-| `terminal-mobile/`  | Capacitor 7 (Android) reusing `terminal/src` | Waiter tablet — APK in landscape          |
-| `apk/`              | —                                       | Pre-built debug APK (`pos-terminal-debug.apk`) |
-| `docs/`             | —                                       | `SPEC.md`, `PERMISSIONS.md`, design references |
+| Folder              | Purpose                                                |
+| ------------------- | ------------------------------------------------------ |
+| `src/`              | Express REST API (`/api/v1/...`), JWT auth, ESC/POS print |
+| `prisma/`           | PostgreSQL schema, migrations, demo seed               |
+| `admin/`            | Back-office for products, supplies, reports            |
+| `terminal/`         | Cashier station — Electron, runs on a local PC         |
+| `terminal-mobile/`  | Waiter tablet — Capacitor, lands on Android in landscape |
+| `apk/`              | Pre-built debug APK for sideloading                    |
+| `docs/`             | Specs, design references, screenshots                  |
 
 ---
 
-## Prerequisites
+## Quick start
 
-- **Node.js 20+** and **npm 10+**
-- **PostgreSQL 16** (any local instance works)
-- **Java JDK 21** + **Android SDK** — only required to *rebuild* the mobile APK
-- A LAN where the backend host has a reachable address from the tablet (any private IP works — no fixed addresses required)
-
----
-
-## 1. Backend API
+> **Need:** Node 20+, PostgreSQL 16, and a LAN your tablet can reach. To rebuild the APK: JDK 21 and an Android SDK.
 
 ```bash
-# install root dependencies (backend + workspaces)
+# 1 — install workspace dependencies
 npm install
 
-# create the database and copy the env template
-cp .env.example .env
-# then edit .env — at minimum set DATABASE_URL and JWT_SECRET
-
-# apply migrations and seed demo data (products, supplies, users)
+# 2 — set up the database
+cp .env.example .env                       # edit DATABASE_URL and JWT_SECRET
 npx prisma migrate deploy
-npx prisma db seed
+npx prisma db seed                         # demo products, supplies, users
 
-# start the API on port 3000
+# 3 — run the API on http://0.0.0.0:3000
 npm run dev
 ```
 
-`.env` keys (see `.env.example`):
+Then start any of the clients:
+
+<details>
+<summary><b>Admin panel</b> — http://localhost:5174</summary>
+
+```bash
+cd admin
+npm install
+npm run dev
+```
+
+Sign in as `admin@pos.local` / `admin123`.
+
+</details>
+
+<details>
+<summary><b>Terminal Desktop (Electron)</b> — opens a window</summary>
+
+```bash
+cd terminal
+npm install
+npm run dev          # Vite + Electron with hot reload
+```
+
+PIN login uses the seeded users (see [Test credentials](#test-credentials)). The renderer auto-resolves the API on the same hostname at port 3000; override with `VITE_API_URL` or change it from the in-app **Settings** modal.
+
+Production build:
+
+```bash
+npm run build        # packages an installer with electron-builder
+```
+
+</details>
+
+<details>
+<summary><b>Terminal Mobile (Android tablet)</b> — install the APK</summary>
+
+A debug-signed APK is committed at [`apk/pos-terminal-debug.apk`](apk/pos-terminal-debug.apk).
+
+1. Enable **Install unknown apps** for your file manager on the tablet.
+2. Copy the APK over USB / Drive / email and tap to install.
+3. Launch **POS Terminal**. The PIN screen shows the current server URL at the bottom and a **Change server** button.
+4. Tap **Change server**, enter `http://<your-server-lan-ip>:3000/api/v1`, OK.
+5. Sign in with a PIN.
+
+The URL is persisted in Capacitor Preferences and survives app restarts. **No fixed IP is required** — the app works on any network as long as the backend is reachable.
+
+</details>
+
+<details>
+<summary><b>Rebuild the APK</b></summary>
+
+```bash
+cd terminal-mobile
+npm install
+
+# (optional) bake in a default server URL so first launch skips manual setup
+echo 'VITE_MOBILE_DEFAULT_SERVER_URL=http://192.168.1.42:3000/api/v1' > .env
+
+npm run build
+npx cap sync android
+
+cd android
+ANDROID_HOME=/path/to/android-sdk \
+JAVA_HOME=/path/to/jdk-21 \
+./gradlew assembleDebug
+```
+
+Output: `terminal-mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+</details>
+
+---
+
+## Configuration
+
+### Backend (`.env`)
 
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/restaurant_pos?schema=public"
@@ -72,97 +193,25 @@ NODE_ENV="development"
 LOG_LEVEL="debug"
 ```
 
-The API listens on `http://localhost:3000` by default and binds to all interfaces, so any LAN client can reach it at `http://<host-ip>:3000/api/v1`.
+### Network printers
 
-Run the test suite:
+ESC/POS over TCP (port 9100 by default). Configure addresses from the admin panel under **System → Settings**, or the `Settings` table:
 
-```bash
-npm test
-```
+| Key                      | Example         | Notes                              |
+| ------------------------ | --------------- | ---------------------------------- |
+| `printer_kitchen_ip`     | `192.168.1.50`  | Kitchen comanda printer            |
+| `printer_kitchen_port`   | `9100`          | TCP port                           |
+| `printer_receipt_ip`     | `192.168.1.51`  | Customer receipt printer           |
+| `printer_receipt_port`   | `9100`          |                                    |
+| `printer_paper_width`    | `58` or `80`    | Receipt width in mm                |
 
----
-
-## 2. Admin Panel
-
-```bash
-cd admin
-npm install
-npm run dev   # http://localhost:5174
-```
-
-Sign in with the seeded admin: **`admin@pos.local` / `admin123`**.
-
-The admin panel reads `VITE_API_URL` if set, otherwise it auto-resolves the API on the same hostname at port 3000 (so a tablet browsing the dev preview at `192.168.x.y:5174` automatically talks to `192.168.x.y:3000`).
+The mobile build calls `POST /api/v1/print/kitchen` and `POST /api/v1/print/receipt`. The desktop build can either delegate to the same endpoints or print directly via Electron + `node-thermal-printer`.
 
 ---
 
-## 3. Terminal Desktop (Electron)
+## Test credentials
 
-```bash
-cd terminal
-npm install
-npm run dev   # opens the Electron window with hot reload
-```
-
-PIN login uses the seeded users — see [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). Defaults: ADMIN PIN **1234**, CASHIER **2002**, WAITER **2004**.
-
-Production build:
-
-```bash
-cd terminal
-npm run build
-```
-
-The Electron renderer auto-detects the API on the same host (port 3000). To override, edit the server URL inside the **Settings** modal or set `VITE_API_URL` at build time.
-
----
-
-## 4. Terminal Mobile (Android tablet)
-
-### Option A — install the pre-built APK
-
-A debug-signed APK is committed at [`apk/pos-terminal-debug.apk`](apk/pos-terminal-debug.apk). To use it:
-
-1. Enable **Install unknown apps** for your file manager on the tablet.
-2. Copy the APK over USB / Drive / email and tap to install.
-3. Launch **POS Terminal**. The PIN screen shows the current server URL at the bottom and a **Change server** button.
-4. Tap **Change server**, enter your backend URL (e.g. `http://192.168.1.42:3000/api/v1`), and tap OK.
-5. Sign in with a PIN.
-
-The URL is persisted in Capacitor Preferences and survives app restarts. There is no hardcoded LAN address — the app works on any network as long as the backend is reachable from the tablet.
-
-### Option B — rebuild the APK yourself
-
-Requires JDK 21 and an Android SDK with `build-tools` and `platforms;android-34`.
-
-```bash
-cd terminal-mobile
-npm install
-
-# (optional) bake in a default server URL so first-launch users
-# don't have to configure it manually
-echo 'VITE_MOBILE_DEFAULT_SERVER_URL=http://192.168.1.42:3000/api/v1' > .env
-
-# build the web bundle and sync into the Android project
-npm run build
-npx cap sync android
-
-# build the debug APK
-cd android
-ANDROID_HOME=/path/to/android-sdk \
-JAVA_HOME=/path/to/jdk-21 \
-./gradlew assembleDebug
-```
-
-Output: `terminal-mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
-
-The mobile build never imports Capacitor plugins from `terminal/src` directly — the platform abstraction in [`terminal/src/platform/`](terminal/src/platform/) keeps print, storage, haptics, and network calls swappable per platform. Printing on the tablet is delegated to the backend (`POST /api/v1/print/kitchen|receipt`); the desktop terminal uses node-thermal-printer over IPC instead.
-
----
-
-## Test credentials (seed data)
-
-Created by `npx prisma db seed`. See [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md) for the full role matrix.
+Seeded by `npx prisma db seed`. See [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md) for the full role matrix and what each role can do.
 
 | Role     | Name              | Email             | PIN  | Admin password |
 | -------- | ----------------- | ----------------- | ---- | -------------- |
@@ -172,40 +221,53 @@ Created by `npx prisma db seed`. See [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md
 | BARISTA  | Sofia Hernandez   | sofia@pos.local   | 2001 | —              |
 | WAITER   | Andrea Valdez     | andrea@pos.local  | 2004 | —              |
 
-These are demo accounts for local development — change them before any non-local deployment.
+> Demo accounts only — change them before any non-local deployment.
 
 ---
 
-## Network printing
+## Highlights
 
-The backend speaks ESC/POS over TCP (port 9100 by default) to network thermal printers. Configure the printer addresses in the admin panel under **System → Settings**, or via the `Settings` table directly:
-
-```
-printer_kitchen_ip    e.g. 192.168.1.50
-printer_kitchen_port  9100
-printer_receipt_ip    e.g. 192.168.1.51
-printer_receipt_port  9100
-printer_paper_width   58 or 80 (mm)
-```
-
-The mobile app calls `POST /api/v1/print/kitchen` and `POST /api/v1/print/receipt`; the desktop terminal can either delegate to the same endpoints or print directly via Electron + `node-thermal-printer`.
+- **Inventory the way real cafés use it.** 3-layer unit model (purchase / inventory / recipe), weighted-average cost, multi-storage stock, transfers, write-offs, partial-bottle tare weights for liquor inventory.
+- **Recipes that update with cost.** Modifier groups support both *swap* (replace an ingredient) and *add* (stack on top); recipe cost recalculates on every purchase confirmation.
+- **Tax-inclusive prices.** Prices are entered as the customer pays them; the API splits subtotal and tax server-side.
+- **Single-transaction sale deduction.** Closing an order updates stock, logs the movement, and updates WAC inside a single Prisma transaction.
+- **Role-based gates, both in UI and API.** Waiters can't process payment; cashiers can't delete tables. PIN step-up authorizes destructive actions like cancelling a sent ticket.
+- **Offline-aware tablet.** TanStack Query auto-pauses while the WiFi drops; an orange banner surfaces the state without locking the cashier out of cached data.
 
 ---
 
-## Repository layout cheatsheet
+## Tests
+
+```bash
+npm test                                   # backend Vitest + Supertest suite
+```
+
+The suite covers auth, orders, payments, inventory deduction, print formatting, and PIN step-up gates.
+
+---
+
+## Repository layout
 
 ```
 .
 ├── src/                  Express API source
 ├── prisma/               schema, migrations, seed
-├── admin/                React admin panel
-├── terminal/             Electron desktop POS
+├── admin/                React admin panel (Vite)
+├── terminal/             Electron desktop POS (Vite renderer)
 ├── terminal-mobile/      Capacitor Android tablet POS
 ├── apk/                  Pre-built debug APK
-├── tests/                Vitest + Supertest test suite
-├── docs/                 Specs and design references
+├── tests/                Vitest + Supertest suite
+├── docs/                 Specs, design refs, screenshots
 └── scripts/              one-off maintenance scripts
 ```
+
+For deeper docs:
+
+- [`docs/SPEC.md`](docs/SPEC.md) — backend business logic
+- [`docs/FRONTEND-SPEC.md`](docs/FRONTEND-SPEC.md) — admin panel
+- [`docs/TERMINAL-SPEC.md`](docs/TERMINAL-SPEC.md) — Electron terminal
+- [`docs/MOBILE-SPEC.md`](docs/MOBILE-SPEC.md) — Capacitor tablet
+- [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md) — role matrix
 
 ---
 
