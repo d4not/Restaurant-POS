@@ -822,7 +822,7 @@ async function main(): Promise<void> {
       supply_id: water.id,
       tax_id: tax.id,
       image_url:
-        'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=480&q=70',
+        'https://images.unsplash.com/photo-1561041695-d2fadf9f318c?auto=format&fit=crop&w=480&q=70',
     },
   });
 
