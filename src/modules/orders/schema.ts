@@ -109,6 +109,10 @@ export const createPaymentSchema = z
     method: z.nativeEnum(PaymentMethod),
     amount: z.number().int().positive(),
     reference: z.string().max(200).nullable().optional(),
+    // Required only when the JWT user is WAITER/BARISTA. Validated against any
+    // active CASHIER/MANAGER/ADMIN PIN by the service layer; the matching user
+    // is persisted on Payment.approved_by_user_id for audit.
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits').optional(),
   })
   .strict();
 

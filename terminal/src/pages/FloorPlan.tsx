@@ -54,81 +54,59 @@ const styles: Record<string, CSSProperties> = {
     minHeight: 0,
     background: 'var(--bg)',
   },
-  head: {
-    padding: '20px 28px 14px',
-    borderBottom: '1px solid var(--border)',
-    display: 'flex',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 16,
-    flexWrap: 'wrap',
-  },
-  titleBlock: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  title: {
-    fontFamily: "'Playfair Display', serif",
-    fontSize: 28,
-    fontWeight: 600,
-    margin: 0,
-    color: 'var(--text1)',
-  },
-  sub: { fontSize: 12, color: 'var(--text2)', marginTop: 4 },
-  legend: {
+  zoneBar: {
     display: 'flex',
     alignItems: 'center',
-    gap: 18,
-    fontSize: 12,
-    color: 'var(--text2)',
-    flexWrap: 'wrap',
+    gap: 12,
+    padding: '10px 20px',
+    borderBottom: '1px solid var(--border)',
+    background: 'var(--bg)',
   },
-  legendItem: { display: 'inline-flex', alignItems: 'center', gap: 6 },
-  toolbar: { display: 'flex', alignItems: 'center', gap: 10 },
   zoneTabs: {
     display: 'flex',
-    gap: 6,
-    padding: '14px 28px',
-    borderBottom: '1px solid var(--border)',
+    gap: 4,
+    flex: 1,
+    minWidth: 0,
     overflowX: 'auto',
+  },
+  zoneActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   body: {
     flex: 1,
     minHeight: 0,
-    padding: '24px 28px',
+    padding: '14px 20px 20px',
     overflow: 'hidden',
     position: 'relative',
   },
 };
 
-const swatchStyle = (color: string): CSSProperties => ({
-  width: 12,
-  height: 12,
-  borderRadius: 3,
-  background: color,
-  boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.06)',
-});
-
 const editToggleStyle = (active: boolean): CSSProperties => ({
-  padding: '10px 16px',
-  borderRadius: 10,
+  padding: '8px 14px',
+  borderRadius: 8,
   border: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
   background: active ? 'var(--text1)' : 'var(--bg2)',
-  color: active ? '#fff' : 'var(--text1)',
-  fontSize: 13,
+  color: active ? '#fff' : 'var(--text2)',
+  fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
   minHeight: 40,
   fontFamily: 'inherit',
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 8,
+  gap: 6,
 });
 
 const addButtonStyle: CSSProperties = {
-  padding: '10px 14px',
-  borderRadius: 10,
+  padding: '8px 12px',
+  borderRadius: 8,
   border: '1px solid var(--border)',
   background: 'var(--bg2)',
   color: 'var(--text1)',
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
   minHeight: 40,
@@ -139,8 +117,8 @@ const addButtonStyle: CSSProperties = {
 };
 
 const zoneTabStyle = (active: boolean): CSSProperties => ({
-  padding: '10px 16px',
-  borderRadius: 10,
+  padding: '9px 14px',
+  borderRadius: 8,
   fontSize: 13,
   fontWeight: 600,
   color: active ? 'var(--text1)' : 'var(--text2)',
@@ -150,14 +128,28 @@ const zoneTabStyle = (active: boolean): CSSProperties => ({
   minHeight: 40,
   whiteSpace: 'nowrap',
   fontFamily: 'inherit',
+  display: 'inline-flex',
+  alignItems: 'center',
 });
 
-const LEGEND = [
-  { color: 'var(--green)', label: 'Available' },
-  { color: 'var(--gold)', label: 'Occupied' },
-  { color: 'var(--red)', label: 'Needs attention' },
-  { color: '#3a566b', label: 'Reserved' },
-];
+const zoneCountStyle = (count: number, active: boolean): CSSProperties => ({
+  marginLeft: 8,
+  padding: count > 0 ? '1px 7px' : '0',
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  fontVariantNumeric: 'tabular-nums',
+  minWidth: count > 0 ? 18 : 'auto',
+  textAlign: 'center',
+  background:
+    count > 0
+      ? active
+        ? 'var(--gold)'
+        : 'rgba(201,164,92,0.16)'
+      : 'transparent',
+  color:
+    count > 0 ? (active ? '#2c2420' : 'var(--gold)') : 'var(--text3)',
+});
 
 // Edit-mode capabilities:
 // - WAITER: cannot enter edit mode at all (button hidden).
@@ -445,17 +437,19 @@ export function FloorPlan() {
     if (!zones) return [];
     const dineInZones = zones.filter((z) => z.kind !== 'TAKEOUT');
     const takeoutZone = zones.find((z) => z.kind === 'TAKEOUT');
+    const activeIn = (z: FloorZone) =>
+      z.tables.reduce((a, t) => a + t.open_order_count, 0);
     const tabs = [
       {
         id: ALL_ZONES,
         name: 'All Zones',
-        count: dineInZones.reduce((a, z) => a + z.tables.length, 0),
+        count: dineInZones.reduce((a, z) => a + activeIn(z), 0),
         kind: 'DINE_IN' as const,
       },
       ...dineInZones.map((z) => ({
         id: z.id,
         name: z.name,
-        count: z.tables.length,
+        count: activeIn(z),
         kind: z.kind,
       })),
     ];
@@ -1156,33 +1150,26 @@ export function FloorPlan() {
     if (!editing) setSelection(null);
   }, [editing]);
 
-  const zoneCount = zoneTabs.length - 1;
-  const totalTables = zones?.reduce((a, z) => a + z.tables.length, 0) ?? 0;
-  const totalOpen =
-    zones?.reduce(
-      (a, z) => a + z.tables.reduce((b, t) => b + t.open_order_count, 0),
-      0,
-    ) ?? 0;
-
   return (
     <div style={styles.root}>
-      <header style={styles.head}>
-        <div style={styles.titleBlock}>
-          <h1 style={styles.title}>Floor Plan</h1>
-          <div style={styles.sub}>
-            {zoneCount} zone{zoneCount === 1 ? '' : 's'} · {totalTables} tables ·{' '}
-            {totalOpen} active order{totalOpen === 1 ? '' : 's'}
-          </div>
+      <div style={styles.zoneBar}>
+        <div style={styles.zoneTabs}>
+          {zoneTabs.map((tab) => {
+            const active = zoneId === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                style={zoneTabStyle(active)}
+                onClick={() => setZoneId(tab.id)}
+              >
+                {tab.name}
+                <span style={zoneCountStyle(tab.count, active)}>{tab.count}</span>
+              </button>
+            );
+          })}
         </div>
-        <div style={styles.legend}>
-          {LEGEND.map((l) => (
-            <span key={l.label} style={styles.legendItem}>
-              <span style={swatchStyle(l.color)} />
-              {l.label}
-            </span>
-          ))}
-        </div>
-        <div style={styles.toolbar}>
+        <div style={styles.zoneActions}>
           {(canEditTableLayout || canEditZoneDecor) && !isTakeoutZoneSelected && editing && (
             <button
               ref={addBtnRef}
@@ -1209,26 +1196,10 @@ export function FloorPlan() {
                 setSelection(null);
               }}
             >
-              {editing ? '✓ Done editing' : '✎ Edit Layout'}
+              {editing ? '✓ Done' : '✎ Edit'}
             </button>
           )}
         </div>
-      </header>
-
-      <div style={styles.zoneTabs}>
-        {zoneTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            style={zoneTabStyle(zoneId === tab.id)}
-            onClick={() => setZoneId(tab.id)}
-          >
-            {tab.name}
-            <span style={{ marginLeft: 8, color: 'var(--text3)', fontSize: 11 }}>
-              {tab.count}
-            </span>
-          </button>
-        ))}
       </div>
 
       {isTakeoutZoneSelected && selectedZone ? (
@@ -1239,7 +1210,18 @@ export function FloorPlan() {
           onRefetchRegister={() => registerQuery.refetch()}
         />
       ) : (
-        <div style={styles.body}>
+        <div
+          className="floor-canvas-body"
+          style={{
+            ...styles.body,
+            // Reserve room for the Inspector drawer when it's open so the
+            // canvas (and the bottom-right resize handle of any selected
+            // zone/table) doesn't slip behind it. Inspector is 300px wide
+            // with a 16px right inset; we add a 16px gap between the canvas
+            // and the drawer for breathing room.
+            paddingRight: editing && selectionRecord ? 332 : 20,
+          }}
+        >
           {isLoading && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text2)' }}>
               <Spinner size={26} />
@@ -1302,6 +1284,7 @@ export function FloorPlan() {
               focusedZoneId={zoneId}
               canvasWidth={canvasBounds.width}
               canvasHeight={canvasBounds.height}
+              editing={editing}
               renderZones={({ zoneTransforms, fadedZoneIds }) =>
                 effectiveZones
                   .filter((z) => z.kind !== 'TAKEOUT')
@@ -1316,9 +1299,17 @@ export function FloorPlan() {
                       height={zone.height}
                       transform={zoneTransforms.get(zone.id)}
                       faded={fadedZoneIds.has(zone.id)}
-                      metaText={`${zone.tables.length} table${
-                        zone.tables.length === 1 ? '' : 's'
-                      }`}
+                      metaText={(() => {
+                        const open = zone.tables.reduce(
+                          (a, t) => a + t.open_order_count,
+                          0,
+                        );
+                        return open > 0
+                          ? `${open} active`
+                          : `${zone.tables.length} ${
+                              zone.tables.length === 1 ? 'table' : 'tables'
+                            }`;
+                      })()}
                       editing={editing}
                       selected={
                         selection?.kind === 'zone' && selection.id === zone.id

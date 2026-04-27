@@ -29,15 +29,17 @@ import { confirmDialog } from '../components/ConfirmDialog';
 import {
   IconCash,
   IconClose,
+  IconMore,
   IconPercent,
   IconPrinter,
 } from '../components/Icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { PinConfirmModal } from '../components/PinConfirmModal';
 import { TakeoutCustomerPanel } from '../components/TakeoutCustomerPanel';
-import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
 import { useSession } from '../store/session';
 import { useUi } from '../store/ui';
+import { useHaptics } from '../hooks/useHaptics';
+import { getBridge } from '../platform';
 import {
   formatElapsed,
   formatMoney,
@@ -58,26 +60,26 @@ const styles: Record<string, React.CSSProperties> = {
   head: {
     display: 'flex',
     alignItems: 'center',
-    gap: 18,
-    padding: '14px 24px',
+    gap: 14,
+    padding: '8px 16px',
     borderBottom: '1px solid var(--border)',
     background: 'var(--bg2)',
-    minHeight: 72,
+    minHeight: 52,
     flexShrink: 0,
   },
   back: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 6,
-    padding: '10px 14px 10px 10px',
-    borderRadius: 8,
+    gap: 5,
+    padding: '7px 12px 7px 9px',
+    borderRadius: 7,
     border: '1px solid var(--border)',
     background: 'var(--bg)',
     color: 'var(--text1)',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
-    minHeight: 40,
+    minHeight: 36,
     fontFamily: 'inherit',
   },
   hTitleBlock: {
@@ -133,25 +135,33 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     display: 'grid',
-    // Two-column layout: ticket sidebar (left) + menu (right). Payment moved
-    // to its own modal so the workspace stays focused on building the ticket.
-    gridTemplateColumns: '380px minmax(0, 1fr)',
+    // Industry-standard layout: products dominate (left/center), ticket lives
+    // in a wider right-side sidebar. Mirrors Toast/Square/Lightspeed and lands
+    // the primary CTAs (Send / Pay) under the dominant hand on a tablet held
+    // in landscape. Was '380px minmax(0,1fr)' (inverted) before.
+    gridTemplateColumns: 'minmax(0, 1fr) 420px',
     gap: 0,
     overflow: 'hidden',
   },
 
-  // ─── Right column (menu — pick products to add to the ticket)
+  // ─── Left column (menu — pick products to add to the ticket).
+  // gridColumn pins this section to track 1 regardless of DOM order — the JSX
+  // is still ticket-first because it's a 2700-line component, but visually the
+  // menu lands on the left where industry POS UX expects it.
   menuCol: {
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
     minHeight: 0,
     background: 'var(--bg)',
+    borderRight: '1px solid var(--border)',
+    gridColumn: 1,
+    gridRow: 1,
   },
   catRow: {
     display: 'flex',
-    gap: 6,
-    padding: '14px 20px',
+    gap: 5,
+    padding: '8px 14px',
     borderBottom: '1px solid var(--border)',
     overflowX: 'auto',
     flexShrink: 0,
@@ -160,21 +170,21 @@ const styles: Record<string, React.CSSProperties> = {
   menuSearch: {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '8px 12px',
-    borderRadius: 8,
+    gap: 6,
+    padding: '6px 10px',
+    borderRadius: 7,
     border: '1px solid var(--border)',
     background: 'var(--bg2)',
     marginLeft: 'auto',
-    minWidth: 200,
-    minHeight: 40,
+    minWidth: 180,
+    minHeight: 36,
     flexShrink: 0,
   },
   menuSearchInput: {
     border: 'none',
     outline: 'none',
     background: 'transparent',
-    fontSize: 13,
+    fontSize: 12,
     color: 'var(--text1)',
     flex: 1,
     fontFamily: 'inherit',
@@ -183,64 +193,115 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    padding: '18px 20px 24px',
+    // Bottom padding stacks normal padding + tablet safe-area so the last row
+    // of tiles never sits under a gesture bar.
+    padding: '10px 12px calc(16px + var(--safe-bottom))',
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-    gap: 12,
+    // Tighter grid (~5-6 cols at 640px wide) so the operator can scan more
+    // products at once and the menu doesn't feel like a phone-style list.
+    gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+    gap: 8,
     alignContent: 'start',
   },
   productCard: {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     background: 'var(--bg2)',
     border: '1px solid var(--border)',
-    borderRadius: 10,
-    padding: '14px 14px 12px',
+    borderRadius: 8,
+    padding: 0,
     cursor: 'pointer',
     textAlign: 'left',
     boxShadow: 'var(--shadow-sm)',
-    minHeight: 96,
     fontFamily: 'inherit',
     transition: 'transform 0.08s, border-color 0.12s',
+    overflow: 'hidden',
   },
-  productName: {
-    fontSize: 13,
-    fontWeight: 500,
-    color: 'var(--text1)',
-    lineHeight: 1.35,
-    flex: 1,
+  // Image area dominates the tile (square aspect). Falls back to a flat
+  // stripe colour when image_url is null — same hue as the category accent
+  // so the menu still feels structured without an image library.
+  productImageWrap: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '1 / 1',
+    background: 'var(--bg)',
+    overflow: 'hidden',
   },
-  productFoot: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
+  productImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
   },
-  productPrice: {
-    fontFamily: "'Playfair Display', serif",
-    fontSize: 16,
-    fontWeight: 600,
-    color: 'var(--text1)',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  productAdd: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+  productImageFallback: {
+    width: '100%',
+    height: '100%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'var(--gold)',
-    color: '#2c2420',
-    fontSize: 16,
+    color: 'rgba(255,255,255,0.85)',
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 24,
     fontWeight: 700,
+    letterSpacing: '0.04em',
   },
-  productHint: {
-    fontSize: 10,
-    color: 'var(--text3)',
+  productSizeBadge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    padding: '1px 6px',
+    borderRadius: 999,
+    background: 'rgba(44,36,32,0.78)',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: 700,
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
-    marginTop: 4,
+  },
+  // Floating "+" affordance over the bottom-right corner of the tile so
+  // cashiers (especially first-time waiters) read the card as "tap to add"
+  // even though the whole card is the tap target. Mirrors the badge in the
+  // user's reference layout.
+  productAddBadge: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    background: 'var(--gold)',
+    color: '#2c2420',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 16,
+    fontWeight: 700,
+    lineHeight: 1,
+    boxShadow: '0 2px 6px rgba(44,36,32,0.18)',
+    pointerEvents: 'none',
+  },
+  productLabel: {
+    padding: '5px 7px 7px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  productName: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: 'var(--text1)',
+    lineHeight: 1.25,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  productPrice: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'var(--text2)',
+    fontVariantNumeric: 'tabular-nums',
   },
   emptyMenu: {
     padding: 60,
@@ -250,132 +311,269 @@ const styles: Record<string, React.CSSProperties> = {
     gridColumn: '1 / -1',
   },
 
-  // ─── Left column (ticket — primary workspace sidebar)
+  // ─── Right column (ticket — primary workspace sidebar).
+  // Explicit gridColumn keeps the ticket on the right even though it's the
+  // first child in the JSX. See menuCol comment.
   ticketCol: {
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
     minWidth: 0,
     background: 'var(--bg2)',
-    borderRight: '1px solid var(--border)',
+    gridColumn: 2,
+    gridRow: 1,
   },
   ticketHead: {
-    padding: '16px 20px 12px',
+    padding: '7px 14px 6px',
     borderBottom: '1px solid var(--border)',
     flexShrink: 0,
   },
   ticketTitle: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: 600,
     margin: 0,
   },
   ticketSub: {
-    fontSize: 11,
+    fontSize: 10,
     color: 'var(--text3)',
     letterSpacing: '0.04em',
-    marginTop: 2,
+    marginTop: 1,
     fontVariantNumeric: 'tabular-nums',
   },
   ticketBody: {
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    padding: '4px 0 12px',
+    padding: 0,
+    // Soft fade on the last 24px so a tablet user (whose scrollbars are
+    // hidden by mobile.css) gets a visual cue that more items live below
+    // the fold. Mask is no-op when content fits.
+    WebkitMaskImage:
+      'linear-gradient(to bottom, black calc(100% - 24px), transparent)',
+    maskImage:
+      'linear-gradient(to bottom, black calc(100% - 24px), transparent)',
   },
-  qtyControls: {
+  // Tabular column header above the rows — Name | Qty | Subtotal.
+  // The unit-price column is gone so the ticket reads cleaner and the qty
+  // cell can host an inline stepper (− 2 +). Subtotals stay on the right so
+  // the cashier can scan line totals top-to-bottom.
+  ticketColHeader: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 88px 64px 24px',
+    columnGap: 6,
+    padding: '5px 12px',
+    borderBottom: '1px solid var(--border)',
+    background: 'var(--bg2)',
+    fontSize: 9,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    color: 'var(--text3)',
+    fontWeight: 700,
+    flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+  },
+  ticketColHeaderCenter: { textAlign: 'center' as const },
+  ticketColHeaderRight: { textAlign: 'right' as const },
+  // Per-item dense row: name (+ modifiers indented) | qty | unit price |
+  // line total | tiny remove ✕. Tap the row to edit (only for editable
+  // items — sent lines route through the cashier-PIN flow on remove).
+  itemNameCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    gap: 1,
+  },
+  itemNameLine: {
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'var(--text1)',
+    lineHeight: 1.3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  itemModsLine: {
+    fontSize: 10,
+    color: 'var(--text2)',
+    fontStyle: 'italic',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  itemNoteLine: {
+    fontSize: 10,
+    color: 'var(--text2)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  // Qty stepper inline: [−][n][+]. Replaces the old static qty cell so the
+  // operator can adjust on the row instead of opening the picker for every
+  // bump. Sent rows still route through the cashier-PIN flow on edit.
+  qtyStepper: {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     border: '1px solid var(--border)',
-    borderRadius: 6,
+    borderRadius: 7,
     background: 'var(--bg)',
     height: 30,
     overflow: 'hidden',
   },
-  qtyBtn: {
-    width: 28,
-    height: 28,
+  qtyStepperBtn: {
+    width: 26,
+    height: 30,
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--text2)',
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: 'var(--text2)',
-    cursor: 'pointer',
-    fontSize: 16,
-    fontWeight: 600,
+    fontFamily: 'inherit',
   },
-  qtyVal: {
-    minWidth: 24,
-    textAlign: 'center',
+  qtyStepperVal: {
+    minWidth: 22,
+    textAlign: 'center' as const,
     fontFamily: "'Playfair Display', serif",
-    fontSize: 14,
-    fontWeight: 600,
-    color: 'var(--text1)',
-    fontVariantNumeric: 'tabular-nums',
-    padding: '0 4px',
-  },
-  itemBlock: {
-    minWidth: 0,
-  },
-  itemHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
-  itemName: {
     fontSize: 13,
-    fontWeight: 500,
-    color: 'var(--text1)',
-    lineHeight: 1.3,
-    flex: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  itemMods: {
-    fontSize: 11,
-    color: 'var(--text2)',
-    fontStyle: 'italic',
-    marginTop: 3,
-  },
-  itemNote: {
-    fontSize: 11,
-    color: 'var(--text2)',
-    marginTop: 3,
-  },
-  itemPriceCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  itemPrice: {
-    fontFamily: "'Playfair Display', serif",
-    fontVariantNumeric: 'tabular-nums',
-    fontSize: 14,
     fontWeight: 600,
     color: 'var(--text1)',
+    fontVariantNumeric: 'tabular-nums',
+    padding: '0 2px',
   },
-  removeBtn: {
+  // Static qty for voided rows (stepper hidden — they're tombstones).
+  itemQtyCell: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text1)',
+    textAlign: 'center' as const,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  itemLineCell: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text1)',
+    textAlign: 'right' as const,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  // Tiny ✕ at the right edge of each row — keeps the click target small so
+  // a stray tap on the row body still routes to "edit". Voided rows show a
+  // restore button in the same slot instead.
+  itemRemoveBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     background: 'transparent',
     color: 'var(--text3)',
-    fontSize: 14,
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     cursor: 'pointer',
-    padding: '0 4px',
+    padding: 0,
+  },
+  itemRestoreBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    background: 'var(--green-soft)',
+    color: 'var(--green)',
+    border: '1px solid var(--green)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: 12,
+    fontWeight: 700,
   },
   emptyTicket: {
-    padding: '60px 24px',
+    padding: '40px 18px',
     textAlign: 'center',
     color: 'var(--text3)',
-    fontSize: 13,
+    fontSize: 12,
   },
   ticketFoot: {
     flexShrink: 0,
-    padding: '12px 20px 16px',
+    // padding-bottom uses the safe-area helper so on-screen tablet nav bars
+    // (gesture pill / 3-button bar) never sit on top of the primary CTAs.
+    padding: '8px 12px calc(8px + var(--safe-bottom))',
     borderTop: '1px solid var(--border)',
     background: 'var(--bg2)',
     display: 'flex',
     flexDirection: 'column',
-    gap: 8,
+    gap: 6,
+  },
+  // Bottom row of small + wide buttons mirroring the Loyverse layout:
+  // [⋯ More][🖨 Print][Pay Order $XX].
+  ticketActionRow: {
+    display: 'flex',
+    gap: 6,
+    alignItems: 'stretch',
+  },
+  smallActionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    background: 'var(--bg2)',
+    color: 'var(--text2)',
+    border: '1px solid var(--border)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
+    fontFamily: 'inherit',
+  },
+  // Anchor for the More popover; positions it just above the kebab button.
+  morePopoverScrim: {
+    position: 'fixed',
+    inset: 0,
+    background: 'transparent',
+    zIndex: 60,
+  },
+  morePopover: {
+    position: 'absolute',
+    bottom: 64,
+    left: 0,
+    width: 240,
+    background: 'var(--bg2)',
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    boxShadow: 'var(--shadow-lg)',
+    overflow: 'hidden',
+    zIndex: 61,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  morePopoverItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px 14px',
+    fontSize: 13,
+    fontWeight: 500,
+    color: 'var(--text1)',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '1px solid var(--border)',
+    cursor: 'pointer',
+    minHeight: 'var(--tap)',
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    width: '100%',
+  },
+  morePopoverItemDanger: {
+    color: 'var(--red)',
   },
 
   // ─── Panels (used inside the payment modal — formerly the right column)
@@ -398,9 +596,9 @@ const styles: Record<string, React.CSSProperties> = {
   totalsRow: {
     display: 'grid',
     gridTemplateColumns: '1fr auto',
-    rowGap: 6,
-    columnGap: 12,
-    fontSize: 13,
+    rowGap: 5,
+    columnGap: 10,
+    fontSize: 12,
     color: 'var(--text2)',
   },
   totalsAmt: {
@@ -409,23 +607,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontVariantNumeric: 'tabular-nums',
     fontWeight: 500,
   },
+  // The footer used to show Subtotal / Tax / Total stacked. With Subtotal
+  // and Tax removed (per UX feedback — they only matter on the receipt) the
+  // grand total is the only line, so it doesn't need the divider rule above.
   grandLabel: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: 600,
     color: 'var(--text1)',
-    paddingTop: 10,
-    marginTop: 4,
-    borderTop: '1px solid var(--border)',
   },
   grandAmt: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 600,
     color: 'var(--text1)',
-    paddingTop: 10,
-    marginTop: 4,
-    borderTop: '1px solid var(--border)',
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums',
   },
@@ -527,7 +722,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   ghostBtn: {
     width: '100%',
-    padding: '11px 14px',
+    padding: '12px 14px',
     borderRadius: 8,
     background: 'var(--bg2)',
     color: 'var(--text1)',
@@ -540,12 +735,12 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     border: '1px solid var(--border)',
     fontFamily: 'inherit',
-    minHeight: 42,
+    minHeight: 'var(--tap)',
     textAlign: 'left',
   },
   dangerBtn: {
     width: '100%',
-    padding: '11px 14px',
+    padding: '12px 14px',
     borderRadius: 8,
     background: 'transparent',
     color: 'var(--red)',
@@ -558,7 +753,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     border: '1px solid rgba(196,80,64,0.25)',
     fontFamily: 'inherit',
-    minHeight: 42,
+    minHeight: 'var(--tap)',
   },
   errBanner: {
     background: 'rgba(196,80,64,0.08)',
@@ -628,9 +823,13 @@ const itemRowStyle = (
   isEditable: boolean,
 ): React.CSSProperties => ({
   display: 'grid',
-  gridTemplateColumns: '92px 1fr auto',
-  gap: 10,
-  padding: '12px 20px',
+  // Same column tracks as ticketColHeader: Name | Qty stepper | Subtotal |
+  // (action slot for ✕ / restore). The unit-price column was dropped — it
+  // duplicated the subtotal column for single-quantity lines and added
+  // visual noise once the qty stepper became inline.
+  gridTemplateColumns: '1fr 88px 64px 24px',
+  columnGap: 6,
+  padding: '6px 12px',
   borderBottom: '1px solid rgba(44,36,32,0.05)',
   background: isVoided
     ? 'rgba(196,80,64,0.05)'
@@ -639,10 +838,12 @@ const itemRowStyle = (
       : 'transparent',
   alignItems: 'center',
   // Editable rows get a subtle hover affordance — the row itself is a tap
-  // target that opens the picker pre-filled. Voided rows are read-only.
+  // target that opens the picker pre-filled (qty + modifiers + notes).
+  // Voided rows are read-only; sent rows fall back to the remove flow.
   cursor: isEditable ? 'pointer' : 'default',
   opacity: isVoided ? 0.7 : 1,
   transition: 'background 0.12s',
+  minHeight: 38,
 });
 
 // Strike-through container for voided items. Applied to the inner block so
@@ -653,82 +854,28 @@ const voidedTextStyle: React.CSSProperties = {
   color: 'var(--text2)',
 };
 
-// Compact "Add note / Edit note" pill rendered under each ticket row. We use
-// a different visual treatment depending on whether the item already has a
-// note so the cashier can spot at-a-glance which items have a special
-// instruction attached.
-const noteBtnStyle = (hasNote: boolean): React.CSSProperties => ({
-  marginTop: 6,
-  padding: '4px 10px',
-  borderRadius: 6,
-  border: '1px dashed ' + (hasNote ? 'var(--gold)' : 'var(--border)'),
-  background: hasNote ? 'var(--gold-soft)' : 'transparent',
-  color: hasNote ? 'var(--text1)' : 'var(--text2)',
-  fontSize: 11,
-  fontWeight: 600,
-  letterSpacing: '0.04em',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-});
-
-const itemBadgeStyle = (variant: 'new' | 'sent' | 'voided'): React.CSSProperties => {
-  const colors = {
-    new: { fg: 'var(--gold)', bg: 'var(--gold-soft)' },
-    sent: { fg: 'var(--green)', bg: 'rgba(74,140,92,0.14)' },
-    voided: { fg: 'var(--red)', bg: 'rgba(196,80,64,0.12)' },
-  } as const;
-  const c = colors[variant];
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    padding: '2px 6px',
-    borderRadius: 4,
-    color: c.fg,
-    background: c.bg,
-  };
-};
-
-const restoreBtnStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '5px 10px',
-  borderRadius: 6,
-  border: '1px solid var(--green)',
-  background: 'rgba(74,140,92,0.10)',
-  color: 'var(--green)',
-  fontSize: 11,
-  fontWeight: 600,
-  letterSpacing: '0.04em',
-  textTransform: 'uppercase',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
+// Per-row helpers (noteBtnStyle / itemBadgeStyle / restoreBtnStyle) were
+// removed when the ticket switched to a tabular layout. Status now reads
+// from the row background tint (gold = new, red = voided) and the inline
+// "REMOVED" tag on voided rows; an in-row ↺/✕ button handles restore /
+// remove. Note editing is delegated to the ProductPicker's notes textarea.
 
 const sendBtnStyle = (disabled: boolean): React.CSSProperties => ({
   width: '100%',
-  padding: '14px 18px',
-  borderRadius: 10,
+  padding: '10px 14px',
+  borderRadius: 8,
   background: disabled ? 'var(--bg)' : 'var(--text1)',
   color: disabled ? 'var(--text3)' : '#fff',
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 600,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 8,
+  gap: 7,
   cursor: disabled ? 'not-allowed' : 'pointer',
   border: '1px solid ' + (disabled ? 'var(--border)' : 'var(--text1)'),
   fontFamily: 'inherit',
-  minHeight: 50,
+  minHeight: 44,
 });
 
 const payMethodStyle = (active: boolean): React.CSSProperties => ({
@@ -764,39 +911,45 @@ const primaryBtnStyle = (disabled: boolean): React.CSSProperties => ({
   cursor: disabled ? 'not-allowed' : 'pointer',
   border: '1px solid ' + (disabled ? 'var(--border)' : 'rgba(44,36,32,0.08)'),
   fontFamily: 'inherit',
-  minHeight: 52,
+  minHeight: 'var(--tap-lg)',
 });
 
 // "Pay Order" CTA in the ticket sidebar footer. Green to mirror the OrderRow
 // button colour that signals "ready to settle".
 const payOrderBtnStyle = (disabled: boolean): React.CSSProperties => ({
   width: '100%',
-  padding: '14px 18px',
-  borderRadius: 10,
+  padding: '10px 14px',
+  borderRadius: 8,
   background: disabled ? 'var(--bg)' : 'var(--green)',
   color: disabled ? 'var(--text3)' : '#fff',
-  fontSize: 15,
+  fontSize: 13,
   fontWeight: 600,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 8,
+  gap: 7,
   cursor: disabled ? 'not-allowed' : 'pointer',
   border: '1px solid ' + (disabled ? 'var(--border)' : 'var(--green)'),
   fontFamily: 'inherit',
-  minHeight: 52,
+  minHeight: 44,
 });
 
-const catTabStyle = (active: boolean): React.CSSProperties => ({
-  padding: '10px 16px',
-  borderRadius: 8,
-  fontSize: 13,
+const catTabStyle = (active: boolean, accent?: string | null): React.CSSProperties => ({
+  padding: '7px 12px',
+  borderRadius: 7,
+  fontSize: 12,
   fontWeight: 600,
   color: active ? '#fff' : 'var(--text2)',
   background: active ? 'var(--text1)' : 'var(--bg2)',
-  border: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
+  // When the category has its own colour (seeded as ProductCategory.color),
+  // accent the inactive pill's left border so the user's eye can find a
+  // category by its hue instead of just reading the label.
+  borderLeft: !active && accent ? `3px solid ${accent}` : '1px solid var(--border)',
+  borderTop: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
+  borderRight: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
+  borderBottom: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
   cursor: 'pointer',
-  minHeight: 40,
+  minHeight: 36,
   whiteSpace: 'nowrap',
   fontFamily: 'inherit',
   flexShrink: 0,
@@ -849,6 +1002,7 @@ export function TableDetail() {
   const pendingPaymentForOrderId = useUi((s) => s.pendingPaymentForOrderId);
   const consumePendingPayment = useUi((s) => s.consumePendingPayment);
   const role = useSession((s) => s.user?.role ?? 'WAITER');
+  const haptics = useHaptics();
   // Anyone in the room can pull items off the ticket — the *backend* asks for
   // a cashier PIN when the line was already sent to the kitchen.
   const canRemove = true;
@@ -934,31 +1088,40 @@ export function TableDetail() {
   });
   const sendKitchenMutation = useMutation({
     mutationFn: () => sendOrderToKitchen(orderId!),
+    onError: () => haptics.error(),
     onSuccess: async (result) => {
+      haptics.success();
       invalidateOrder();
       // Fire the kitchen printer in the background — the order screen has
-      // already updated, so we don't await it. Failures from the IPC are
-      // surfaced via a toast in a future iteration; for now we rely on the
-      // backend's authoritative state ("sent_at" is set regardless of paper).
-      if (window.electron?.printer && result.printed_count > 0) {
+      // already updated, so we don't await it. Failures from the IPC / HTTP
+      // are surfaced via a toast in a future iteration; for now we rely on
+      // the backend's authoritative state ("sent_at" is set regardless of
+      // paper). Desktop prints locally over IPC; mobile/web delegate to the
+      // backend's /print/kitchen endpoint (which is a no-op for already-sent
+      // items, so the redundant marker is harmless).
+      if (result.printed_count > 0) {
         try {
-          await window.electron.printer.printKitchen({
-            order_id: result.order_id,
-            order_number: result.order.order_number,
-            table:
-              result.order.order_type === 'TAKEOUT'
-                ? `Takeout #${result.order.order_number}`
-                : result.order.table
-                  ? `Table ${result.order.table.number}`
-                  : null,
-            waiter: result.order.user.name,
-            printed_at: result.printed_at,
-            is_correction: result.is_correction,
-            items: result.items,
-            voided_items: result.voided_items,
-          });
+          if (window.electron?.printer) {
+            await window.electron.printer.printKitchen({
+              order_id: result.order_id,
+              order_number: result.order.order_number,
+              table:
+                result.order.order_type === 'TAKEOUT'
+                  ? `Takeout #${result.order.order_number}`
+                  : result.order.table
+                    ? `Table ${result.order.table.number}`
+                    : null,
+              waiter: result.order.user.name,
+              printed_at: result.printed_at,
+              is_correction: result.is_correction,
+              items: result.items,
+              voided_items: result.voided_items,
+            });
+          } else {
+            await getBridge().print.kitchen(result.order_id);
+          }
         } catch {
-          /* IPC bridge is stubbed in dev; ignore and let the order data drive UI */
+          /* bridge stubbed or printer unreachable; backend state is the source of truth */
         }
       }
     },
@@ -1015,10 +1178,19 @@ export function TableDetail() {
   const [reference, setReference] = useState('');
   const [splitPayments, setSplitPayments] = useState<SplitPaymentDraft[]>([]);
   const [splitMode, setSplitMode] = useState(false);
+  // Cashier PIN entered when a waiter/barista is settling. Sent on every
+  // payment in the modal session (split payments reuse the same PIN). Cleared
+  // when the modal is dismissed or the order changes.
+  const [cashierPin, setCashierPin] = useState('');
+  const needsCashierPin = !canPay;
   // Payment is its own pestaña now — opens as a fullscreen modal so the
   // build-the-ticket workflow stays focused on the menu + sidebar. Closing the
   // modal returns to the workspace; settling fully closes the whole detail.
   const [paymentOpen, setPaymentOpen] = useState(false);
+  // Footer "More" popover (Apply discount + Cancel order). Kept off the main
+  // footer grid so the ticket body keeps its scroll room — see ticketActionRow
+  // in the JSX below.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [printingReceipt, setPrintingReceipt] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
   // Snapshot of the just-paid order so the payment modal can stay mounted on
@@ -1028,7 +1200,11 @@ export function TableDetail() {
   // The order item currently being edited in the note dialog. Null means
   // the dialog is closed; an item snapshot keeps the original note around so
   // the textarea can pre-populate without a useEffect dance.
-  const [noteEditing, setNoteEditing] = useState<ActiveOrderItem | null>(null);
+  // Note editing now lives inside ProductPicker (its `notes` textarea), so
+  // we don't keep a parallel NoteDialog state here. Tapping an editable row
+  // opens the picker pre-filled with the existing note. Sent items can't
+  // edit notes at all — once the kitchen has seen the line, the note is
+  // immutable from the floor.
   // Cancel-order modal: gated behind reason + PIN re-auth so the audit trail
   // captures who pulled the trigger and why.
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -1048,8 +1224,8 @@ export function TableDetail() {
     setPaymentOpen(false);
     setPrintError(null);
     setPaidOrder(null);
-    setNoteEditing(null);
     setEditingItem(null);
+    setCashierPin('');
   }, [orderId]);
 
   // When the cashier hits "Pay Order" from the active orders list, the UI
@@ -1058,10 +1234,10 @@ export function TableDetail() {
   // would otherwise render disabled).
   useEffect(() => {
     if (!orderId || pendingPaymentForOrderId !== orderId) return;
-    if (!order || order.status !== 'OPEN' || !canPay || order.items.length === 0) return;
+    if (!order || order.status !== 'OPEN' || order.items.length === 0) return;
     setPaymentOpen(true);
     consumePendingPayment();
-  }, [orderId, pendingPaymentForOrderId, order, canPay, consumePendingPayment]);
+  }, [orderId, pendingPaymentForOrderId, order, consumePendingPayment]);
 
   // Escape returns to the order list. Skipped when the user is typing in an
   // input/textarea or when a modal (product picker, confirm dialog) is open —
@@ -1151,18 +1327,15 @@ export function TableDetail() {
   }
 
   // ─── Header values ───────────────────────────────────────────────
+  // tableLabel still feeds the cancel confirmation copy, the payment modal
+  // header, and child components. zoneLabel was only used in the removed
+  // secondary header — order identity now lives in the global TopBar.
   const tableLabel =
     order.order_type === 'TAKEOUT'
       ? `Takeout #${order.order_number}`
       : order.table
         ? `Table ${order.table.number}`
         : `Order #${order.order_number}`;
-  const zoneLabel =
-    order.order_type === 'TAKEOUT'
-      ? order.takeout_channel
-        ? TAKEOUT_CHANNEL_LABEL[order.takeout_channel]
-        : 'Takeout'
-      : order.table?.zone.name ?? '—';
   const elapsed = formatElapsed(minutesSince(order.created_at));
   // Ticket header counts only non-voided lines so the "X items" matches what
   // the customer is paying for (voided lines are tombstones, not active).
@@ -1196,10 +1369,15 @@ export function TableDetail() {
   // ─── Helpers ─────────────────────────────────────────────────────
   function handleProductTap(p: PosProduct) {
     const hasVariants = p.variants.some((v) => v.active);
-    const hasModifierGroups = p.modifier_groups.some((link) =>
-      link.modifier_group.modifiers.some((m) => m.active),
+    // Only force the picker when the product has *required* mods (min>0) or
+    // an explicit required flag. Optional mod groups (e.g. "Add a flavour")
+    // are skippable — the cashier can tap once for the default and customize
+    // later by tapping the row to re-open the picker. This brings the simple
+    // case down to 1 tap, matching Toast/Square.
+    const hasRequiredMods = p.modifier_groups.some(
+      (link) => link.modifier_group.required || link.modifier_group.min_selection > 0,
     );
-    if (hasVariants || hasModifierGroups) {
+    if (hasVariants || hasRequiredMods) {
       setPickerProduct(p);
       return;
     }
@@ -1230,27 +1408,22 @@ export function TableDetail() {
     return products.find((p) => p.id === editingItem.product_id) ?? null;
   }
 
-  function handleQty(item: ActiveOrderItem, delta: number) {
+  // Inline qty stepper handler. Voided rows ignore taps (they're tombstones);
+  // sent rows route through the cashier-PIN flow via setPinPrompt; everything
+  // else dispatches updateItemMutation directly. Decrementing past 1 routes
+  // to the remove flow so the operator never has to leave the row to delete a
+  // line. Quantity is integer-valued at the storage level, so we clamp to 1+.
+  function handleStepQty(item: ActiveOrderItem, delta: 1 | -1) {
     if (item.voided_at != null) return;
     const next = item.quantity + delta;
-    const itemName =
-      item.product.name + (item.variant ? ` · ${item.variant.name}` : '');
     if (next <= 0) {
-      if (!canRemove) return;
-      if (item.sent_to_kitchen) {
-        setPinPrompt({ kind: 'remove', itemId: item.id, itemName });
-        return;
-      }
-      removeItemMutation.mutate({ itemId: item.id });
+      handleRemoveItem(item);
       return;
     }
+    const itemName =
+      item.product.name + (item.variant ? ` · ${item.variant.name}` : '');
     if (item.sent_to_kitchen) {
-      setPinPrompt({
-        kind: 'updateQty',
-        itemId: item.id,
-        itemName,
-        nextQty: next,
-      });
+      setPinPrompt({ kind: 'updateQty', itemId: item.id, itemName, nextQty: next });
       return;
     }
     updateItemMutation.mutate({ itemId: item.id, input: { quantity: next } });
@@ -1331,14 +1504,21 @@ export function TableDetail() {
   // cashier always sees what happened. Returns true on success so the
   // payment-success path can decide whether to close the detail.
   async function printReceiptFor(target: ActiveOrder): Promise<boolean> {
-    if (!window.electron?.printer) {
-      setPrintError('Printing only works inside the desktop terminal.');
-      return false;
-    }
     setPrintError(null);
     setPrintingReceipt(true);
     try {
-      const result = await window.electron.printer.printReceipt({ order: target });
+      // Desktop sends the full order payload over IPC and the main process
+      // formats locally. Mobile / web bundles delegate to the backend, which
+      // reads the order itself and pushes ESC/POS to the configured printer.
+      if (window.electron?.printer) {
+        const result = await window.electron.printer.printReceipt({ order: target });
+        if (!result.ok) {
+          setPrintError(translatePrintError(result.error));
+          return false;
+        }
+        return true;
+      }
+      const result = await getBridge().print.receipt(target.id);
       if (!result.ok) {
         setPrintError(translatePrintError(result.error));
         return false;
@@ -1395,9 +1575,13 @@ export function TableDetail() {
   }
 
   async function submitSinglePayment() {
-    if (!canPay || !order) return;
+    if (!order) return;
     if (order.items.length === 0) {
       window.alert('Add items before charging.');
+      return;
+    }
+    if (needsCashierPin && !/^\d{4,6}$/.test(cashierPin)) {
+      window.alert('Cashier PIN required to settle this order.');
       return;
     }
     let amount = currentTender;
@@ -1410,9 +1594,11 @@ export function TableDetail() {
         method: paymentMethod,
         amount,
         reference: paymentMethod === 'CASH' ? null : reference || null,
+        ...(needsCashierPin ? { pin: cashierPin } : {}),
       });
       invalidateOrder();
       if (result.order.status === 'PAID') {
+        haptics.success();
         await finalizeSettled(result.order);
       } else {
         // Partial cash tender — keep the screen open and clear the input so
@@ -1422,12 +1608,17 @@ export function TableDetail() {
       }
     } catch (err) {
       // Error is captured by paymentMutation.error and rendered inline.
+      haptics.error();
       if (!(err instanceof ApiError)) throw err;
     }
   }
 
   async function submitSplitPayments() {
-    if (!canPay || !orderId || splitPayments.length === 0) return;
+    if (!orderId || splitPayments.length === 0) return;
+    if (needsCashierPin && !/^\d{4,6}$/.test(cashierPin)) {
+      window.alert('Cashier PIN required to settle this order.');
+      return;
+    }
     try {
       let lastResult: Awaited<ReturnType<typeof addOrderPayment>> | null = null;
       for (const draft of splitPayments) {
@@ -1435,16 +1626,19 @@ export function TableDetail() {
           method: draft.method,
           amount: draft.amount,
           reference: draft.method === 'CASH' ? null : draft.reference || null,
+          ...(needsCashierPin ? { pin: cashierPin } : {}),
         });
       }
       invalidateOrder();
       if (lastResult?.order.status === 'PAID') {
+        haptics.success();
         await finalizeSettled(lastResult.order);
       } else {
         setSplitPayments([]);
         setSplitMode(false);
       }
     } catch (err) {
+      haptics.error();
       if (err instanceof ApiError) {
         window.alert(err.message);
       } else {
@@ -1493,10 +1687,10 @@ export function TableDetail() {
   ];
 
   const submitDisabled =
-    !canPay ||
     paymentMutation.isPending ||
     order.items.length === 0 ||
     remaining <= 0 ||
+    (needsCashierPin && !/^\d{4,6}$/.test(cashierPin)) ||
     (splitMode
       ? splitPayments.length === 0
       : currentTender <= 0 ||
@@ -1504,57 +1698,23 @@ export function TableDetail() {
 
   return (
     <div style={styles.shell}>
-      <header style={styles.head}>
-        <button type="button" style={styles.back} onClick={closeDetail}>
-          ‹ Back
-        </button>
-        <TableMark
-          color={
-            order.needs_attention
-              ? 'var(--red)'
-              : order.order_type === 'TAKEOUT'
-                ? 'var(--text2)'
-                : 'var(--gold)'
-          }
-          label={
-            order.order_type === 'TAKEOUT'
-              ? '#'
-              : order.table
-                ? String(order.table.number)
-                : '?'
-          }
-        />
-        <div style={styles.hTitleBlock}>
-          <h1 style={styles.hTitle}>{tableLabel}</h1>
-          <div style={styles.hMeta}>
-            <span>{zoneLabel}</span>
-            <span style={styles.metaSep} />
-            <span>Order #{order.order_number}</span>
-            <span style={styles.metaSep} />
-            <span>Waiter: {order.user.name}</span>
-            <span style={styles.metaSep} />
-            <span>{order.status === 'OPEN' ? 'Open' : order.status}</span>
-          </div>
-        </div>
-        <div style={styles.hSpacer} />
-        <div style={styles.hStat}>
-          <span style={styles.hStatLabel}>Elapsed</span>
-          <span style={styles.hStatVal}>{elapsed}</span>
-        </div>
-        <div style={styles.hStat}>
-          <span style={styles.hStatLabel}>Total</span>
-          <span style={styles.hStatVal}>{formatMoney(order.total)}</span>
-        </div>
-      </header>
-
+      {/* Secondary header was removed: order identity (Order #X / Table·Zone)
+          + Back button now live in the global TopBar when view==='detail'.
+          Elapsed and totals are shown inside the ticket sidebar. */}
       <div style={styles.body}>
-        {/* ───────── LEFT: ticket sidebar ───────── */}
+        {/* Layout intentionally renders the MENU first (left-dominant) and the
+            ticket second (right sidebar). CSS grid order matches DOM order, so
+            don't reorder these two sections without flipping the gridTemplateColumns. */}
+        {/* ───────── RIGHT: ticket sidebar ───────── */}
         <section style={styles.ticketCol}>
           <div style={styles.ticketHead}>
             <h2 style={styles.ticketTitle}>Current Ticket</h2>
             <div style={styles.ticketSub}>
-              {itemCount} item{itemCount === 1 ? '' : 's'} ·{' '}
-              {hasUnsent ? 'Some items not sent to kitchen' : 'All items sent'}
+              {itemCount === 0
+                ? `Empty · ${elapsed} elapsed`
+                : `${itemCount} item${itemCount === 1 ? '' : 's'} · ${elapsed} elapsed · ${
+                    hasUnsent ? 'unsent items' : 'all sent'
+                  }`}
             </div>
           </div>
 
@@ -1564,6 +1724,15 @@ export function TableDetail() {
                 order={order}
                 editable={order.status === 'OPEN'}
               />
+            </div>
+          )}
+
+          {order.items.length > 0 && (
+            <div style={styles.ticketColHeader}>
+              <span>Item</span>
+              <span style={styles.ticketColHeaderCenter}>Qty</span>
+              <span style={styles.ticketColHeaderRight}>Total</span>
+              <span />
             </div>
           )}
 
@@ -1585,6 +1754,10 @@ export function TableDetail() {
                     product.modifier_groups.some((link) =>
                       link.modifier_group.modifiers.some((m) => m.active),
                     ));
+                const voidedText = it.isVoided ? voidedTextStyle : null;
+                // The stepper is shown for any non-voided line (sent rows
+                // still get the controls — taps route through the PIN flow).
+                const showStepper = !it.isVoided;
                 return (
                   <div
                     key={it.raw.id}
@@ -1592,148 +1765,111 @@ export function TableDetail() {
                     onClick={editable ? () => handleTicketRowTap(it.raw) : undefined}
                     role={editable ? 'button' : undefined}
                     aria-label={
-                      editable
-                        ? `Edit ${it.raw.product.name}`
-                        : undefined
+                      editable ? `Edit ${it.raw.product.name}` : undefined
                     }
                   >
-                    {/* Qty stepper hides for voided rows — they're frozen
-                        snapshots of what was sent before the void. */}
-                    {it.isVoided ? (
+                    {/* Name + (variant) on line 1; modifiers indented on a
+                        smaller second line; notes / void reason on a third. */}
+                    <div style={styles.itemNameCell}>
+                      <span style={{ ...styles.itemNameLine, ...voidedText }}>
+                        {it.raw.product.name}
+                        {it.raw.variant && ` · ${it.raw.variant.name}`}
+                        {it.isVoided && (
+                          <span style={{ marginLeft: 6, color: 'var(--red)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em' }}>
+                            REMOVED
+                          </span>
+                        )}
+                      </span>
+                      {it.raw.modifiers.length > 0 && (
+                        <span style={{ ...styles.itemModsLine, ...voidedText }}>
+                          {it.raw.modifiers.map((m) => m.name).join(' · ')}
+                        </span>
+                      )}
+                      {it.raw.notes && (
+                        <span style={{ ...styles.itemNoteLine, ...voidedText }}>
+                          Note: {it.raw.notes}
+                        </span>
+                      )}
+                      {it.isVoided && it.raw.void_reason && (
+                        <span style={{ ...styles.itemNoteLine, color: 'var(--red)' }}>
+                          Reason: {it.raw.void_reason}
+                        </span>
+                      )}
+                    </div>
+                    {showStepper ? (
                       <div
-                        style={{
-                          ...styles.qtyVal,
-                          textAlign: 'center',
-                          ...voidedTextStyle,
-                        }}
+                        style={styles.qtyStepper}
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {it.raw.quantity}×
-                      </div>
-                    ) : (
-                      <div style={styles.qtyControls} onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          style={styles.qtyBtn}
-                          onClick={() => handleQty(it.raw, -1)}
-                          disabled={it.isSent && !canRemove}
+                          style={styles.qtyStepperBtn}
+                          onClick={() => handleStepQty(it.raw, -1)}
+                          disabled={updateItemMutation.isPending}
+                          aria-label="Decrease quantity"
                         >
-                          –
+                          −
                         </button>
-                        <span style={styles.qtyVal}>{it.raw.quantity}</span>
+                        <span style={styles.qtyStepperVal}>{it.raw.quantity}</span>
                         <button
                           type="button"
-                          style={styles.qtyBtn}
-                          onClick={() => handleQty(it.raw, +1)}
+                          style={styles.qtyStepperBtn}
+                          onClick={() => handleStepQty(it.raw, 1)}
+                          disabled={updateItemMutation.isPending}
+                          aria-label="Increase quantity"
                         >
                           +
                         </button>
                       </div>
-                    )}
-                    <div style={styles.itemBlock}>
-                      <div style={styles.itemHeader}>
-                        <span
-                          style={{
-                            ...styles.itemName,
-                            ...(it.isVoided ? voidedTextStyle : {}),
-                          }}
-                        >
-                          {it.raw.product.name}
-                          {it.raw.variant && ` · ${it.raw.variant.name}`}
-                        </span>
-                        {it.isVoided ? (
-                          <span style={itemBadgeStyle('voided')}>
-                            ✕ Removed
-                            {it.raw.void_printed_at ? ' · sent' : ''}
-                          </span>
-                        ) : it.isSent ? (
-                          <span style={itemBadgeStyle('sent')}>✓ Sent</span>
-                        ) : (
-                          <span style={itemBadgeStyle('new')}>New</span>
-                        )}
-                      </div>
-                      {it.raw.modifiers.length > 0 && (
-                        <div
-                          style={{
-                            ...styles.itemMods,
-                            ...(it.isVoided ? voidedTextStyle : {}),
-                          }}
-                        >
-                          {it.raw.modifiers.map((m) => m.name).join(' · ')}
-                        </div>
-                      )}
-                      {it.raw.notes && (
-                        <div
-                          style={{
-                            ...styles.itemNote,
-                            ...(it.isVoided ? voidedTextStyle : {}),
-                          }}
-                        >
-                          Note: {it.raw.notes}
-                        </div>
-                      )}
-                      {it.isVoided && it.raw.void_reason && (
-                        <div style={{ ...styles.itemNote, color: 'var(--red)' }}>
-                          Reason: {it.raw.void_reason}
-                        </div>
-                      )}
-                      {!it.isVoided && (
-                        <button
-                          type="button"
-                          style={noteBtnStyle(Boolean(it.raw.notes))}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setNoteEditing(it.raw);
-                          }}
-                          aria-label={it.raw.notes ? 'Edit note' : 'Add note'}
-                        >
-                          {it.raw.notes ? '✎ Edit note' : '＋ Add note'}
-                        </button>
-                      )}
-                    </div>
-                    <div style={styles.itemPriceCol} onClick={(e) => e.stopPropagation()}>
-                      <span
-                        style={{
-                          ...styles.itemPrice,
-                          ...(it.isVoided ? voidedTextStyle : {}),
-                        }}
-                      >
-                        {formatMoney(it.raw.line_total)}
+                    ) : (
+                      <span style={{ ...styles.itemQtyCell, ...voidedText }}>
+                        {it.raw.quantity}
                       </span>
-                      {it.isVoided ? (
-                        <button
-                          type="button"
-                          style={restoreBtnStyle}
-                          onClick={() => handleRestoreItem(it.raw)}
-                          disabled={restoreItemMutation.isPending}
-                          aria-label="Restore item"
-                        >
-                          ↺ Restore
-                        </button>
-                      ) : (
-                        canRemove && (
-                          <button
-                            type="button"
-                            style={styles.removeBtn}
-                            onClick={async () => {
-                              if (it.isSent) {
-                                handleRemoveItem(it.raw);
-                                return;
-                              }
-                              const ok = await confirmDialog({
-                                title: 'Remove item?',
-                                message: `${it.raw.product.name} will be removed from the ticket.`,
-                                confirmLabel: 'Remove',
-                                danger: true,
-                              });
-                              if (ok) handleRemoveItem(it.raw);
-                            }}
-                            aria-label="Remove item"
-                          >
-                            <IconClose style={{ fontSize: 14 }} />
-                          </button>
-                        )
-                      )}
-                    </div>
+                    )}
+                    <span style={{ ...styles.itemLineCell, ...voidedText }}>
+                      {formatMoney(it.raw.line_total)}
+                    </span>
+                    {/* Action slot: voided rows expose ↺ restore; otherwise
+                        a small ✕ removes the line (cashier PIN if sent). */}
+                    {it.isVoided ? (
+                      <button
+                        type="button"
+                        style={styles.itemRestoreBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRestoreItem(it.raw);
+                        }}
+                        disabled={restoreItemMutation.isPending}
+                        aria-label="Restore item"
+                        title="Restore"
+                      >
+                        ↺
+                      </button>
+                    ) : canRemove ? (
+                      <button
+                        type="button"
+                        style={styles.itemRemoveBtn}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (it.isSent) {
+                            handleRemoveItem(it.raw);
+                            return;
+                          }
+                          const ok = await confirmDialog({
+                            title: 'Remove item?',
+                            message: `${it.raw.product.name} will be removed from the ticket.`,
+                            confirmLabel: 'Remove',
+                            danger: true,
+                          });
+                          if (ok) handleRemoveItem(it.raw);
+                        }}
+                        aria-label="Remove item"
+                      >
+                        <IconClose style={{ fontSize: 13 }} />
+                      </button>
+                    ) : (
+                      <span />
+                    )}
                   </div>
                 );
               })
@@ -1743,7 +1879,7 @@ export function TableDetail() {
               updateItemMutation.error ||
               removeItemMutation.error ||
               restoreItemMutation.error) && (
-              <div style={{ ...styles.errBanner, margin: '12px 20px' }}>
+              <div style={{ ...styles.errBanner, margin: '12px 16px' }}>
                 {firstApiMessage(
                   addItemMutation.error,
                   updateItemMutation.error,
@@ -1754,13 +1890,13 @@ export function TableDetail() {
             )}
           </div>
 
-          {/* Footer: totals + every action the cashier needs */}
+          {/* Footer: just the grand Total (Subtotal & Tax moved to the receipt
+              and the payment modal — they don't help the cashier finalize a
+              ticket) + 2 persistent CTAs (Send / Pay) + a compact action row
+              [⋯ More][🖨][Pay]. Apply discount / Cancel order live behind the
+              "More" kebab so the ticket body keeps its vertical room. */}
           <div style={styles.ticketFoot}>
             <div style={styles.totalsRow}>
-              <span>Subtotal</span>
-              <span style={styles.totalsAmt}>{formatMoney(order.subtotal)}</span>
-              <span>Tax</span>
-              <span style={styles.totalsAmt}>{formatMoney(order.tax_amount)}</span>
               {Number(order.discount_amount) > 0 && (
                 <>
                   <span>Discount</span>
@@ -1783,22 +1919,6 @@ export function TableDetail() {
               )}
             </div>
 
-            {canPay && order.status === 'OPEN' && (
-              <button
-                type="button"
-                style={styles.ghostBtn}
-                onClick={handleApplyDiscount}
-                disabled={discountMutation.isPending}
-              >
-                <IconPercent style={{ fontSize: 16 }} />
-                <span>
-                  {Number(order.discount_amount) > 0
-                    ? `Discount: ${formatMoney(order.discount_amount)} — tap to clear`
-                    : 'Apply discount'}
-                </span>
-              </button>
-            )}
-
             {sendKitchenMutation.error && (
               <div style={styles.errBanner}>
                 {sendKitchenMutation.error instanceof ApiError
@@ -1807,11 +1927,14 @@ export function TableDetail() {
               </div>
             )}
 
-            {hasUnsent && (
+            {/* Send to Kitchen — full-width primary CTA. Disabled when there
+                are no unsent lines so the screen still tells the user what
+                button this is, even on an all-sent ticket. */}
+            {order.status === 'OPEN' && (
               <button
                 type="button"
-                style={sendBtnStyle(sendKitchenMutation.isPending)}
-                disabled={sendKitchenMutation.isPending}
+                style={sendBtnStyle(!hasUnsent || sendKitchenMutation.isPending)}
+                disabled={!hasUnsent || sendKitchenMutation.isPending}
                 onClick={() => sendKitchenMutation.mutate()}
               >
                 {sendKitchenMutation.isPending ? (
@@ -1823,43 +1946,94 @@ export function TableDetail() {
               </button>
             )}
 
-            {order.status === 'OPEN' && canPay && order.items.length > 0 && (
-              <button
-                type="button"
-                style={payOrderBtnStyle(false)}
-                onClick={() => setPaymentOpen(true)}
-              >
-                <IconCash style={{ fontSize: 18 }} />
-                Pay Order · {formatMoney(String(remaining))}
-              </button>
-            )}
-
-            <button
-              type="button"
-              style={styles.ghostBtn}
-              onClick={handlePrintReceipt}
-              disabled={printingReceipt || order.items.length === 0}
-            >
-              {printingReceipt ? (
-                <Spinner size={12} />
-              ) : (
-                <IconPrinter style={{ fontSize: 16 }} />
+            {/* Compact action row: [⋯ More][🖨 Print][Pay Order $XX].
+                The kebab opens a popover with Apply discount + Cancel order
+                so they don't take up dedicated vertical chrome. */}
+            <div style={{ ...styles.ticketActionRow, position: 'relative' }}>
+              {order.status === 'OPEN' && (
+                <button
+                  type="button"
+                  style={styles.smallActionBtn}
+                  onClick={() => setMoreOpen((v) => !v)}
+                  aria-label="More actions"
+                  aria-expanded={moreOpen}
+                >
+                  <IconMore style={{ fontSize: 20 }} />
+                </button>
               )}
-              <span>Print Ticket</span>
-            </button>
-            {printError && <div style={styles.errBanner}>{printError}</div>}
-
-            {order.status === 'OPEN' && (
               <button
                 type="button"
-                style={styles.dangerBtn}
-                onClick={handleCancelOrderClick}
-                disabled={cancelMutation.isPending}
+                style={styles.smallActionBtn}
+                onClick={handlePrintReceipt}
+                disabled={printingReceipt || order.items.length === 0}
+                aria-label="Print ticket"
+                title="Print ticket"
               >
-                <IconClose style={{ fontSize: 16 }} />
-                <span>Cancel order</span>
+                {printingReceipt ? (
+                  <Spinner size={14} />
+                ) : (
+                  <IconPrinter style={{ fontSize: 18 }} />
+                )}
               </button>
-            )}
+              {order.status === 'OPEN' && (
+                <button
+                  type="button"
+                  style={{ ...payOrderBtnStyle(order.items.length === 0), flex: 1, width: 'auto' }}
+                  disabled={order.items.length === 0}
+                  onClick={() => setPaymentOpen(true)}
+                >
+                  <IconCash style={{ fontSize: 18 }} />
+                  Pay · {formatMoney(String(remaining))}
+                </button>
+              )}
+
+              {moreOpen && order.status === 'OPEN' && (
+                <>
+                  <div
+                    style={styles.morePopoverScrim}
+                    onClick={() => setMoreOpen(false)}
+                  />
+                  <div style={styles.morePopover} role="menu">
+                    {canPay && (
+                      <button
+                        type="button"
+                        style={styles.morePopoverItem}
+                        onClick={() => {
+                          setMoreOpen(false);
+                          handleApplyDiscount();
+                        }}
+                        disabled={discountMutation.isPending}
+                      >
+                        <IconPercent style={{ fontSize: 16 }} />
+                        <span>
+                          {Number(order.discount_amount) > 0
+                            ? 'Clear discount'
+                            : 'Apply discount'}
+                        </span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.morePopoverItem,
+                        ...styles.morePopoverItemDanger,
+                        borderBottom: 'none',
+                      }}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        handleCancelOrderClick();
+                      }}
+                      disabled={cancelMutation.isPending}
+                    >
+                      <IconClose style={{ fontSize: 16 }} />
+                      <span>Cancel order</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {printError && <div style={styles.errBanner}>{printError}</div>}
             {cancelMutation.error && !cancelOpen && (
               <div style={styles.errBanner}>
                 {cancelMutation.error instanceof ApiError
@@ -1887,7 +2061,7 @@ export function TableDetail() {
                 <button
                   key={c.id}
                   type="button"
-                  style={catTabStyle(activeCat === c.id)}
+                  style={catTabStyle(activeCat === c.id, c.color)}
                   onClick={() => setActiveCat(c.id)}
                 >
                   {c.name}
@@ -1904,7 +2078,7 @@ export function TableDetail() {
             </div>
           </div>
 
-          <div style={styles.productGrid}>
+          <div className="product-grid" style={styles.productGrid}>
             {productsQuery.isLoading && (
               <div style={styles.emptyMenu}>
                 <Spinner size={18} />
@@ -1919,29 +2093,67 @@ export function TableDetail() {
               </div>
             )}
             {visibleProducts.map((p) => {
-              const variants = p.variants.filter((v) => v.active);
+              const variants = p.variants
+                .filter((v) => v.active)
+                .slice()
+                .sort((a, b) => a.display_order - b.display_order);
+              // Show the *default* variant's price (the lowest display_order)
+              // instead of "from $X" — matches Square/Toast where the tile
+              // commits to a price for the most-likely tap. The size badge
+              // overlay tells the cashier additional sizes exist.
               const priceLabel = variants.length > 0
-                ? `from ${formatMoney(variants[0].sell_price)}`
+                ? formatMoney(variants[0].sell_price)
                 : p.sell_price != null
                   ? formatMoney(p.sell_price)
                   : '—';
-              const priceFromVariant = variants.length > 0;
+              const cat = p.category_id
+                ? categories.find((c) => c.id === p.category_id)
+                : null;
+              // Fallback colour for the image area when image_url is null —
+              // resolves through: product override → category tag → gold.
+              const fallbackColor = p.icon_color ?? cat?.color ?? 'var(--gold)';
+              const initial = p.name.trim().charAt(0).toUpperCase() || '·';
               return (
                 <button
                   key={p.id}
                   type="button"
+                  className="product-card"
                   style={styles.productCard}
                   onClick={() => handleProductTap(p)}
                 >
-                  <span style={styles.productName}>{p.name}</span>
-                  {priceFromVariant && (
-                    <span style={styles.productHint}>
-                      {variants.length} size{variants.length === 1 ? '' : 's'}
+                  <div style={styles.productImageWrap}>
+                    {p.image_url ? (
+                      <img
+                        src={p.image_url}
+                        alt=""
+                        style={styles.productImage}
+                        loading="lazy"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          ...styles.productImageFallback,
+                          background: fallbackColor,
+                        }}
+                      >
+                        {initial}
+                      </div>
+                    )}
+                    {variants.length > 1 && (
+                      <span style={styles.productSizeBadge}>
+                        {variants.length} sizes
+                      </span>
+                    )}
+                    <span style={styles.productAddBadge} aria-hidden>＋</span>
+                  </div>
+                  <div style={styles.productLabel}>
+                    <span className="product-card-name" style={styles.productName}>
+                      {p.name}
                     </span>
-                  )}
-                  <div style={styles.productFoot}>
-                    <span style={styles.productPrice}>{priceLabel}</span>
-                    <span style={styles.productAdd}>+</span>
+                    <span className="product-card-price" style={styles.productPrice}>
+                      {priceLabel}
+                    </span>
                   </div>
                 </button>
               );
@@ -2000,27 +2212,13 @@ export function TableDetail() {
         />
       )}
 
-      {noteEditing && (
-        <NoteDialog
-          item={noteEditing}
-          busy={updateItemMutation.isPending}
-          onCancel={() => setNoteEditing(null)}
-          onSave={(nextNote) => {
-            updateItemMutation.mutate(
-              { itemId: noteEditing.id, input: { notes: nextNote } },
-              { onSuccess: () => setNoteEditing(null) },
-            );
-          }}
-        />
-      )}
-
       {/* Payment is its own pestaña now — fullscreen modal that overlays the
           workspace. Closing it returns to the ticket; settling fully closes
           the whole detail (the parent's submit handlers already do that).
           When `paidOrder` is set the order is already settled but the
           receipt didn't print — the modal stays mounted in a post-payment
           state offering retry / close. */}
-      {((paymentOpen && order.status === 'OPEN') || paidOrder) && canPay && (
+      {((paymentOpen && order.status === 'OPEN') || paidOrder) && (
         <div
           style={styles.payScrim}
           onClick={() => {
@@ -2031,7 +2229,7 @@ export function TableDetail() {
             setPaymentOpen(false);
           }}
         >
-          <div style={styles.payModal} onClick={(e) => e.stopPropagation()} role="dialog">
+          <div className="pay-modal" style={styles.payModal} onClick={(e) => e.stopPropagation()} role="dialog">
             <header style={styles.payHead}>
               <button
                 type="button"
@@ -2114,6 +2312,40 @@ export function TableDetail() {
                   )}
                 </div>
               </div>
+
+              {needsCashierPin && (
+                <div style={styles.panel}>
+                  <div style={styles.panelHd}>
+                    <span>Cashier authorization</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
+                    Your role can't settle without an active cashier or
+                    manager's PIN. Hand the tablet over so they can authorize.
+                  </div>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={cashierPin}
+                    onChange={(e) => setCashierPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Cashier PIN"
+                    style={{
+                      width: '100%',
+                      minHeight: 'var(--tap-lg)',
+                      padding: '12px 16px',
+                      borderRadius: 10,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg)',
+                      fontSize: 18,
+                      letterSpacing: '0.4em',
+                      textAlign: 'center',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+              )}
 
               <div style={styles.panel}>
                 <div style={styles.panelHd}>
@@ -2206,6 +2438,7 @@ export function TableDetail() {
                         <button
                           key={q.label}
                           type="button"
+                          className="pay-quick-btn"
                           style={styles.quickBtn}
                           onClick={() => handleQuickAmount(q.value)}
                         >
@@ -2359,195 +2592,10 @@ export function TableDetail() {
   );
 }
 
-// Lightweight dialog for editing the note on an existing order item. Mounted
-// above the ticket sidebar — the cashier taps the per-item note pill, enters
-// or edits free-text instructions, and saves. Submitting an empty note clears
-// it (we send `null` so the backend strips the field).
-interface NoteDialogProps {
-  item: ActiveOrderItem;
-  busy: boolean;
-  onCancel: () => void;
-  onSave: (note: string | null) => void;
-}
-
-function NoteDialog({ item, busy, onCancel, onSave }: NoteDialogProps) {
-  const [draft, setDraft] = useState(item.notes ?? '');
-
-  // Esc cancels, Cmd/Ctrl+Enter saves — keyboard handling kept local so the
-  // dialog can be reused without polluting the parent's listeners.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onCancel();
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault();
-        const trimmed = draft.trim();
-        onSave(trimmed ? trimmed : null);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [draft, onCancel, onSave]);
-
-  const labelTitle = item.product.name + (item.variant ? ` · ${item.variant.name}` : '');
-  const trimmed = draft.trim();
-  const dirty = trimmed !== (item.notes ?? '').trim();
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(44,36,32,0.42)',
-        zIndex: 80,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-      }}
-      onClick={onCancel}
-      role="dialog"
-    >
-      <div
-        style={{
-          width: 460,
-          maxWidth: '100%',
-          background: 'var(--bg2)',
-          borderRadius: 16,
-          border: '1px solid var(--border)',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.32)',
-          overflow: 'hidden',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ padding: '20px 24px 12px', borderBottom: '1px solid var(--border)' }}>
-          <h2
-            style={{
-              fontFamily: "'Playfair Display', serif",
-              fontSize: 20,
-              fontWeight: 600,
-              margin: 0,
-              color: 'var(--text1)',
-            }}
-          >
-            Note for {labelTitle}
-          </h2>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>
-            Prints on the kitchen ticket and the customer receipt.
-          </div>
-        </div>
-        <div style={{ padding: '16px 24px 20px' }}>
-          <textarea
-            autoFocus
-            style={{
-              width: '100%',
-              minHeight: 96,
-              padding: '12px 14px',
-              border: '1.5px solid var(--border)',
-              borderRadius: 10,
-              background: 'var(--bg)',
-              color: 'var(--text1)',
-              fontSize: 14,
-              fontFamily: 'inherit',
-              outline: 'none',
-              resize: 'vertical',
-            }}
-            placeholder="e.g., extra hot, no foam, no tomato, allergy info…"
-            value={draft}
-            maxLength={240}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              fontSize: 11,
-              color: 'var(--text3)',
-              marginTop: 6,
-            }}
-          >
-            <span>Esc to cancel · Ctrl+Enter to save</span>
-            <span>{draft.length}/240</span>
-          </div>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            gap: 10,
-            padding: '14px 20px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg)',
-          }}
-        >
-          {item.notes && (
-            <button
-              type="button"
-              style={{
-                padding: '12px 16px',
-                borderRadius: 10,
-                background: 'transparent',
-                color: 'var(--red)',
-                border: '1px solid rgba(196,80,64,0.25)',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: busy ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
-                minHeight: 44,
-              }}
-              disabled={busy}
-              onClick={() => onSave(null)}
-            >
-              Remove note
-            </button>
-          )}
-          <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            style={{
-              padding: '12px 16px',
-              borderRadius: 10,
-              background: 'var(--bg2)',
-              color: 'var(--text1)',
-              border: '1px solid var(--border)',
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              minHeight: 44,
-            }}
-            onClick={onCancel}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            style={{
-              padding: '12px 18px',
-              borderRadius: 10,
-              background: !dirty || busy ? 'var(--text3)' : 'var(--text1)',
-              color: '#fff',
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: !dirty || busy ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit',
-              minHeight: 44,
-              opacity: !dirty || busy ? 0.7 : 1,
-            }}
-            onClick={() => onSave(trimmed ? trimmed : null)}
-            disabled={!dirty || busy}
-          >
-            {busy ? 'Saving…' : 'Save note'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// NoteDialog was removed when the ticket switched to the tabular layout —
+// notes are now editable through ProductPicker's textarea (the same modal
+// that picks variants and modifiers). Sent items can't edit notes from the
+// floor; that's acceptable since the kitchen has already seen the line.
 
 // Render the payment-modal body once the order has settled but the receipt
 // hasn't printed. The order is already PAID on the backend, so the only
@@ -2673,25 +2721,3 @@ function firstApiMessage(...errs: unknown[]): string | null {
   return null;
 }
 
-function TableMark({ color, label }: { color: string; label: string }) {
-  return (
-    <div
-      style={{
-        width: 52,
-        height: 52,
-        borderRadius: 12,
-        background: color,
-        color: '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: "'Playfair Display', serif",
-        fontSize: 24,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
-    >
-      {label}
-    </div>
-  );
-}

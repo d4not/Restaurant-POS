@@ -238,6 +238,9 @@ export interface CreatePaymentInput {
   method: PaymentMethodType;
   amount: number;
   reference?: string | null;
+  // Required by the backend when the JWT user is WAITER/BARISTA — they must
+  // include a CASHIER+/MANAGER/ADMIN PIN to settle. Cashier+ leave this off.
+  pin?: string;
 }
 
 export interface PaymentResult {

@@ -87,6 +87,7 @@ export const NAV: NavEntry[] = [
     icon: '⚙',
     items: [
       { id: 'tables-zones', label: 'Tables & Zones', path: '/system/tables-zones' },
+      { id: 'storages',     label: 'Storages',       path: '/system/storages' },
       { id: 'settings',     label: 'Settings',       path: '/settings' },
     ],
   },

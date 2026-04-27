@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import type { UserRole } from '@prisma/client';
 import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
 import type {
@@ -17,6 +18,11 @@ import type {
 function currentUserId(req: Request): string {
   if (!req.auth) throw new UnauthorizedError('Missing auth context');
   return req.auth.userId;
+}
+
+function currentUserRole(req: Request): UserRole {
+  if (!req.auth) throw new UnauthorizedError('Missing auth context');
+  return req.auth.role;
 }
 
 export async function create(req: Request, res: Response): Promise<void> {
@@ -95,6 +101,7 @@ export async function addPayment(req: Request, res: Response): Promise<void> {
     req.params.id as string,
     req.body as CreatePaymentInput,
     currentUserId(req),
+    currentUserRole(req),
   );
   res.status(201).json({ success: true, data: result });
 }

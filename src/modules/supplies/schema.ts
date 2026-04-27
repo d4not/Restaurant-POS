@@ -53,6 +53,13 @@ export const supplyStockQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+// Barcodes are 8–14 digits in the wild but we accept any 1–64 char string so
+// QR-style internal codes still work. Validation lives at the schema layer
+// because the value flows through both an external HTTP call and a DB query.
+export const barcodeParamSchema = z.object({
+  barcode: z.string().min(1).max(64),
+});
+
 export type CreateSupplyInput = z.infer<typeof createSupplySchema>;
 export type UpdateSupplyInput = z.infer<typeof updateSupplySchema>;
 export type ListSupplyQuery = z.infer<typeof listSupplyQuerySchema>;

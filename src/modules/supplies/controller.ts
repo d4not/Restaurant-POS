@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as service from './service.js';
+import { lookupBarcode } from './barcode-lookup.js';
 import type {
   CreateSupplyInput,
   UpdateSupplyInput,
@@ -41,4 +42,9 @@ export async function listStocks(req: Request, res: Response): Promise<void> {
     req.query as unknown as SupplyStockQuery,
   );
   res.json({ success: true, data: page });
+}
+
+export async function barcodeLookup(req: Request, res: Response): Promise<void> {
+  const result = await lookupBarcode(req.params.barcode as string);
+  res.json({ success: true, data: result });
 }

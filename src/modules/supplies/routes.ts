@@ -9,6 +9,7 @@ import {
   updateSupplySchema,
   listSupplyQuerySchema,
   supplyStockQuerySchema,
+  barcodeParamSchema,
 } from './schema.js';
 import { tareWeightRouter } from '../tare-weights/routes.js';
 
@@ -18,6 +19,13 @@ supplyRouter.use(requireAuth);
 
 supplyRouter.post('/', validate(createSupplySchema), asyncHandler(controller.create));
 supplyRouter.get('/', validate(listSupplyQuerySchema, 'query'), asyncHandler(controller.list));
+// Must come before `/:id` so the literal "barcode-lookup" segment isn't
+// interpreted as a UUID id and rejected by uuidParamSchema.
+supplyRouter.get(
+  '/barcode-lookup/:barcode',
+  validate(barcodeParamSchema, 'params'),
+  asyncHandler(controller.barcodeLookup),
+);
 supplyRouter.get('/:id', validate(uuidParamSchema, 'params'), asyncHandler(controller.getById));
 supplyRouter.patch(
   '/:id',

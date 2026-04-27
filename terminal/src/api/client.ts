@@ -16,7 +16,24 @@ function resolveApiBase(): string {
   return 'http://localhost:3000/api/v1';
 }
 
-const API_BASE = resolveApiBase();
+// Mutable so the mobile bootstrap (and the Settings UI) can inject a value
+// loaded from Capacitor Preferences after app start. Initialised with the
+// legacy resolution so requests during bootstrap still go somewhere sensible.
+let apiBase = resolveApiBase();
+
+export function setApiBase(url: string): void {
+  apiBase = url.trim() || resolveApiBase();
+}
+
+export function getApiBase(): string {
+  return apiBase;
+}
+
+// Strip the `/api/v1` suffix to get the server root — used for the /health
+// connection-test ping (it lives at the root, not under the versioned API).
+export function getServerRoot(): string {
+  return apiBase.replace(/\/api\/v\d+\/?$/, '').replace(/\/$/, '');
+}
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -43,7 +60,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    response = await fetch(`${apiBase}${path}`, { ...init, headers });
   } catch {
     throw new ApiError('Cannot reach the server', 0, 'NETWORK');
   }
@@ -67,9 +84,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok || !payload.success) {
     // 401 with an existing session means the token is stale — wipe it so the
-    // app routes back to the PIN screen instead of looping on retries.
+    // app routes back to the PIN screen. We flag the wipe as an expiry so the
+    // PIN screen can surface a transient "Session expired" toast.
     if (response.status === 401 && token) {
-      useSession.getState().signOut();
+      useSession.getState().expireSession();
     }
     throw new ApiError(
       payload.error?.message ?? `Request failed (${response.status})`,

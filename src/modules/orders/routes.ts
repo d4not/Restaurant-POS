@@ -103,11 +103,15 @@ orderRouter.post(
   asyncHandler(controller.restoreItem),
 );
 
+// Payments are open to ORDER_WRITERS at the route level so a waiter/barista can
+// reach the controller during emergency-shift flows. The service layer then
+// enforces: cashier+ → no PIN needed; waiter/barista → must include a valid
+// cashier+ PIN, which is recorded on Payment.approved_by_user_id.
 orderRouter.post(
   '/:id/payments',
   validate(uuidParamSchema, 'params'),
   validate(createPaymentSchema),
-  CASHIER_ACTIONS,
+  ORDER_WRITERS,
   asyncHandler(controller.addPayment),
 );
 

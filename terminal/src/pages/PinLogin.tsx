@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api/client';
 import { pinLogin } from '../api/auth';
 import { useSession } from '../store/session';
+import { useHaptics } from '../hooks/useHaptics';
 import { IconBackspace } from '../components/Icons';
 
 const PIN_LENGTH = 4;
 
 const styles: Record<string, React.CSSProperties> = {
   root: {
-    height: '100vh',
-    width: '100vw',
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
     background: 'var(--bg)',
     display: 'flex',
     alignItems: 'center',
@@ -108,6 +110,20 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 14,
     letterSpacing: '0.04em',
   },
+  expiredToast: {
+    position: 'absolute',
+    top: 24,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '10px 18px',
+    borderRadius: 10,
+    background: 'rgba(196,80,64,0.92)',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+    letterSpacing: '0.02em',
+  },
 };
 
 const dotStyle = (filled: boolean): React.CSSProperties => ({
@@ -124,11 +140,25 @@ export function PinLogin() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const signIn = useSession((s) => s.signIn);
+  const sessionExpired = useSession((s) => s.sessionExpired);
+  const consumeSessionExpired = useSession((s) => s.consumeSessionExpired);
+  const haptics = useHaptics();
   // Tracks which PIN we've already attempted, so StrictMode's double-invoke of
   // useEffect (and the busy state update that re-runs the effect) doesn't
   // cancel the in-flight request before signIn fires. A ref survives the
   // re-runs without triggering one.
   const submittedRef = useRef<string | null>(null);
+  // Show "Session expired" toast for ~6 seconds when arrival was triggered by
+  // a 401, then auto-clear. Reading the flag also clears it so a screen-lock
+  // followed by a manual unlock doesn't replay an old expiry message.
+  const [expiredToast, setExpiredToast] = useState(false);
+  useEffect(() => {
+    if (!sessionExpired) return;
+    setExpiredToast(true);
+    consumeSessionExpired();
+    const t = window.setTimeout(() => setExpiredToast(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [sessionExpired, consumeSessionExpired]);
 
   // Submit as soon as the user has entered the full PIN. The PIN length is
   // fixed for now (4 digits is what the seed data uses); when 6-digit pins
@@ -142,10 +172,12 @@ export function PinLogin() {
     setError(null);
     pinLogin(pin)
       .then((res) => {
+        haptics.success();
         signIn(res.token, res.user);
       })
       .catch((err) => {
         const message = err instanceof ApiError ? err.message : 'Could not sign in';
+        haptics.error();
         setError(message);
         setPin('');
         // Failed PIN: allow retry of the same digits if the user wants.
@@ -154,7 +186,7 @@ export function PinLogin() {
       .finally(() => {
         setBusy(false);
       });
-  }, [pin, signIn]);
+  }, [pin, signIn, haptics]);
 
   // Hardware keyboard support — handy for development and accessibility.
   useEffect(() => {
@@ -172,23 +204,31 @@ export function PinLogin() {
 
   function press(digit: string) {
     if (busy) return;
+    haptics.tap();
     setError(null);
     setPin((p) => (p.length < PIN_LENGTH ? p + digit : p));
   }
 
   function backspace() {
     if (busy) return;
+    haptics.tap();
     setPin((p) => p.slice(0, -1));
   }
 
   function clearAll() {
     if (busy) return;
+    haptics.tap();
     setPin('');
     setError(null);
   }
 
   return (
-    <div style={styles.root}>
+    <div style={{ ...styles.root, position: 'relative' }}>
+      {expiredToast && (
+        <div style={styles.expiredToast} role="alert">
+          Session expired. Please sign in again.
+        </div>
+      )}
       <div style={styles.card}>
         <div style={styles.brand}>R</div>
         <h1 style={styles.title}>Welcome back</h1>
@@ -202,7 +242,7 @@ export function PinLogin() {
 
         <div style={styles.error}>{error ?? ' '}</div>
 
-        <div style={styles.pad}>
+        <div className="pin-keypad" style={styles.pad}>
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
             <button
               key={d}

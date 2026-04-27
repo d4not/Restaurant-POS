@@ -10,6 +10,7 @@ import {
   useUpdateTax,
 } from '../../hooks/useTaxes';
 import { useSettings, useUpdateSettings } from '../../hooks/useSettings';
+import { usePrinterStatus } from '../../hooks/usePrinterStatus';
 import {
   usePreferencesStore,
   type Currency,
@@ -34,7 +35,260 @@ export function SettingsPage() {
       <DisplayPreferencesCard />
       <DefaultTaxCard />
       <TakeoutChannelsCard />
+      <PrinterSettingsCard />
       <TaxConfigurationCard />
+    </div>
+  );
+}
+
+/* ───────────────── Printers + business identity ─────────── */
+
+const PRINTER_FIELDS = [
+  'business_name',
+  'business_address',
+  'printer_kitchen_ip',
+  'printer_kitchen_port',
+  'printer_receipt_ip',
+  'printer_receipt_port',
+  'printer_paper_width',
+] as const;
+type PrinterField = (typeof PRINTER_FIELDS)[number];
+
+const PAPER_WIDTH_OPTIONS = [
+  { value: '80', label: '80mm (48 chars/line)' },
+  { value: '58', label: '58mm (32 chars/line)' },
+] as const;
+
+function PrinterSettingsCard() {
+  const settingsQ = useSettings();
+  const updateSettingsM = useUpdateSettings();
+  const statusQ = usePrinterStatus();
+
+  const [form, setForm] = useState<Record<PrinterField, string>>({
+    business_name: '',
+    business_address: '',
+    printer_kitchen_ip: '',
+    printer_kitchen_port: '9100',
+    printer_receipt_ip: '',
+    printer_receipt_port: '9100',
+    printer_paper_width: '80',
+  });
+  const [saveState, setSaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Pull the server values into the form on first load. Don't clobber user
+  // edits on later refetches — same pattern as DefaultTaxCard.
+  useEffect(() => {
+    if (!settingsQ.data) return;
+    if (saveState !== 'idle' && saveState !== 'saved') return;
+    setForm({
+      business_name: settingsQ.data.business_name ?? '',
+      business_address: settingsQ.data.business_address ?? '',
+      printer_kitchen_ip: settingsQ.data.printer_kitchen_ip ?? '',
+      printer_kitchen_port: settingsQ.data.printer_kitchen_port ?? '9100',
+      printer_receipt_ip: settingsQ.data.printer_receipt_ip ?? '',
+      printer_receipt_port: settingsQ.data.printer_receipt_port ?? '9100',
+      printer_paper_width: settingsQ.data.printer_paper_width ?? '80',
+    });
+  }, [settingsQ.data, saveState]);
+
+  const dirty = useMemo(() => {
+    if (!settingsQ.data) return false;
+    return PRINTER_FIELDS.some((k) => (settingsQ.data?.[k] ?? '') !== form[k]);
+  }, [form, settingsQ.data]);
+
+  const onChange = (k: PrinterField) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+    setSaveState('idle');
+    setErrorMsg(null);
+  };
+
+  const onSave = async () => {
+    setSaveState('saving');
+    setErrorMsg(null);
+    try {
+      await updateSettingsM.mutateAsync({ ...form });
+      setSaveState('saved');
+      // Refresh the connection dots so the operator sees the new state right away.
+      statusQ.refetch();
+      setTimeout(() => setSaveState('idle'), 1500);
+    } catch (err) {
+      setSaveState('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
+  const status = statusQ.data;
+
+  return (
+    <Card title="Printers & business identity">
+      <p className="fs-12 text-muted mb-12">
+        Network printers used for kitchen comandas and customer receipts.
+        Tablets call the backend, which then dispatches ESC/POS over TCP to the
+        IPs below. Business name + address appear at the top of every receipt.
+      </p>
+
+      <h3 className="fs-13 fw-600" style={{ marginBottom: 8 }}>Business</h3>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <Input
+          label="Business name"
+          value={form.business_name}
+          onChange={onChange('business_name')}
+          placeholder="e.g. Cafe Central"
+        />
+        <Input
+          label="Business address"
+          value={form.business_address}
+          onChange={onChange('business_address')}
+          placeholder="Street, city"
+        />
+      </div>
+
+      <h3 className="fs-13 fw-600" style={{ marginBottom: 8 }}>Kitchen printer</h3>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '2fr 1fr auto',
+          gap: 12,
+          alignItems: 'end',
+          marginBottom: 16,
+        }}
+      >
+        <Input
+          label="IP address"
+          value={form.printer_kitchen_ip}
+          onChange={onChange('printer_kitchen_ip')}
+          placeholder="192.168.1.50"
+        />
+        <Input
+          label="Port"
+          value={form.printer_kitchen_port}
+          onChange={onChange('printer_kitchen_port')}
+          inputMode="numeric"
+          placeholder="9100"
+        />
+        <PrinterStatusDot
+          configured={status?.kitchen.configured ?? false}
+          connected={status?.kitchen.connected ?? false}
+          loading={statusQ.isLoading}
+        />
+      </div>
+
+      <h3 className="fs-13 fw-600" style={{ marginBottom: 8 }}>Receipt printer</h3>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '2fr 1fr auto',
+          gap: 12,
+          alignItems: 'end',
+          marginBottom: 16,
+        }}
+      >
+        <Input
+          label="IP address"
+          value={form.printer_receipt_ip}
+          onChange={onChange('printer_receipt_ip')}
+          placeholder="192.168.1.51"
+        />
+        <Input
+          label="Port"
+          value={form.printer_receipt_port}
+          onChange={onChange('printer_receipt_port')}
+          inputMode="numeric"
+          placeholder="9100"
+        />
+        <PrinterStatusDot
+          configured={status?.receipt.configured ?? false}
+          connected={status?.receipt.connected ?? false}
+          loading={statusQ.isLoading}
+        />
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr auto auto',
+          gap: 12,
+          alignItems: 'end',
+        }}
+      >
+        <Select
+          label="Paper width"
+          options={[...PAPER_WIDTH_OPTIONS]}
+          value={form.printer_paper_width}
+          onValueChange={(v) => {
+            setForm((f) => ({ ...f, printer_paper_width: v || '80' }));
+            setSaveState('idle');
+          }}
+        />
+        <Button
+          variant="ghost"
+          onClick={() => statusQ.refetch()}
+          disabled={statusQ.isFetching}
+        >
+          Re-check
+        </Button>
+        <Button
+          variant="primary"
+          onClick={onSave}
+          loading={saveState === 'saving'}
+          disabled={!dirty || settingsQ.isLoading}
+        >
+          Save
+        </Button>
+      </div>
+
+      {saveState === 'saved' && (
+        <div className="fs-11 mt-8" style={{ color: 'var(--green)' }}>
+          Saved — next print will use the new configuration.
+        </div>
+      )}
+      {saveState === 'error' && errorMsg && (
+        <div className="auth-alert mt-8">{errorMsg}</div>
+      )}
+    </Card>
+  );
+}
+
+function PrinterStatusDot({
+  configured,
+  connected,
+  loading,
+}: {
+  configured: boolean;
+  connected: boolean;
+  loading: boolean;
+}) {
+  let tone: 'green' | 'gold' | 'gray' | 'red' = 'gray';
+  let label = 'Not configured';
+  if (loading) {
+    tone = 'gray';
+    label = 'Checking…';
+  } else if (!configured) {
+    tone = 'gray';
+    label = 'Not configured';
+  } else if (connected) {
+    tone = 'green';
+    label = 'Connected';
+  } else {
+    tone = 'red';
+    label = 'Unreachable';
+  }
+  return (
+    <div className="field">
+      <label>Status</label>
+      <div style={{ paddingTop: 4 }}>
+        <Badge tone={tone}>{label}</Badge>
+      </div>
     </div>
   );
 }

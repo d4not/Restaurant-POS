@@ -21,6 +21,18 @@
   --shadow-sm: 0 1px 2px rgba(44, 36, 32, 0.04);
   --shadow:    0 2px 8px rgba(44, 36, 32, 0.06);
   --shadow-lg: 0 8px 32px rgba(44, 36, 32, 0.12);
+  /* Tablet tap-target tokens. Per MOBILE-SPEC.md the floor is 48 px; primary
+     CTAs use --tap-lg so they read as actions, not chrome. */
+  --tap:       48px;
+  --tap-lg:    56px;
+  /* Global UI scale. SettingsModal writes 0.7–1.4 onto :root; the transform
+     below turns that into a real responsive resize for both Electron and
+     Capacitor (Chromium handles `transform: scale` identically on each). */
+  --ui-scale:  1;
+  /* Bottom safe-area for the on-screen tablet nav bar. Capacitor's
+     env(safe-area-inset-bottom) is 0 on most Android tablets, so we layer a
+     hard floor on top so the primary CTAs never collide with gesture bars. */
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
   font-size: 14px;
 }
 
@@ -28,6 +40,26 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+}
+
+/* ── Responsive UI scale ─────────────────────────────────────────────────
+ * Turn `--ui-scale` into a real "make everything bigger / smaller" knob via
+ * transform with width/height compensation:
+ *   - At scale 1.2 the layout box is 1/1.2 = 83% of viewport; the transform
+ *     scales it back up to 100% on screen → content is 1.2× bigger AND the
+ *     layout reflows for the smaller box (fewer product columns, shorter
+ *     ticket rows, etc.) instead of being clipped.
+ *   - At scale 0.8 the layout box is 1/0.8 = 125% of viewport; the transform
+ *     scales it down to 100% on screen → content is smaller AND more fits
+ *     because the layout sees a wider canvas.
+ * `transform-origin: top left` keeps (0,0) anchored so absolute positioning
+ * and modal scrims line up correctly. Works in both Electron (desktop) and
+ * Capacitor (tablet) since both run Chromium. */
+#root {
+  transform-origin: top left;
+  transform: scale(var(--ui-scale, 1));
+  width: calc(100% / var(--ui-scale, 1));
+  height: calc(100% / var(--ui-scale, 1));
 }
 
 body {

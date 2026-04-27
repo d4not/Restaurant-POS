@@ -27,7 +27,7 @@ function colorsFor(table: FloorTable, attention: boolean): ChromeColors {
   if (attention) {
     return {
       border: 'var(--red)',
-      bg: 'rgba(196,80,64,0.06)',
+      bg: 'rgba(196,80,64,0.22)',
       fg: 'var(--text1)',
       accent: 'var(--red)',
       badge: 'rgba(196,80,64,0.16)',
@@ -36,7 +36,7 @@ function colorsFor(table: FloorTable, attention: boolean): ChromeColors {
   if (table.status === 'OCCUPIED' || table.current_order) {
     return {
       border: 'var(--gold)',
-      bg: 'rgba(201,164,92,0.07)',
+      bg: 'rgba(201,164,92,0.28)',
       fg: 'var(--text1)',
       accent: 'var(--gold)',
       badge: 'rgba(201,164,92,0.16)',
@@ -45,7 +45,7 @@ function colorsFor(table: FloorTable, attention: boolean): ChromeColors {
   if (table.status === 'RESERVED') {
     return {
       border: '#3a566b',
-      bg: 'rgba(91,122,140,0.05)',
+      bg: 'rgba(91,122,140,0.18)',
       fg: 'var(--text1)',
       accent: '#3a566b',
       badge: 'rgba(91,122,140,0.16)',
@@ -53,7 +53,7 @@ function colorsFor(table: FloorTable, attention: boolean): ChromeColors {
   }
   return {
     border: 'var(--green)',
-    bg: 'rgba(74,140,92,0.04)',
+    bg: 'var(--bg2)',
     fg: 'var(--text1)',
     accent: 'var(--green)',
     badge: 'rgba(74,140,92,0.10)',
@@ -79,6 +79,7 @@ export function TableNode({
   const order = table.current_order;
   const minutes = order ? minutesSince(order.opened_at) : 0;
 
+  const isOccupied = !!order || table.status === 'OCCUPIED';
   const root: CSSProperties = {
     position: 'absolute',
     left,
@@ -87,8 +88,8 @@ export function TableNode({
     height,
     transform: `rotate(${table.rotation}deg)`,
     transformOrigin: 'center',
-    background: 'var(--bg2)',
-    border: `2px solid ${colors.border}`,
+    background: colors.bg,
+    border: `${isOccupied || attention ? 3 : 2}px solid ${colors.border}`,
     borderRadius: isCircle ? '50%' : 14,
     boxShadow: selected
       ? '0 0 0 3px rgba(201,164,92,0.35), var(--shadow)'
@@ -102,17 +103,23 @@ export function TableNode({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 10,
+    padding: 8,
     textAlign: 'center',
   };
 
+  const minDim = Math.min(width, height);
+  // Hide secondary copy on tightly-scaled tables — the number alone has to
+  // carry the cell. Threshold tuned so a typical 100×100 table at ~0.6 zoom
+  // (i.e. ~60px on screen) drops the chrome and just shows the digits.
+  const dense = minDim < 78;
+
   const number: CSSProperties = {
     fontFamily: "'Playfair Display', serif",
-    fontSize: Math.min(28, Math.max(16, Math.min(width, height) * 0.22)),
+    fontSize: Math.min(34, Math.max(18, minDim * 0.34)),
     fontWeight: 700,
     color: colors.fg,
     lineHeight: 1,
-    marginBottom: 4,
+    marginBottom: dense ? 0 : 4,
   };
 
   const subStyle: CSSProperties = {
@@ -127,20 +134,11 @@ export function TableNode({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 3,
+    gap: 2,
     fontSize: 11,
     color: 'var(--text2)',
     fontVariantNumeric: 'tabular-nums',
-    marginTop: 4,
-  };
-
-  const cornerStripe: CSSProperties = {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    background: colors.accent,
+    marginTop: 2,
   };
 
   const resizeHandle: CSSProperties = {
@@ -171,29 +169,27 @@ export function TableNode({
       }}
       data-table-id={table.id}
     >
-      {!isCircle && <div style={cornerStripe} />}
-
       <div style={number}>{table.label || table.number}</div>
 
-      {!order && !editing && (
-        <>
-          <div style={subStyle}>{table.status === 'AVAILABLE' ? 'Tap to open' : table.status}</div>
-          <div style={{ ...subStyle, marginTop: 4, color: 'var(--text3)', letterSpacing: '0.06em' }}>
-            seats {table.capacity}
-          </div>
-        </>
+      {!order && !editing && !dense && (
+        <div style={{ ...subStyle, color: 'var(--text3)', letterSpacing: '0.06em' }}>
+          {table.status === 'RESERVED' ? 'Reserved' : `seats ${table.capacity}`}
+        </div>
       )}
 
       {order && (
         <div style={occupiedStyle}>
-          <span style={{ color: colors.accent, fontWeight: 600 }}>
+          <span style={{ color: colors.accent, fontWeight: 700, fontSize: dense ? 12 : 13 }}>
             {formatElapsed(minutes)}
           </span>
-          {order.waiter && <span>{order.waiter.name}</span>}
-          <span>
-            {order.item_count} {order.item_count === 1 ? 'item' : 'items'} ·{' '}
-            {formatMoney(order.total)}
-          </span>
+          {!dense && (
+            <>
+              {order.waiter && <span>{order.waiter.name}</span>}
+              <span style={{ fontWeight: 600, color: 'var(--text1)' }}>
+                {formatMoney(order.total)}
+              </span>
+            </>
+          )}
         </div>
       )}
 

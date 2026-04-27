@@ -157,6 +157,12 @@ export function SuppliesPage() {
           {showInactive ? '✓ Inactive visible' : 'Show inactive'}
         </button>
 
+        <Button
+          variant="secondary"
+          onClick={() => navigate('/inventory/supplies/quick-add')}
+        >
+          ⚡ Quick add (scan)
+        </Button>
         <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
           + New supply
         </Button>

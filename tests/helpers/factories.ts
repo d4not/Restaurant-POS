@@ -4,12 +4,12 @@ import { prisma } from '../../src/lib/prisma.js';
 let counter = 0;
 const uniq = (prefix: string): string => `${prefix}-${Date.now()}-${++counter}`;
 
-export async function makeUser(overrides: Partial<{ role: UserRole; email: string; name: string }> = {}) {
+export async function makeUser(overrides: Partial<{ role: UserRole; email: string; name: string; pin: string }> = {}) {
   return prisma.user.create({
     data: {
       name: overrides.name ?? 'Test User',
       email: overrides.email ?? `${uniq('user')}@test.local`,
-      pin: '1234',
+      pin: overrides.pin ?? '1234',
       password_hash: 'not-a-real-hash',
       role: overrides.role ?? 'ADMIN',
     },

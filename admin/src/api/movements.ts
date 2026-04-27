@@ -7,7 +7,9 @@ export interface ListMovementsParams {
   limit?: number;
   supply_id?: string;
   storage_id?: string;
-  type?: StockMovementType;
+  /** Single type or list of types — multi-type is sent as comma-separated and
+   *  the backend Zod schema unwraps it into a Prisma `IN` filter. */
+  type?: StockMovementType | StockMovementType[];
   reference_type?: string;
   reference_id?: string;
   from?: string;
@@ -15,5 +17,14 @@ export interface ListMovementsParams {
 }
 
 export function listMovements(params: ListMovementsParams = {}) {
-  return api.get<Paginated<StockMovement>>('/stock-movements', { ...params });
+  const { type, ...rest } = params;
+  const typeParam = Array.isArray(type)
+    ? type.length > 0
+      ? type.join(',')
+      : undefined
+    : type;
+  return api.get<Paginated<StockMovement>>('/stock-movements', {
+    ...rest,
+    type: typeParam,
+  });
 }

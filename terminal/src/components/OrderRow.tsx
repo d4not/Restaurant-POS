@@ -16,6 +16,7 @@ import {
 } from '../utils/format';
 import { ApiError } from '../api/client';
 import { useUi } from '../store/ui';
+import { getBridge } from '../platform';
 import { PulsingDot, Spinner } from './Spinner';
 import { IconClose, IconPrinter } from './Icons';
 import { CancelOrderModal } from './CancelOrderModal';
@@ -429,29 +430,33 @@ export function OrderRow({ order }: Props) {
     onSuccess: async (result) => {
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
       // Mirror TableDetail's behaviour: hand the printed payload to the
-      // Electron IPC bridge so the comanda actually prints. Failures are
-      // swallowed because the backend's `sent_at` is the source of truth and
-      // the renderer has already updated; a missing printer shouldn't block
-      // the cashier's flow.
-      if (window.electron?.printer && result.printed_count > 0) {
+      // Electron IPC bridge (desktop) or the backend's /print/kitchen endpoint
+      // (mobile/web) so the comanda actually prints. Failures are swallowed —
+      // the backend's `sent_at` is the source of truth and the renderer has
+      // already updated; a missing printer shouldn't block the cashier.
+      if (result.printed_count > 0) {
         try {
-          await window.electron.printer.printKitchen({
-            order_id: result.order_id,
-            order_number: result.order.order_number,
-            table:
-              result.order.order_type === 'TAKEOUT'
-                ? `Takeout #${result.order.order_number}`
-                : result.order.table
-                  ? `Table ${result.order.table.number}`
-                  : null,
-            waiter: result.order.user.name,
-            printed_at: result.printed_at,
-            is_correction: result.is_correction,
-            items: result.items,
-            voided_items: result.voided_items,
-          });
+          if (window.electron?.printer) {
+            await window.electron.printer.printKitchen({
+              order_id: result.order_id,
+              order_number: result.order.order_number,
+              table:
+                result.order.order_type === 'TAKEOUT'
+                  ? `Takeout #${result.order.order_number}`
+                  : result.order.table
+                    ? `Table ${result.order.table.number}`
+                    : null,
+              waiter: result.order.user.name,
+              printed_at: result.printed_at,
+              is_correction: result.is_correction,
+              items: result.items,
+              voided_items: result.voided_items,
+            });
+          } else {
+            await getBridge().print.kitchen(result.order_id);
+          }
         } catch {
-          /* ignore — IPC may be stubbed in dev */
+          /* bridge stubbed or printer unreachable; backend state is authoritative */
         }
       }
     },

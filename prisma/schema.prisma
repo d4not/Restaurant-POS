@@ -208,6 +208,7 @@ model User {
   attendance_logs   Attendance[]        @relation("AttendanceRecorder")
   payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
   payroll_approvals PayrollPeriod[]     @relation("PayrollApprover")
+  payment_approvals Payment[]           @relation("PaymentApprover")
 
   @@index([email])
   @@map("users")
@@ -1023,18 +1024,23 @@ model OrderItemModifier {
 }
 
 model Payment {
-  id            String        @id @default(uuid()) @db.Uuid
-  order_id      String        @db.Uuid
-  method        PaymentMethod
-  amount        Decimal       @db.Decimal(14, 0)
-  change_amount Decimal       @default(0) @db.Decimal(14, 0)
-  reference     String?
-  created_at    DateTime      @default(now())
+  id                   String        @id @default(uuid()) @db.Uuid
+  order_id             String        @db.Uuid
+  method               PaymentMethod
+  amount               Decimal       @db.Decimal(14, 0)
+  change_amount        Decimal       @default(0) @db.Decimal(14, 0)
+  reference            String?
+  // Set when a waiter/barista initiated the payment with a cashier+'s PIN.
+  // Null when the JWT user already had cashier+ rights.
+  approved_by_user_id  String?       @db.Uuid
+  created_at           DateTime      @default(now())
 
-  order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  order       Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  approved_by User? @relation("PaymentApprover", fields: [approved_by_user_id], references: [id])
 
   @@index([order_id])
   @@index([method])
+  @@index([approved_by_user_id])
   @@map("payments")
 }
 

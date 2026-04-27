@@ -6,8 +6,8 @@ import { usePreferencesStore } from './store/preferences';
 import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { SuppliesPage } from './pages/inventory/SuppliesPage';
-import { SupplyDetail } from './pages/inventory/SupplyDetail';
-import { SupplyCreate } from './pages/inventory/SupplyCreate';
+import { SupplyEditor } from './pages/inventory/SupplyEditor';
+import { SupplyQuickAdd } from './pages/inventory/SupplyQuickAdd';
 import { SuppliersPage } from './pages/inventory/SuppliersPage';
 import { MovementsPage } from './pages/inventory/MovementsPage';
 import { PurchaseOrdersPage } from './pages/inventory/PurchaseOrdersPage';
@@ -28,6 +28,7 @@ import { ModifierGroupsPage } from './pages/menu/ModifierGroupsPage';
 import { ModifierGroupDetail } from './pages/menu/ModifierGroupDetail';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { TablesZonesPage } from './pages/system/TablesZonesPage';
+import { StoragesPage } from './pages/system/StoragesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,8 +79,9 @@ export default function App() {
             <Route path="inventory">
               <Route index element={<Navigate to="supplies" replace />} />
               <Route path="supplies"           element={<SuppliesPage />} />
-              <Route path="supplies/new"       element={<SupplyCreate />} />
-              <Route path="supplies/:id"       element={<SupplyDetail />} />
+              <Route path="supplies/new"       element={<SupplyEditor mode="create" />} />
+              <Route path="supplies/quick-add" element={<SupplyQuickAdd />} />
+              <Route path="supplies/:id"       element={<SupplyEditor mode="edit" />} />
               <Route path="movements"          element={<MovementsPage />} />
               <Route path="purchases"          element={<PurchaseOrdersPage />} />
               <Route path="purchases/new"      element={<PurchaseOrderCreate />} />
@@ -112,6 +114,7 @@ export default function App() {
             {/* System */}
             <Route path="system">
               <Route path="tables-zones" element={<TablesZonesPage />} />
+              <Route path="storages"     element={<StoragesPage />} />
             </Route>
 
             {/* Settings */}

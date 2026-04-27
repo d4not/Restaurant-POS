@@ -13,7 +13,11 @@ export async function listStockMovements(query: ListStockMovementQuery) {
   const where: Prisma.StockMovementWhereInput = {
     ...(query.supply_id ? { supply_id: query.supply_id } : {}),
     ...(query.storage_id ? { storage_id: query.storage_id } : {}),
-    ...(query.type ? { type: query.type } : {}),
+    ...(query.type && query.type.length > 0
+      ? query.type.length === 1
+        ? { type: query.type[0] }
+        : { type: { in: query.type } }
+      : {}),
     ...(query.reference_type ? { reference_type: query.reference_type } : {}),
     ...(query.reference_id ? { reference_id: query.reference_id } : {}),
     ...(query.from || query.to

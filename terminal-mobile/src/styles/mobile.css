@@ -1,0 +1,159 @@
+/* Tablet-specific overrides applied on top of the shared terminal index.css.
+ * Keeps the warm light palette intact — these rules only adjust touch-target
+ * size, scroll behaviour, and platform chrome that doesn't apply on desktop.
+ * The responsive UI scale (transform: scale on #root) lives in the shared
+ * index.css now so Electron benefits from it too. */
+
+/* Bigger touch targets on tablet — desktop is fine with 44px but Android
+ * touchscreens benefit from 48px+ as the materialised guideline. */
+button,
+[role='button'],
+.clickable {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+/* Touch scrolling — hide the scrollbar UI but keep scrolling functional.
+ * Scrollbar cosmetics on Android WebView feel out of place vs. native. */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Disable tap-and-hold text selection across the UI. Inputs/textareas re-enable
+ * selection so cashiers can still edit their own text fields. */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+/* Prevent the Android WebView pull-to-refresh gesture eating drag interactions
+ * on lists and the floor plan. */
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+/* Honour notched / cutout-display tablets. Padding lives on the root shell so
+ * floors / orders content stays clear of the camera notch in landscape. */
+#root {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Disable iOS-style font auto-resize on rotation (Capacitor's Android WebView
+ * inherits this from Chromium under some configurations). */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ── TopBar tablet fixes ─────────────────────────────────────────────────
+ * The shared topbar uses `1fr auto 1fr` columns. On a 1138px CSS viewport
+ * (2560px @ 2.25 DPR) the right column overflows: ShiftPill + clock + user
+ * info + hamburger collide and stack visually. We hide the redundant
+ * sub-text rows that already have an icon/value alongside, and tighten the
+ * gaps so everything fits cleanly on one row. */
+.topbar-brand-sub,
+.topbar-user-text,
+.topbar-clock-date {
+  display: none !important;
+}
+.topbar-takeout-label {
+  display: none !important;
+}
+/* The grid columns pack tighter without their helper text */
+.topbar-root {
+  gap: 10px !important;
+  padding: 0 14px !important;
+}
+.topbar-right {
+  gap: 10px !important;
+}
+.topbar-user {
+  padding-left: 10px !important;
+  gap: 0 !important;
+}
+.topbar-brand-wrap {
+  padding-right: 12px !important;
+  gap: 10px !important;
+}
+
+/* ── PIN Login keypad — make keys square and bigger for tablet ─────────── */
+.pin-keypad {
+  max-width: 380px !important;
+  gap: 14px !important;
+}
+.pin-keypad button {
+  height: 88px !important;
+  font-size: 30px !important;
+}
+
+/* ── Modifier / Variant picker — wider modal so Sweetener doesn't clip ── */
+.product-picker-modal {
+  width: 720px !important;
+  max-width: 92vw !important;
+  max-height: calc(100vh - 32px) !important;
+}
+
+/* ── Payment modal — wider so quick-amount buttons breathe ─────────────── */
+.pay-modal {
+  width: 640px !important;
+  max-width: 92vw !important;
+}
+.pay-modal .pay-quick-btn {
+  font-size: 14px !important;
+  min-height: 48px !important;
+  padding: 12px 6px !important;
+}
+
+/* ── Floor plan — give the canvas more vertical room ───────────────────── */
+/* Top/left/bottom forced; right is driven by JS so it can grow when the
+ * Inspector drawer is open (preventing the drawer from covering a zone's
+ * bottom-right resize handle). */
+.floor-canvas-body {
+  padding-top: 14px !important;
+  /* Bottom padding clears Android's gesture / nav bar. The Capacitor WebView
+   * doesn't always report a non-zero safe-area-inset-bottom on tablets, so
+   * we floor it at 36px and grow with the inset when the device does report
+   * one. */
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 36px) !important;
+  padding-left: 18px !important;
+}
+
+/* The canvas wrap installs its own pinch+pan gesture handlers and needs the
+ * browser to forward raw multi-touch events instead of intercepting them as
+ * native page zoom (which the global `touch-action: manipulation` rule on
+ * <body> would otherwise do). */
+[data-pinchable] {
+  touch-action: none;
+}
+
+/* ── Order page (TableDetail) — compact tablet density ─────────────────
+ * The shared TableDetail.tsx ships with a tablet-friendly compact grid
+ * already. Earlier mobile.css used to enlarge cards (minmax 210px) for a
+ * roomier feel, but that made the menu feel like a phone-style list with
+ * only 2-3 items per row. We now mirror the shared compact grid so the
+ * full-screen tablet view fits 5-6 columns of product tiles. */
+.product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+  gap: 10px !important;
+}
+.product-card {
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+/* ── Active orders empty/header — cards stretch to fill on tablet ─────── */
+.active-orders-summary {
+  grid-template-columns: repeat(4, 1fr) !important;
+}

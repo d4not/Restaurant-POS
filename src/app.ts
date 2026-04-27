@@ -37,6 +37,7 @@ import { tableRouter } from './modules/tables/routes.js';
 import { floorRouter } from './modules/floors/routes.js';
 import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
+import { printRouter } from './modules/print/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -111,6 +112,7 @@ export function createApp(): Express {
   app.use('/api/v1/floors', floorRouter);
   app.use('/api/v1/floor-decor', floorDecorRouter);
   app.use('/api/v1/suggestions', suggestionRouter);
+  app.use('/api/v1/print', printRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

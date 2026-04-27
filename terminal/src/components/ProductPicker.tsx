@@ -82,13 +82,13 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 4,
   },
   closeBtn: {
-    width: 36,
-    height: 36,
+    width: 'var(--tap)',
+    height: 'var(--tap)',
     borderRadius: 8,
     background: 'var(--bg)',
     color: 'var(--text2)',
     border: '1px solid var(--border)',
-    fontSize: 18,
+    fontSize: 20,
     cursor: 'pointer',
   },
   body: {
@@ -156,7 +156,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cancelBtn: {
     flex: 1,
-    padding: '12px 18px',
+    padding: '14px 18px',
     borderRadius: 10,
     background: 'var(--bg)',
     color: 'var(--text1)',
@@ -164,14 +164,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 600,
     cursor: 'pointer',
-    minHeight: 48,
+    minHeight: 'var(--tap-lg)',
     fontFamily: 'inherit',
   },
 };
 
 const submitBtnStyle = (enabled: boolean): React.CSSProperties => ({
   flex: 2,
-  padding: '12px 18px',
+  padding: '14px 18px',
   borderRadius: 10,
   background: enabled ? 'var(--text1)' : 'var(--text3)',
   color: '#fff',
@@ -179,7 +179,7 @@ const submitBtnStyle = (enabled: boolean): React.CSSProperties => ({
   fontSize: 14,
   fontWeight: 600,
   cursor: enabled ? 'pointer' : 'not-allowed',
-  minHeight: 48,
+  minHeight: 'var(--tap-lg)',
   fontFamily: 'inherit',
   opacity: enabled ? 1 : 0.7,
 });
@@ -204,7 +204,7 @@ const modBtnStyle = (active: boolean): React.CSSProperties => ({
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 10,
-  padding: '12px 14px',
+  padding: '14px 16px',
   borderRadius: 10,
   background: active ? 'var(--gold-soft)' : 'var(--bg)',
   border: '1.5px solid ' + (active ? 'var(--gold)' : 'var(--border)'),
@@ -214,7 +214,7 @@ const modBtnStyle = (active: boolean): React.CSSProperties => ({
   fontWeight: 500,
   textAlign: 'left',
   fontFamily: 'inherit',
-  minHeight: 48,
+  minHeight: 'var(--tap-lg)',
 });
 
 const checkmarkStyle = (active: boolean): React.CSSProperties => ({
@@ -384,7 +384,7 @@ export function ProductPicker({
 
   return (
     <div style={styles.scrim} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div className="product-picker-modal" style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.head}>
           <div>
             <h2 style={styles.title}>{product.name}</h2>

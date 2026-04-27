@@ -1,0 +1,12 @@
+node_modules
+dist
+tsconfig.tsbuildinfo
+android/app/build
+android/.gradle
+android/build
+android/local.properties
+android/app/release
+android/app/debug
+android/capacitor-cordova-android-plugins
+*.log
+.DS_Store

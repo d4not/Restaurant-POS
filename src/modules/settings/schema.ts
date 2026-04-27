@@ -15,4 +15,18 @@ export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 // Well-known keys — centralised so typos in other modules fail at compile time.
 export const SETTING_KEYS = {
   DEFAULT_TAX_ID: 'default_tax_id',
+  // Printer config consumed by src/modules/print. Stored as opaque strings;
+  // print-service parses them on read (port → number, paper_width → 58|80).
+  PRINTER_KITCHEN_IP: 'printer_kitchen_ip',
+  PRINTER_KITCHEN_PORT: 'printer_kitchen_port',
+  PRINTER_RECEIPT_IP: 'printer_receipt_ip',
+  PRINTER_RECEIPT_PORT: 'printer_receipt_port',
+  PRINTER_PAPER_WIDTH: 'printer_paper_width',
+  BUSINESS_NAME: 'business_name',
+  BUSINESS_ADDRESS: 'business_address',
+} as const;
+
+export const PRINTER_DEFAULTS = {
+  PORT: '9100',
+  PAPER_WIDTH: '80',
 } as const;

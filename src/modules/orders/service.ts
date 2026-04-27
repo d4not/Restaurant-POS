@@ -8,6 +8,7 @@ import {
   StockMovementType,
   TableStatus,
   TakeoutChannel,
+  type UserRole,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
@@ -1149,7 +1150,21 @@ export async function restoreOrderItem(
  *  - Any method: amount may NOT exceed remaining for non-CASH (overpay is only
  *    allowed on cash, since that's how change works in real life)
  */
-export async function addPayment(orderId: string, input: CreatePaymentInput, userId: string) {
+export async function addPayment(
+  orderId: string,
+  input: CreatePaymentInput,
+  userId: string,
+  userRole: UserRole,
+) {
+  // Waiter/Barista emergency-shift flow: they can settle a ticket only if they
+  // include a cashier+'s PIN in the payload. The matching cashier id is then
+  // recorded on Payment.approved_by_user_id for audit. Cashier+ JWTs settle
+  // without a PIN exactly as before.
+  let approverUserId: string | null = null;
+  if (userRole === 'WAITER' || userRole === 'BARISTA') {
+    approverUserId = await authorizeCashierPin(input.pin);
+  }
+
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
@@ -1256,6 +1271,7 @@ export async function addPayment(orderId: string, input: CreatePaymentInput, use
         amount,
         change_amount: changeAmount,
         reference: input.reference ?? null,
+        approved_by_user_id: approverUserId,
       },
     });
 

@@ -79,13 +79,31 @@ async function main(): Promise<void> {
     },
   });
 
-  const supplier = await prisma.supplier.create({
+  // Two suppliers reflect the real procurement split:
+  //   - Sam's Club Los Mochis: physical wholesale store. Drive over with a list,
+  //     pay at register. No credit, no delivery. Used for dry goods and cups.
+  //   - Frios: cold-chain dairy distributor. Orders go out by WhatsApp the night
+  //     before; same-day delivery the next morning. Net-7 invoicing.
+  const samsLosMochis = await prisma.supplier.create({
     data: {
-      name: 'Northside Coffee Distribution',
-      contact_name: 'Maria Garcia',
-      phone: '+1 555 123 4567',
-      email: 'sales@northsidecoffee.local',
-      credit_days: 30,
+      name: "Sam's Club Los Mochis",
+      contact_name: null,
+      phone: '+52 668 818 2200',
+      email: null,
+      address: 'Blvd. Adolfo López Mateos 802, Los Mochis, Sinaloa',
+      credit_days: 0,
+      notes: 'Physical pickup. Pay at register (cash or card). No delivery.',
+    },
+  });
+  const frios = await prisma.supplier.create({
+    data: {
+      name: 'Frios',
+      contact_name: 'Pedro López',
+      phone: '+52 668 123 4567',
+      email: null,
+      address: 'Cold-chain distribution, Los Mochis area',
+      credit_days: 7,
+      notes: 'WhatsApp orders before 7pm — same-day morning delivery.',
     },
   });
 
@@ -134,6 +152,22 @@ async function main(): Promise<void> {
   // still pick up the 16% automatically at order time.
   await prisma.setting.create({
     data: { key: 'default_tax_id', value: tax.id },
+  });
+
+  // Printer + business identity defaults consumed by /api/v1/print. Empty IPs
+  // mean "no printer configured" — the print service surfaces a connection
+  // error instead of trying to dial 0.0.0.0. Operators set the real IPs in the
+  // admin Settings page after first launch.
+  await prisma.setting.createMany({
+    data: [
+      { key: 'printer_kitchen_ip', value: '' },
+      { key: 'printer_kitchen_port', value: '9100' },
+      { key: 'printer_receipt_ip', value: '' },
+      { key: 'printer_receipt_port', value: '9100' },
+      { key: 'printer_paper_width', value: '80' },
+      { key: 'business_name', value: 'Cafe POS' },
+      { key: 'business_address', value: '' },
+    ],
   });
 
   // --------------------------------------------------------------------------
@@ -268,22 +302,89 @@ async function main(): Promise<void> {
   }
 
   // --------------------------------------------------------------------------
-  // Purchase packagings (optional — illustrative of the 3-layer unit model)
+  // Purchase packagings — split by supplier:
+  //   Frios delivers dairy; Sam's covers everything else.
+  // price_per_package is captured here so the quick-add flow has a reference
+  // unit cost (and so the variance/cost reports have something to surface).
   // --------------------------------------------------------------------------
   const milkCase = await prisma.purchasePackaging.create({
     data: {
       supply_id: milk.id,
-      supplier_id: supplier.id,
+      supplier_id: frios.id,
       name: 'Case of 6 bottles',
       units_per_package: 6,
+      price_per_package: 21000,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: almond.id,
+      supplier_id: frios.id,
+      name: 'Case of 12 bottles',
+      units_per_package: 12,
+      price_per_package: 66000,
+      is_primary: true,
     },
   });
   const cupSleeve = await prisma.purchasePackaging.create({
     data: {
       supply_id: cup12.id,
-      supplier_id: supplier.id,
+      supplier_id: samsLosMochis.id,
       name: 'Sleeve of 50',
       units_per_package: 50,
+      price_per_package: 17500,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: espresso.id,
+      supplier_id: samsLosMochis.id,
+      name: 'Bag (1 kg)',
+      units_per_package: 1,
+      price_per_package: 42000,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: vanillaSyrup.id,
+      supplier_id: samsLosMochis.id,
+      name: 'Bottle (750 ml)',
+      units_per_package: 1,
+      price_per_package: 18000,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: chocolateSauce.id,
+      supplier_id: samsLosMochis.id,
+      name: 'Bottle (1 kg)',
+      units_per_package: 1,
+      price_per_package: 22000,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: sugar.id,
+      supplier_id: samsLosMochis.id,
+      name: 'Bag (1 kg)',
+      units_per_package: 1,
+      price_per_package: 2500,
+      is_primary: true,
+    },
+  });
+  await prisma.purchasePackaging.create({
+    data: {
+      supply_id: water.id,
+      supplier_id: samsLosMochis.id,
+      name: 'Bottle (500 ml)',
+      units_per_package: 1,
+      price_per_package: 1200,
+      is_primary: true,
     },
   });
 
@@ -294,6 +395,7 @@ async function main(): Promise<void> {
   // down to per-base-unit cost. Values chosen to produce realistic centavo WACs.
   // --------------------------------------------------------------------------
   async function buyAndConfirm(
+    supplierId: string,
     storageId: string,
     items: Array<{
       supply_id: string;
@@ -305,7 +407,7 @@ async function main(): Promise<void> {
   ): Promise<void> {
     const purchase = await prisma.purchase.create({
       data: {
-        supplier_id: supplier.id,
+        supplier_id: supplierId,
         storage_id: storageId,
         date: new Date(dateIso),
         status: 'DRAFT',
@@ -325,14 +427,11 @@ async function main(): Promise<void> {
     await confirmPurchase(purchase.id);
   }
 
-  // Initial warehouse load — bulk buys into the back storage.
+  // Initial warehouse load — Sam's run for dry goods + cups + water.
   await buyAndConfirm(
+    samsLosMochis.id,
     warehouse.id,
     [
-      // 4 cases × 6 bottles × 3500c per bottle → 24 bottles of whole milk
-      { supply_id: milk.id, packaging_id: milkCase.id, package_quantity: 4, price_per_package: 21000 },
-      // 12 bottles of almond milk @ 5500c
-      { supply_id: almond.id, package_quantity: 12, price_per_package: 5500 },
       // 10 bags of espresso beans @ 42000c / kg
       { supply_id: espresso.id, package_quantity: 10, price_per_package: 42000 },
       // 6 bottles of vanilla syrup @ 18000c / bottle
@@ -353,12 +452,24 @@ async function main(): Promise<void> {
     '2026-04-10T09:00:00Z',
   );
 
-  // Restock directly to the bar so it has front-of-house inventory.
+  // Frios delivery — dairy only, lands at warehouse fridge.
   await buyAndConfirm(
+    frios.id,
+    warehouse.id,
+    [
+      // 4 cases × 6 bottles → 24 bottles of whole milk
+      { supply_id: milk.id, packaging_id: milkCase.id, package_quantity: 4, price_per_package: 21000 },
+      // 12 bottles of almond milk @ 5500c
+      { supply_id: almond.id, package_quantity: 12, price_per_package: 5500 },
+    ],
+    '2026-04-11T09:00:00Z',
+  );
+
+  // Bar restock from Sam's — front-of-house dry inventory.
+  await buyAndConfirm(
+    samsLosMochis.id,
     bar.id,
     [
-      { supply_id: milk.id, package_quantity: 6, price_per_package: 3600 },
-      { supply_id: almond.id, package_quantity: 4, price_per_package: 5700 },
       { supply_id: espresso.id, package_quantity: 2, price_per_package: 43000 },
       { supply_id: vanillaSyrup.id, package_quantity: 2, price_per_package: 18500 },
       { supply_id: chocolateSauce.id, package_quantity: 1, price_per_package: 22500 },
@@ -369,6 +480,17 @@ async function main(): Promise<void> {
       { supply_id: water.id, package_quantity: 24, price_per_package: 1250 },
     ],
     '2026-04-18T09:00:00Z',
+  );
+
+  // Bar restock from Frios — fresh dairy delivery to the bar fridge.
+  await buyAndConfirm(
+    frios.id,
+    bar.id,
+    [
+      { supply_id: milk.id, package_quantity: 6, price_per_package: 3600 },
+      { supply_id: almond.id, package_quantity: 4, price_per_package: 5700 },
+    ],
+    '2026-04-19T09:00:00Z',
   );
 
   // --------------------------------------------------------------------------
@@ -508,6 +630,7 @@ async function main(): Promise<void> {
   async function createDish(params: {
     name: string;
     category_id: string;
+    image_url?: string;
     variants: Array<{
       name: string;
       sell_price: number;
@@ -527,6 +650,7 @@ async function main(): Promise<void> {
         type: ProductType.DISH,
         category_id: params.category_id,
         tax_id: tax.id,
+        image_url: params.image_url ?? null,
       },
     });
     for (const [idx, v] of params.variants.entries()) {
@@ -546,9 +670,14 @@ async function main(): Promise<void> {
   // Milk lines carry modifier_group_id so the Milk Type SWAP group fills the
   // slot — Whole Milk (is_default) when nothing is picked, Almond Milk (or
   // any other modifier) when the customer chooses.
+  // Image URLs use Unsplash CDN — fine for dev seed; production would upload
+  // through the admin panel and serve from the backend's static dir. Falls
+  // back to the colored initial tile if the CDN fails or the device is offline.
   await createDish({
     name: 'Latte',
     category_id: hotCoffeeCat.id,
+    image_url:
+      'https://images.unsplash.com/photo-1561882468-9110e03e0f78?auto=format&fit=crop&w=480&q=70',
     variants: [
       {
         name: 'Small 8oz',
@@ -584,6 +713,8 @@ async function main(): Promise<void> {
   await createDish({
     name: 'Cappuccino',
     category_id: hotCoffeeCat.id,
+    image_url:
+      'https://images.unsplash.com/photo-1572442388796-11668a67e53d?auto=format&fit=crop&w=480&q=70',
     variants: [
       {
         name: 'Small 8oz',
@@ -619,6 +750,8 @@ async function main(): Promise<void> {
   await createDish({
     name: 'Americano',
     category_id: hotCoffeeCat.id,
+    image_url:
+      'https://images.unsplash.com/photo-1497636577773-f1231844b336?auto=format&fit=crop&w=480&q=70',
     variants: [
       {
         name: 'Medium 12oz',
@@ -643,6 +776,8 @@ async function main(): Promise<void> {
   await createDish({
     name: 'Mocha',
     category_id: hotCoffeeCat.id,
+    image_url:
+      'https://images.unsplash.com/photo-1542990253-0d0f5be5f0ed?auto=format&fit=crop&w=480&q=70',
     variants: [
       {
         name: 'Small 8oz',
@@ -686,6 +821,8 @@ async function main(): Promise<void> {
       sell_price: 2500,
       supply_id: water.id,
       tax_id: tax.id,
+      image_url:
+        'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=480&q=70',
     },
   });
 
@@ -982,12 +1119,12 @@ async function main(): Promise<void> {
   await prisma.attendance.createMany({ data: attendanceRecords });
 
   console.log('Seed complete.');
-  console.log(`  Supplier: ${supplier.name}`);
+  console.log(`  Suppliers: ${samsLosMochis.name} (dry goods), ${frios.name} (dairy)`);
   console.log(`  Storages: ${warehouse.name}, ${bar.name}`);
   console.log(`  Zones: ${indoorZone.name} (tables 1-6), ${terraceZone.name} (tables 7-10)`);
   console.log('  Products: Latte ×3, Cappuccino ×3, Americano ×2, Mocha ×3, Bottled Water');
   console.log('  Preparations: Simple Syrup, Mocha Sauce');
-  console.log('  Purchases: 2 confirmed (Warehouse + Bar) — WAC and stock populated');
+  console.log('  Purchases: 4 confirmed (2 per supplier) — WAC and stock populated');
   console.log('  Sales: 4 sample orders — SALE movements written for variance reports');
   console.log(`  Employees: ${sofia.name}, ${carlos.name}, ${lucia.name}`);
   console.log(`  Attendance: ${attendanceRecords.length} records for week of ${weekStart.toISOString().slice(0, 10)}`);

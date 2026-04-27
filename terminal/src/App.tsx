@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { TopBar } from './components/TopBar';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
+import { OfflineBanner } from './components/OfflineBanner';
 import { PinLogin } from './pages/PinLogin';
 import { ActiveOrders } from './pages/ActiveOrders';
 import { FloorPlan } from './pages/FloorPlan';
@@ -10,14 +11,20 @@ import { OrderHistory } from './pages/OrderHistory';
 import { TableDetail } from './pages/TableDetail';
 import { useSession } from './store/session';
 import { useUi } from './store/ui';
+import { usePreferences } from './store/preferences';
 import { fetchMe } from './api/auth';
 import { useAutoLock } from './hooks/useAutoLock';
+import { useNetworkSync } from './hooks/useNetworkSync';
 
+// Use 100% (not 100vw/100vh) so the shell tracks #root's size — important on
+// terminal-mobile, where mobile.css transforms #root and counter-sizes its
+// width/height to make the UI scale responsive without clipping. On desktop
+// #root is full viewport so the resolved size is identical.
 const shellStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  height: '100vh',
-  width: '100vw',
+  height: '100%',
+  width: '100%',
   overflow: 'hidden',
   background: 'var(--bg)',
 };
@@ -67,12 +74,31 @@ export function App() {
   // so unmounting around the PinLogin early-return isn't required.
   useAutoLock(authed);
 
+  // Mirror the platform bridge's network status into TanStack Query so it
+  // pauses requests while offline and refetches on reconnection.
+  useNetworkSync();
+
+  // Apply the persisted UI scale to the document root so every component
+  // styled off --ui-scale / --rem reflects the operator's preference. Pushing
+  // this once at the document level avoids a per-component prop and keeps the
+  // PIN login (which renders before App's main branch) in scale too.
+  const uiScale = usePreferences((s) => s.uiScale);
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ui-scale', String(uiScale));
+  }, [uiScale]);
+
   if (!authed) {
-    return <PinLogin />;
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <PinLogin />
+      </div>
+    );
   }
 
   return (
     <div style={shellStyle}>
+      <OfflineBanner />
       <TopBar />
       <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {view === 'orders' && <ActiveOrders />}

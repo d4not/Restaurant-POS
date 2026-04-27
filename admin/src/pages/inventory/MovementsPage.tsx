@@ -1,13 +1,12 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Badge, Table } from '../../components/ui';
+import { Badge, Button, Modal, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { SearchInput } from '../../components/forms/SearchInput';
 import { useMovements } from '../../hooks/useMovements';
 import { useStorages } from '../../hooks/useStorages';
 import { useSupplies } from '../../hooks/useSupplies';
 import {
-  STOCK_MOVEMENT_TYPES,
   type StockMovement,
   type StockMovementType,
 } from '../../types/inventory';
@@ -30,21 +29,74 @@ function toIsoDayEnd(value: string): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
+// Tab definitions — each maps to a set of StockMovementType values. Transfers
+// surface both legs of the trip (TRANSFER_OUT at the source, TRANSFER_IN at
+// the destination) so a single transfer event shows two rows under one tab.
+type CategoryId = 'all' | 'sales' | 'purchases' | 'transfers' | 'mermas' | 'adjustments';
+
+interface CategoryDef {
+  id: CategoryId;
+  label: string;
+  types: StockMovementType[];
+  description: string;
+}
+
+const CATEGORIES: CategoryDef[] = [
+  {
+    id: 'all',
+    label: 'All',
+    types: [],
+    description: 'Every movement, regardless of source.',
+  },
+  {
+    id: 'sales',
+    label: 'Sales',
+    types: ['SALE'],
+    description: 'Auto-deducted from product sales as orders are paid.',
+  },
+  {
+    id: 'purchases',
+    label: 'Purchases',
+    types: ['PURCHASE'],
+    description: 'Stock added when a purchase order is confirmed.',
+  },
+  {
+    id: 'transfers',
+    label: 'Transfers',
+    types: ['TRANSFER_OUT', 'TRANSFER_IN'],
+    description:
+      'Stock moved between two storages — recorded twice (out at source, in at destination).',
+  },
+  {
+    id: 'mermas',
+    label: 'Mermas',
+    types: ['WRITE_OFF'],
+    description: 'Manual write-offs: spilled, expired, damaged, theft, etc.',
+  },
+  {
+    id: 'adjustments',
+    label: 'Adjustments',
+    types: ['ADJUSTMENT'],
+    description: 'Diffs applied when an inventory check completes.',
+  },
+];
+
 export function MovementsPage() {
   const [urlParams, setUrlParams] = useSearchParams();
 
-  const [type, setType] = useState<StockMovementType | ''>('');
+  const [category, setCategory] = useState<CategoryId>('all');
   const [storageId, setStorageId] = useState('');
   const [supplySearch, setSupplySearch] = useState('');
   const [supplyId, setSupplyId] = useState<string>(urlParams.get('supply_id') ?? '');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [terminalActionModal, setTerminalActionModal] = useState<
+    'transfer' | 'write-off' | null
+  >(null);
 
   const storagesQ = useStorages();
   const suppliesQ = useSupplies({ search: supplySearch || undefined });
 
-  // If the URL arrived with supply_id already selected, fetch that one supply
-  // so we can show its name in the picker.
   const selectedSupply = useMemo(() => {
     if (!supplyId) return null;
     return (
@@ -54,7 +106,6 @@ export function MovementsPage() {
     );
   }, [suppliesQ.data, supplyId]);
 
-  // Keep the URL in sync with the supply_id so reloads preserve the filter.
   useEffect(() => {
     const current = urlParams.get('supply_id') ?? '';
     if (supplyId === current) return;
@@ -64,15 +115,17 @@ export function MovementsPage() {
     setUrlParams(next, { replace: true });
   }, [supplyId, urlParams, setUrlParams]);
 
+  const activeCategory = CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0];
+
   const filters = useMemo(
     () => ({
-      type: (type || undefined) as StockMovementType | undefined,
+      type: activeCategory.types.length > 0 ? activeCategory.types : undefined,
       storage_id: storageId || undefined,
       supply_id: supplyId || undefined,
       from: toIsoDayStart(from),
       to: toIsoDayEnd(to),
     }),
-    [type, storageId, supplyId, from, to],
+    [activeCategory, storageId, supplyId, from, to],
   );
 
   const query = useMovements(filters);
@@ -150,7 +203,7 @@ export function MovementsPage() {
   ];
 
   const clearAll = () => {
-    setType('');
+    setCategory('all');
     setStorageId('');
     setSupplyId('');
     setSupplySearch('');
@@ -159,35 +212,61 @@ export function MovementsPage() {
   };
 
   const hasActiveFilters =
-    !!(type || storageId || supplyId || from || to);
+    category !== 'all' || !!(storageId || supplyId || from || to);
 
   return (
     <>
+      {/* Category tab strip — primary segmentation of the movements ledger */}
       <div
-        className="toolbar"
-        style={{ alignItems: 'flex-end', gap: 10 }}
+        style={{
+          display: 'flex',
+          gap: 6,
+          flexWrap: 'wrap',
+          marginBottom: 6,
+        }}
       >
-        <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-          <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-            Type
-          </label>
-          <select
-            className="search-box"
-            value={type}
-            onChange={(e) => setType(e.target.value as StockMovementType | '')}
-            style={{ cursor: 'pointer' }}
+        {CATEGORIES.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className={`filter-pill ${category === c.id ? 'active' : ''}`}
+            onClick={() => setCategory(c.id)}
           >
-            <option value="">All types</option>
-            {STOCK_MOVEMENT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <p className="fs-12 text-muted" style={{ marginBottom: 14 }}>
+        {activeCategory.description}
+      </p>
 
+      {/* Action buttons — both flows live in the POS terminal app, the buttons
+          here surface that affordance + open a brief explainer modal. */}
+      <div
+        className="flex gap-8"
+        style={{ marginBottom: 14, flexWrap: 'wrap' }}
+      >
+        <Button
+          variant="secondary"
+          onClick={() => setTerminalActionModal('transfer')}
+        >
+          + Register transfer
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => setTerminalActionModal('write-off')}
+        >
+          + Register write-off
+        </Button>
+      </div>
+
+      {/* Fine-grained filters */}
+      <div className="toolbar" style={{ alignItems: 'flex-end', gap: 10 }}>
         <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-          <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+          <label
+            className="fs-11 text-muted"
+            style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
+          >
             Storage
           </label>
           <select
@@ -207,7 +286,10 @@ export function MovementsPage() {
         </div>
 
         <div style={{ flex: '1 1 260px', minWidth: 260 }}>
-          <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+          <label
+            className="fs-11 text-muted"
+            style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
+          >
             Supply
           </label>
           <SearchInput
@@ -222,9 +304,12 @@ export function MovementsPage() {
             style={{ cursor: 'pointer' }}
           >
             <option value="">Any supply</option>
-            {selectedSupply && !suppliesQ.data?.pages[0]?.items.some((s) => s.id === selectedSupply.id) && (
-              <option value={selectedSupply.id}>{selectedSupply.name}</option>
-            )}
+            {selectedSupply &&
+              !suppliesQ.data?.pages[0]?.items.some(
+                (s) => s.id === selectedSupply.id,
+              ) && (
+                <option value={selectedSupply.id}>{selectedSupply.name}</option>
+              )}
             {suppliesQ.data?.pages
               .flatMap((p) => p.items)
               .map((s) => (
@@ -236,7 +321,10 @@ export function MovementsPage() {
         </div>
 
         <div style={{ flex: '0 0 160px' }}>
-          <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+          <label
+            className="fs-11 text-muted"
+            style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
+          >
             From
           </label>
           <input
@@ -247,7 +335,10 @@ export function MovementsPage() {
           />
         </div>
         <div style={{ flex: '0 0 160px' }}>
-          <label className="fs-11 text-muted" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+          <label
+            className="fs-11 text-muted"
+            style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}
+          >
             To
           </label>
           <input
@@ -276,16 +367,75 @@ export function MovementsPage() {
         getRowKey={(m) => m.id}
         isInitialLoad={query.isLoading}
         error={query.error as Error | null}
-        emptyMessage={hasActiveFilters ? 'No movements match these filters' : 'No movements yet'}
+        emptyMessage={
+          hasActiveFilters
+            ? 'No movements match these filters'
+            : 'No movements yet'
+        }
         emptySub={
           hasActiveFilters
-            ? 'Try clearing some filters.'
+            ? 'Try a different category or clear the filters.'
             : 'Movements are created automatically from purchases, sales, transfers, and inventory adjustments.'
         }
         hasMore={!!query.hasNextPage}
         isLoadingMore={query.isFetchingNextPage}
         onLoadMore={() => query.fetchNextPage()}
       />
+
+      <TerminalActionModal
+        kind={terminalActionModal}
+        onClose={() => setTerminalActionModal(null)}
+      />
     </>
+  );
+}
+
+interface TerminalActionModalProps {
+  kind: 'transfer' | 'write-off' | null;
+  onClose: () => void;
+}
+
+function TerminalActionModal({ kind, onClose }: TerminalActionModalProps) {
+  const open = kind !== null;
+  const isTransfer = kind === 'transfer';
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isTransfer ? 'Register a transfer' : 'Register a write-off'}
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          Got it
+        </Button>
+      }
+    >
+      <p className="fs-13" style={{ lineHeight: 1.55 }}>
+        {isTransfer ? (
+          <>
+            Transfers move stock between two storages — for example, restocking
+            the bar from the warehouse fridge.
+          </>
+        ) : (
+          <>
+            Write-offs (mermas) record stock leaving inventory for any reason
+            other than a sale: spilled milk, expired bag, damaged bottle, theft.
+          </>
+        )}
+      </p>
+      <p
+        className="fs-13"
+        style={{ marginTop: 10, lineHeight: 1.55, color: 'var(--text2)' }}
+      >
+        This flow lives in the <strong>POS terminal</strong> app — the staff
+        member at the bar registers it from the same device they use to take
+        orders, then it shows up here under the{' '}
+        <Badge tone={isTransfer ? 'gold' : 'red'}>
+          {isTransfer ? 'Transfers' : 'Mermas'}
+        </Badge>{' '}
+        tab. Inventory checks (full counts) are also done from the terminal and
+        their adjustments land under{' '}
+        <Badge tone="blue">Adjustments</Badge>.
+      </p>
+    </Modal>
   );
 }

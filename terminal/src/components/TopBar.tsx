@@ -17,10 +17,12 @@ import { ShiftPill, ShiftManagerModal } from './RegisterPanel';
 import { PinConfirmModal } from './PinConfirmModal';
 import { verifyPin } from '../api/auth';
 import { ApiError } from '../api/client';
-import { createOrder, type TakeoutChannel } from '../api/orders';
+import { createOrder, fetchOrder, type TakeoutChannel } from '../api/orders';
 import { fetchOpenRegister } from '../api/registers';
 import { fetchSettings } from '../api/settings';
+import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
 import { TakeoutChannelPicker } from './TakeoutChannelPicker';
+import { IconChevronLeft } from './Icons';
 
 interface NavTab {
   view: TerminalView;
@@ -39,13 +41,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: '1fr auto 1fr',
     alignItems: 'center',
-    height: 72,
+    height: 56,
     background: 'var(--sidebar)',
     color: '#e8ddd0',
-    padding: '0 20px',
+    padding: '0 16px',
     flexShrink: 0,
     borderBottom: '1px solid rgba(0,0,0,0.2)',
-    gap: 20,
+    gap: 16,
   },
   left: {
     display: 'flex',
@@ -63,16 +65,16 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100%',
   },
   brand: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 7,
     background: 'linear-gradient(135deg, #c9a45c 0%, #a8843f 100%)',
     color: '#2c2420',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontFamily: "'Playfair Display', serif",
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: 700,
   },
   brandText: {
@@ -82,28 +84,28 @@ const styles: Record<string, React.CSSProperties> = {
   },
   brandName: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: 600,
     color: '#fff',
   },
   brandSub: {
-    fontSize: 10,
+    fontSize: 9,
     letterSpacing: '0.18em',
     textTransform: 'uppercase',
     color: 'rgba(232,221,208,0.45)',
-    marginTop: 2,
+    marginTop: 1,
   },
   newOrderBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '10px 16px',
-    borderRadius: 10,
+    gap: 7,
+    padding: '7px 12px',
+    borderRadius: 8,
     background: 'rgba(232,221,208,0.08)',
     color: '#e8ddd0',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 600,
-    minHeight: 44,
+    minHeight: 38,
     border: '1px solid rgba(232,221,208,0.12)',
     cursor: 'pointer',
     transition: 'background 0.15s',
@@ -142,17 +144,17 @@ const styles: Record<string, React.CSSProperties> = {
   },
   clockTime: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 600,
     color: '#fff',
     fontVariantNumeric: 'tabular-nums',
   },
   clockDate: {
-    fontSize: 10,
+    fontSize: 9,
     letterSpacing: '0.14em',
     textTransform: 'uppercase',
     color: 'rgba(232,221,208,0.5)',
-    marginTop: 2,
+    marginTop: 1,
   },
   user: {
     display: 'flex',
@@ -164,8 +166,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   avatar: {
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 30,
     borderRadius: '50%',
     background: 'linear-gradient(135deg, #6b5e54, #2c2420)',
     color: '#e8ddd0',
@@ -173,30 +175,75 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 600,
-    fontSize: 13,
+    fontSize: 12,
     border: '1px solid rgba(232,221,208,0.12)',
   },
   userText: { display: 'flex', flexDirection: 'column', lineHeight: 1.15 },
-  userName: { fontSize: 13, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' },
+  userName: { fontSize: 12, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' },
   userMeta: {
-    fontSize: 10,
+    fontSize: 9,
     letterSpacing: '0.12em',
     textTransform: 'uppercase',
     color: 'rgba(232,221,208,0.5)',
-    marginTop: 2,
+    marginTop: 1,
     whiteSpace: 'nowrap',
   },
   hamburger: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: 'rgba(232,221,208,0.06)',
     color: '#e8ddd0',
     cursor: 'pointer',
-    fontSize: 20,
+    fontSize: 17,
+  },
+  // Contextual detail header — replaces the brand+takeout cluster on the left
+  // when view==='detail'. Mirrors the Loyverse pattern: ‹ Back chip + tab pills.
+  detailBackBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '7px 12px 7px 8px',
+    borderRadius: 8,
+    background: 'rgba(232,221,208,0.06)',
+    color: '#e8ddd0',
+    border: '1px solid rgba(232,221,208,0.12)',
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: 600,
+    minHeight: 38,
+    fontFamily: 'inherit',
+  },
+  detailTitleBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    lineHeight: 1.15,
+    minWidth: 0,
+  },
+  detailTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 15,
+    fontWeight: 600,
+    color: '#fff',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: 360,
+  },
+  detailSub: {
+    fontSize: 10,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    color: 'rgba(232,221,208,0.55)',
+    marginTop: 3,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: 360,
   },
   scrim: {
     position: 'fixed',
@@ -250,18 +297,18 @@ const styles: Record<string, React.CSSProperties> = {
 const navBtnStyle = (active: boolean): React.CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 10,
-  padding: '12px 20px',
-  borderRadius: 10,
+  gap: 8,
+  padding: '8px 14px',
+  borderRadius: 8,
   color: active ? '#2c2420' : 'rgba(232,221,208,0.78)',
   background: active ? 'var(--gold)' : 'transparent',
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 600,
   letterSpacing: '0.02em',
   whiteSpace: 'nowrap',
   transition: 'all 0.15s',
   cursor: 'pointer',
-  minHeight: 44,
+  minHeight: 38,
   fontFamily: 'inherit',
 });
 
@@ -276,9 +323,12 @@ export function TopBar() {
   const closeMenu = useUi((s) => s.closeMenu);
   const openSettings = useUi((s) => s.openSettings);
   const openOrderDetail = useUi((s) => s.openOrderDetail);
+  const closeOrderDetail = useUi((s) => s.closeOrderDetail);
+  const detailOrderId = useUi((s) => s.detailOrderId);
   const historyUnlocked = useUi((s) => s.historyUnlocked);
   const unlockHistory = useUi((s) => s.unlockHistory);
   const resetSession = useUi((s) => s.resetSession);
+  const isDetail = view === 'detail';
 
   const user = useSession((s) => s.user);
   const lock = useSession((s) => s.lock);
@@ -315,6 +365,29 @@ export function TopBar() {
     queryFn: fetchSettings,
     staleTime: 60_000,
   });
+
+  // When view==='detail' we mirror TableDetail's order query (same key) so
+  // the topbar can show "Order #X / Table Y · Zone" without a second round
+  // trip — TanStack dedupes against the cache TableDetail already populated.
+  const detailOrderQuery = useQuery({
+    queryKey: ['order', detailOrderId],
+    queryFn: () => fetchOrder(detailOrderId!),
+    enabled: isDetail && !!detailOrderId,
+    staleTime: 8_000,
+  });
+  const detailOrder = detailOrderQuery.data ?? null;
+  const detailTitle = detailOrder
+    ? `Order #${detailOrder.order_number}`
+    : 'Order';
+  const detailSub = detailOrder
+    ? detailOrder.order_type === 'TAKEOUT'
+      ? detailOrder.takeout_channel
+        ? TAKEOUT_CHANNEL_LABEL[detailOrder.takeout_channel]
+        : 'Takeout'
+      : detailOrder.table
+        ? `Table ${detailOrder.table.number} · ${detailOrder.table.zone.name}`
+        : 'Open ticket'
+    : '';
 
   const takeoutMutation = useMutation({
     mutationFn: (channel: TakeoutChannel) => {
@@ -393,67 +466,88 @@ export function TopBar() {
   }, [menuOpen, closeMenu]);
 
   return (
-    <header style={styles.root}>
-      <div style={styles.left}>
-        <div style={styles.brandWrap}>
-          <div style={styles.brand}>R</div>
-          <div style={styles.brandText}>
-            <span style={styles.brandName}>Restaurant POS</span>
-            <span style={styles.brandSub}>Terminal</span>
-          </div>
+    <header className="topbar-root" style={styles.root}>
+      {isDetail ? (
+        <div style={styles.left}>
+          <button
+            type="button"
+            style={styles.detailBackBtn}
+            onClick={closeOrderDetail}
+            aria-label="Back to orders"
+          >
+            <IconChevronLeft style={{ fontSize: 18 }} />
+            <span>Back</span>
+          </button>
         </div>
-        <button
-          type="button"
-          style={{
-            ...styles.newOrderBtn,
-            ...(takeoutMutation.isPending ? styles.newOrderBtnDisabled : null),
-          }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            setTakeoutError(null);
-            setPickerOpen(true);
-          }}
-          disabled={takeoutMutation.isPending}
-          title="Open a takeout or delivery order"
-        >
-          <IconPlus />
-          <span>{takeoutMutation.isPending ? 'Opening…' : 'Takeout/Delivery Order'}</span>
-        </button>
-        {takeoutError && !pickerOpen && (
-          <span style={styles.newOrderError}>{takeoutError}</span>
-        )}
-      </div>
+      ) : (
+        <div style={styles.left}>
+          <div className="topbar-brand-wrap" style={styles.brandWrap}>
+            <div style={styles.brand}>R</div>
+            <div style={styles.brandText}>
+              <span style={styles.brandName}>Restaurant POS</span>
+              <span className="topbar-brand-sub" style={styles.brandSub}>Terminal</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            style={{
+              ...styles.newOrderBtn,
+              ...(takeoutMutation.isPending ? styles.newOrderBtnDisabled : null),
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setTakeoutError(null);
+              setPickerOpen(true);
+            }}
+            disabled={takeoutMutation.isPending}
+            title="Open a takeout or delivery order"
+          >
+            <IconPlus />
+            <span className="topbar-takeout-label">{takeoutMutation.isPending ? 'Opening…' : 'Takeout/Delivery Order'}</span>
+          </button>
+          {takeoutError && !pickerOpen && (
+            <span style={styles.newOrderError}>{takeoutError}</span>
+          )}
+        </div>
+      )}
 
-      <nav style={styles.navList}>
-        {visibleTabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = view === tab.view;
-          return (
-            <button
-              key={tab.view}
-              type="button"
-              style={navBtnStyle(active)}
-              onClick={() => handleTabClick(tab)}
-            >
-              <Icon style={{ fontSize: 18 }} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {isDetail ? (
+        <div style={styles.detailTitleBlock}>
+          <span style={styles.detailTitle}>{detailTitle}</span>
+          {detailSub && <span style={styles.detailSub}>{detailSub}</span>}
+        </div>
+      ) : (
+        <nav style={styles.navList}>
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = view === tab.view;
+            return (
+              <button
+                key={tab.view}
+                type="button"
+                style={navBtnStyle(active)}
+                onClick={() => handleTabClick(tab)}
+              >
+                <Icon style={{ fontSize: 18 }} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
 
-      <div style={styles.right}>
+      <div className="topbar-right" style={styles.right}>
         <ShiftPill onClick={() => setShiftModalOpen(true)} />
         <div style={styles.clockGroup}>
           <span style={styles.clockTime}>{formatTime(now)}</span>
-          <span style={styles.clockDate}>{formatDate(now)}</span>
+          <span className="topbar-clock-date" style={styles.clockDate}>{formatDate(now)}</span>
         </div>
 
-        <div style={styles.user}>
+        <div className="topbar-user" style={styles.user}>
           <div style={styles.avatar}>
             {user ? getInitials(user.name) : '·'}
           </div>
-          <div style={styles.userText}>
+          <div className="topbar-user-text" style={styles.userText}>
             <span style={styles.userName}>{user?.name ?? 'Signed out'}</span>
             <span style={styles.userMeta}>{user?.role ?? '—'}</span>
           </div>

@@ -10,7 +10,14 @@ import {
   rejectSuggestion,
   type Suggestion,
 } from '../api/suggestions';
-import { ApiError } from '../api/client';
+import { ApiError, getApiBase, getServerRoot, setApiBase } from '../api/client';
+import { getPrinterStatus } from '../api/print';
+import {
+  defaultServerUrlForPlatform,
+  loadServerUrl,
+  saveServerUrl,
+} from '../store/serverUrl';
+import { getPlatformId } from '../platform';
 
 // Sections the user can switch between in the modal's left rail. General /
 // Appearance / Printers ship in Phase 5; Users / Register depend on backend
@@ -440,9 +447,168 @@ export function SettingsModal() {
 function GeneralSection() {
   return (
     <>
+      <ServerUrlCard />
       <BusinessInfoCard />
       <CacheCard />
     </>
+  );
+}
+
+// Lets the operator point the app at a different backend without rebuilding.
+// Lives here (rather than admin-only) because the LAN-deployment use case is
+// "swap the API server, every terminal needs to follow" and a cashier on a
+// tablet may need to fix it on the spot. Connection test pings /health on the
+// server root to validate the URL before saving.
+function ServerUrlCard() {
+  const [draft, setDraft] = useState<string>(getApiBase());
+  const [loaded, setLoaded] = useState(false);
+  const [saved, setSaved] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<
+    { ok: true; latencyMs: number } | { ok: false; error: string } | null
+  >(null);
+  const [testing, setTesting] = useState(false);
+
+  // Hydrate from the persisted preference once. If nothing's there, surface
+  // the platform default so the cashier sees the URL the app would otherwise
+  // try (rather than an empty input that looks broken).
+  useEffect(() => {
+    let cancelled = false;
+    loadServerUrl()
+      .then((stored) => {
+        if (cancelled) return;
+        const fallback = defaultServerUrlForPlatform() || getApiBase();
+        setDraft(stored || fallback);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const dirty = loaded && draft.trim() !== getApiBase();
+  const valid = /^https?:\/\/.+/i.test(draft.trim());
+
+  async function save() {
+    if (!valid) return;
+    const next = draft.trim();
+    await saveServerUrl(next);
+    setApiBase(next);
+    setSaved(true);
+    setTestResult(null);
+    window.setTimeout(() => setSaved(false), 3000);
+  }
+
+  async function runTest() {
+    if (!valid) return;
+    setTesting(true);
+    setTestResult(null);
+    // Test the *draft* URL, not the live one — operators usually test before
+    // committing. Strip /api/v1 the same way getServerRoot does for live.
+    const draftRoot = draft.trim().replace(/\/api\/v\d+\/?$/, '').replace(/\/$/, '');
+    const target = `${draftRoot}/health`;
+    const startedAt = performance.now();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(target, { signal: controller.signal });
+      const latencyMs = Math.round(performance.now() - startedAt);
+      if (!res.ok) {
+        setTestResult({ ok: false, error: `Server returned ${res.status}` });
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { success?: boolean; data?: { status?: string } }
+        | null;
+      if (!body?.success || body.data?.status !== 'ok') {
+        setTestResult({ ok: false, error: 'Unexpected health response' });
+        return;
+      }
+      setTestResult({ ok: true, latencyMs });
+    } catch (err) {
+      const reason =
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Timed out after 5s'
+          : err instanceof Error
+            ? err.message
+            : 'Could not reach server';
+      setTestResult({ ok: false, error: reason });
+    } finally {
+      window.clearTimeout(timeout);
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHead}>
+        <div>
+          <h3 style={styles.cardTitle}>Server URL</h3>
+          <div style={styles.cardSub}>
+            Where this terminal sends API requests. Change to point at a
+            different backend on the local network — a restart isn't required.
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.label}>Backend base URL</label>
+        <input
+          style={styles.input}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(false);
+            setTestResult(null);
+          }}
+          placeholder="http://192.168.1.100:3000/api/v1"
+          spellCheck={false}
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
+        <div style={styles.hint}>
+          Active URL: <code>{getServerRoot()}</code>
+        </div>
+      </div>
+
+      <div style={styles.cardActions}>
+        <button
+          type="button"
+          style={styles.primaryBtn}
+          onClick={save}
+          disabled={!dirty || !valid}
+        >
+          Save changes
+        </button>
+        <button
+          type="button"
+          style={styles.goldBtn}
+          onClick={runTest}
+          disabled={!valid || testing}
+        >
+          {testing ? <Spinner size={12} /> : '🔌'} Test connection
+        </button>
+      </div>
+
+      {!valid && (
+        <div style={resultBannerStyle(false)}>
+          URL must start with http:// or https://
+        </div>
+      )}
+      {saved && <div style={resultBannerStyle(true)}>Saved.</div>}
+      {testResult?.ok && (
+        <div style={resultBannerStyle(true)}>
+          Connected — health responded in {testResult.latencyMs}ms.
+        </div>
+      )}
+      {testResult && !testResult.ok && (
+        <div style={resultBannerStyle(false)}>
+          Could not reach server: {testResult.error}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -619,11 +785,7 @@ function PrintersSection() {
   });
 
   if (!window.electron) {
-    return (
-      <div style={styles.empty}>
-        Printer setup only works inside the Electron app.
-      </div>
-    );
+    return <RemotePrinterStatus />;
   }
   if (configQuery.isLoading || !configQuery.data) {
     return (
@@ -654,6 +816,117 @@ function PrintersSection() {
         onSave={(next) => saveMutation.mutate({ kitchen: next })}
       />
     </>
+  );
+}
+
+// On Capacitor (mobile), the tablet talks to backend printers over the LAN —
+// it has no local printer access of its own. Show a read-only status panel
+// fetched from /print/status, with a pointer to the admin web for changes
+// (printer IPs / paper width are global business settings, not per-device).
+function RemotePrinterStatus() {
+  const platform = getPlatformId();
+  const remote = platform === 'capacitor';
+
+  const statusQuery = useQuery({
+    queryKey: ['printer-status', 'remote'],
+    queryFn: getPrinterStatus,
+    enabled: remote,
+    refetchInterval: 30_000,
+  });
+
+  if (!remote) {
+    return (
+      <div style={styles.empty}>
+        Printer setup only works inside the Electron or mobile app.
+      </div>
+    );
+  }
+
+  if (statusQuery.isLoading || !statusQuery.data) {
+    return (
+      <div style={styles.loading}>
+        <Spinner size={18} /> Checking printer status…
+      </div>
+    );
+  }
+
+  if (statusQuery.isError) {
+    return (
+      <div style={styles.empty}>
+        Couldn't reach the server to check printer status.
+      </div>
+    );
+  }
+
+  const status = statusQuery.data;
+  return (
+    <>
+      <RemotePrinterCard
+        title="Receipt printer"
+        subtitle="Customer receipts at payment."
+        role={status.receipt}
+      />
+      <RemotePrinterCard
+        title="Kitchen printer"
+        subtitle="Comanda printed when items are sent to the kitchen."
+        role={status.kitchen}
+      />
+      <div style={{ ...styles.cardSub, marginTop: 4 }}>
+        Printer IPs and paper width are configured in the admin web panel
+        (Settings → Printers). Changes apply to every device.
+      </div>
+    </>
+  );
+}
+
+interface RemotePrinterCardProps {
+  title: string;
+  subtitle: string;
+  role: { configured: boolean; connected: boolean; ip: string; port: number };
+}
+
+function RemotePrinterCard({ title, subtitle, role }: RemotePrinterCardProps) {
+  const dotColor = !role.configured
+    ? 'var(--text3)'
+    : role.connected
+      ? 'var(--green)'
+      : 'var(--red)';
+  const label = !role.configured
+    ? 'Not configured'
+    : role.connected
+      ? 'Connected'
+      : 'Unreachable';
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHead}>
+        <div>
+          <h3 style={styles.cardTitle}>{title}</h3>
+          <div style={styles.cardSub}>{subtitle}</div>
+        </div>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'var(--text2)',
+          }}
+        >
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: dotColor,
+            }}
+          />
+          {label}
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+        {role.configured ? `${role.ip}:${role.port}` : '—'}
+      </div>
+    </div>
   );
 }
 
@@ -871,6 +1144,8 @@ function AppearanceSection() {
 
   return (
     <>
+      <UiScaleCard />
+
       <div style={styles.card}>
         <div style={styles.cardHead}>
           <div>
@@ -944,6 +1219,82 @@ function AppearanceSection() {
     </>
   );
 }
+
+// UI scale picker. 100% is the default (= the redesigned compact tablet
+// layout). Operators on a small/dense panel can drop to 90%; on a roomier
+// 13" tablet they can bump to 110-120% for older eyes. Persisted per-device.
+const UI_SCALE_OPTIONS: Array<{ label: string; value: number }> = [
+  { label: '80%', value: 0.8 },
+  { label: '90%', value: 0.9 },
+  { label: '100%', value: 1 },
+  { label: '110%', value: 1.1 },
+  { label: '120%', value: 1.2 },
+  { label: '130%', value: 1.3 },
+];
+
+function UiScaleCard() {
+  const uiScale = usePreferences((s) => s.uiScale);
+  const setUiScale = usePreferences((s) => s.setUiScale);
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHead}>
+        <div>
+          <h3 style={styles.cardTitle}>Interface scale</h3>
+          <div style={styles.cardSub}>
+            Resize every screen at once. 100% matches the default tablet layout;
+            increase if text feels small, decrease to fit more on screen.
+          </div>
+        </div>
+      </div>
+
+      <div style={uiScaleStyles.row}>
+        {UI_SCALE_OPTIONS.map((opt) => {
+          const active = Math.abs(uiScale - opt.value) < 0.01;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              style={uiScaleStyles.option(active)}
+              onClick={() => setUiScale(opt.value)}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={styles.hint}>
+        Currently at {Math.round(uiScale * 100)}%. Saved per device.
+      </div>
+    </div>
+  );
+}
+
+const uiScaleStyles: {
+  row: React.CSSProperties;
+  option: (active: boolean) => React.CSSProperties;
+} = {
+  row: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(6, 1fr)',
+    gap: 8,
+    marginBottom: 10,
+  },
+  option: (active) => ({
+    padding: '10px 6px',
+    borderRadius: 8,
+    border: '1px solid ' + (active ? 'var(--text1)' : 'var(--border)'),
+    background: active ? 'var(--text1)' : 'var(--bg2)',
+    color: active ? '#fff' : 'var(--text1)',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 40,
+    transition: 'all 0.12s',
+  }),
+};
 
 // ─── Suggestions section ───────────────────────────────────────────────────
 // Admin-only review queue. Cashiers submit suggested changes (new tables,
