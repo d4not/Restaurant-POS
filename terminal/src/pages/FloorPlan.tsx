@@ -10,7 +10,7 @@ import {
   type FloorZone,
   type TableShapeValue,
 } from '../api/floors';
-import { fetchOpenRegister } from '../api/registers';
+import { fetchCurrentRegister } from '../api/registers';
 import { createTable, deleteTable, patchTable, patchTableStatus } from '../api/tables';
 import { createZone, deleteZone, patchZone } from '../api/zones';
 import {
@@ -224,14 +224,14 @@ export function FloorPlan() {
     | null
   >(null);
 
-  // Find the cashier's currently-open shift. Required to create new orders —
-  // the backend rejects POST /orders without a register_id. Lazily fetched so
-  // a cashier who's just lurking on the floor doesn't pay for the round-trip.
+  // Find the singleton open shift (any role's register works). The backend
+  // rejects POST /orders without a register_id; App.tsx already gates the UI
+  // on this query so it should resolve from cache here.
   const registerQuery = useQuery({
-    queryKey: ['register', 'open', userId],
-    queryFn: () => (userId ? fetchOpenRegister(userId) : Promise.resolve(null)),
+    queryKey: ['register', 'current'],
+    queryFn: fetchCurrentRegister,
     enabled: !!userId,
-    staleTime: 60_000,
+    staleTime: 15_000,
   });
 
   const { data: zones, isLoading, error } = useQuery({

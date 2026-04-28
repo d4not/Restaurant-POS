@@ -27,6 +27,8 @@ import { EmployeeDetail } from './pages/staff/EmployeeDetail';
 import { SalesReport } from './pages/reports/SalesReport';
 import { ExpensesReport } from './pages/reports/ExpensesReport';
 import { ProductCostsReport } from './pages/reports/ProductCostsReport';
+import { DailyReportsList } from './pages/reports/DailyReportsList';
+import { DailyReportDetail } from './pages/reports/DailyReportDetail';
 import { ModifierGroupsPage } from './pages/menu/ModifierGroupsPage';
 import { ModifierGroupDetail } from './pages/menu/ModifierGroupDetail';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -84,6 +86,8 @@ export default function App() {
               <Route path="sales"         element={<SalesReport />} />
               <Route path="product-costs" element={<ProductCostsReport />} />
               <Route path="expenses"      element={<ExpensesReport />} />
+              <Route path="daily"         element={<DailyReportsList />} />
+              <Route path="daily/:id"     element={<DailyReportDetail />} />
             </Route>
 
             {/* Inventory */}

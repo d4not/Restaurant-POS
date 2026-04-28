@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CashMovementType, CashRegisterStatus } from '@prisma/client';
+import { CashMovementType, CashRegisterKind, CashRegisterStatus } from '@prisma/client';
 
 export const openRegisterSchema = z
   .object({
@@ -19,6 +19,7 @@ export const listRegisterQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   status: z.nativeEnum(CashRegisterStatus).optional(),
+  kind: z.nativeEnum(CashRegisterKind).optional(),
   user_id: z.string().uuid().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),

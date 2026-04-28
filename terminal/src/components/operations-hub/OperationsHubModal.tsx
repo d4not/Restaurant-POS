@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchOpenRegister } from '../../api/registers';
+import { fetchCurrentRegister } from '../../api/registers';
 import { useSession } from '../../store/session';
 import { useTranslation } from '../../i18n';
 import { hubStyles } from './styles';
@@ -34,9 +34,15 @@ type SubFlow =
   | 'transfer'
   | 'printerCheck';
 
+// Cash + reporting actions are limited to roles that handle money. Floor
+// staff (waiter/barista) still see transfer + printer check.
+const CASHIER_ROLES: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
+
 export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
   const { t } = useTranslation();
   const userId = useSession((s) => s.user?.id ?? null);
+  const role = useSession((s) => s.user?.role ?? 'WAITER');
+  const isCashier = CASHIER_ROLES.has(role);
   const [subFlow, setSubFlow] = useState<SubFlow>(null);
 
   // Reset the open child whenever the hub closes — opening it again should
@@ -45,14 +51,15 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
     if (!open) setSubFlow(null);
   }, [open]);
 
-  // Same query the topbar uses, identical key — no extra fetch when both are
-  // mounted. Drives the disabled-state hint on income/expense (we can't post a
-  // CashMovement without an open register).
+  // Same singleton-shift lookup as App.tsx / topbar. Drives the disabled-state
+  // hint on income/expense (we can't post a CashMovement without an open
+  // register, and the singleton lookup is what tells us which one to attach
+  // the movement to).
   const registerQuery = useQuery({
-    queryKey: ['register', 'open', userId],
-    queryFn: () => fetchOpenRegister(userId!),
+    queryKey: ['register', 'current'],
+    queryFn: fetchCurrentRegister,
     enabled: open && Boolean(userId),
-    staleTime: 30_000,
+    staleTime: 15_000,
   });
   const reg = registerQuery.data;
   const hasOpenShift = Boolean(reg);
@@ -88,38 +95,46 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
           </div>
 
           <div style={hubStyles.hubGrid}>
-            <OperationsHubCard
-              Icon={IconRegister}
-              title={t('hub.action.shift')}
-              hint={shiftHint}
-              accent={hasOpenShift ? 'green' : 'gold'}
-              onClick={() => setSubFlow('shift')}
-            />
-            <OperationsHubCard
-              Icon={IconArrowDown}
-              title={t('hub.action.expense')}
-              hint={t('hub.action.expenseHint')}
-              accent="red"
-              disabled={!hasOpenShift}
-              disabledTitle={t('hub.disabled.noShift')}
-              onClick={() => setSubFlow('expense')}
-            />
-            <OperationsHubCard
-              Icon={IconArrowUp}
-              title={t('hub.action.income')}
-              hint={t('hub.action.incomeHint')}
-              accent="green"
-              disabled={!hasOpenShift}
-              disabledTitle={t('hub.disabled.noShift')}
-              onClick={() => setSubFlow('income')}
-            />
-            <OperationsHubCard
-              Icon={IconChart}
-              title={t('hub.action.dailyReport')}
-              hint={t('hub.action.dailyReportHint')}
-              accent="gold"
-              onClick={() => setSubFlow('dailyReport')}
-            />
+            {isCashier && (
+              <OperationsHubCard
+                Icon={IconRegister}
+                title={t('hub.action.shift')}
+                hint={shiftHint}
+                accent={hasOpenShift ? 'green' : 'gold'}
+                onClick={() => setSubFlow('shift')}
+              />
+            )}
+            {isCashier && (
+              <OperationsHubCard
+                Icon={IconArrowDown}
+                title={t('hub.action.expense')}
+                hint={t('hub.action.expenseHint')}
+                accent="red"
+                disabled={!hasOpenShift}
+                disabledTitle={t('hub.disabled.noShift')}
+                onClick={() => setSubFlow('expense')}
+              />
+            )}
+            {isCashier && (
+              <OperationsHubCard
+                Icon={IconArrowUp}
+                title={t('hub.action.income')}
+                hint={t('hub.action.incomeHint')}
+                accent="green"
+                disabled={!hasOpenShift}
+                disabledTitle={t('hub.disabled.noShift')}
+                onClick={() => setSubFlow('income')}
+              />
+            )}
+            {isCashier && (
+              <OperationsHubCard
+                Icon={IconChart}
+                title={t('hub.action.dailyReport')}
+                hint={t('hub.action.dailyReportHint')}
+                accent="gold"
+                onClick={() => setSubFlow('dailyReport')}
+              />
+            )}
             <OperationsHubCard
               Icon={IconTransfer}
               title={t('hub.action.transfer')}

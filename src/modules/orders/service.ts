@@ -5,6 +5,7 @@ import {
   PaymentMethod,
   Prisma,
   ProductType,
+  ShiftType,
   StockMovementType,
   TableStatus,
   TakeoutChannel,
@@ -457,8 +458,25 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
     // validated against the correct (possibly just-changed) type.
     const current = await tx.order.findUniqueOrThrow({
       where: { id },
-      select: { table_id: true, order_type: true, takeout_channel: true },
+      select: {
+        table_id: true,
+        order_type: true,
+        takeout_channel: true,
+        register: { select: { type: true } },
+      },
     });
+
+    // Discount is the one PATCH field that's blocked on provisional shifts.
+    // Floor staff running a side-flow shouldn't be cutting prices — that
+    // decision belongs to the cashier on the parent shift. Other PATCH
+    // fields (notes, table reseat, takeout snapshots) stay open.
+    const settingDiscount =
+      input.discount_amount !== undefined || input.discount_reason !== undefined;
+    if (settingDiscount && current.register.type === ShiftType.PROVISIONAL) {
+      throw new ForbiddenError(
+        'Discounts are not allowed on a provisional shift',
+      );
+    }
     const nextOrderType = input.order_type ?? current.order_type;
     // Pick the next channel: explicit input wins, else keep the current one
     // unless the type is flipping to DINE_IN (which forces null).
@@ -548,6 +566,19 @@ export async function cancelOrder(
   let cancelReason: string | null = null;
 
   if (requiresApproval) {
+    // Voiding a sent-to-kitchen ticket on a provisional shift is off-limits —
+    // the cashier on the parent shift must do this once they take over. Floor
+    // staff can still cancel orders that haven't reached the kitchen yet (the
+    // requiresApproval=false branch below).
+    const orderRegister = await prisma.order.findUnique({
+      where: { id },
+      select: { register: { select: { type: true } } },
+    });
+    if (orderRegister?.register.type === ShiftType.PROVISIONAL) {
+      throw new ForbiddenError(
+        'Cannot cancel an order with sent items on a provisional shift',
+      );
+    }
     if (!input.reason || input.reason.trim().length < 5) {
       throw new ForbiddenError('Reason required (5+ characters)');
     }
@@ -1156,15 +1187,6 @@ export async function addPayment(
   userId: string,
   userRole: UserRole,
 ) {
-  // Waiter/Barista emergency-shift flow: they can settle a ticket only if they
-  // include a cashier+'s PIN in the payload. The matching cashier id is then
-  // recorded on Payment.approved_by_user_id for audit. Cashier+ JWTs settle
-  // without a PIN exactly as before.
-  let approverUserId: string | null = null;
-  if (userRole === 'WAITER' || userRole === 'BARISTA') {
-    approverUserId = await authorizeCashierPin(input.pin);
-  }
-
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
@@ -1208,26 +1230,48 @@ export async function addPayment(
     // open drawer can't be reconciled.
     const originalRegister = await tx.cashRegister.findUnique({
       where: { id: order.register_id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, kind: true },
     });
     let activeRegisterId = order.register_id;
+    let activeRegisterKind = originalRegister?.kind ?? null;
     if (!originalRegister || originalRegister.status !== CashRegisterStatus.OPEN) {
+      // Singleton-shift model: any open register works. The arriving cashier
+      // doesn't need a personal one — they settle against whichever shift is
+      // currently open.
       const fallback = await tx.cashRegister.findFirst({
-        where: { user_id: userId, status: CashRegisterStatus.OPEN },
-        select: { id: true },
+        where: { status: CashRegisterStatus.OPEN },
+        select: { id: true, kind: true },
       });
       if (!fallback) {
         throw new ConflictError(
-          "The order's original register is closed and you have no open register — open one before settling.",
+          "The order's original register is closed and no shift is open — open one before settling.",
         );
       }
       activeRegisterId = fallback.id;
+      activeRegisterKind = fallback.kind;
       // Re-anchor the order so the close-shift recomputation, sales reports,
       // and deduction rules all see the cashier who actually settled it.
       await tx.order.update({
         where: { id: orderId },
         data: { register_id: activeRegisterId },
       });
+    }
+
+    // Waiter/Barista emergency-shift flow: ordinarily they need a cashier+'s
+    // PIN to settle a ticket (recorded on Payment.approved_by_user_id). When
+    // the active shift is PROVISIONAL, however, there is no cashier on site
+    // by definition — that's the whole point of provisional. We waive the
+    // PIN requirement and stamp the floor staff member as the implicit
+    // approver so the audit trail still names a real person. The arriving
+    // cashier reconciles cash at close time.
+    let approverUserId: string | null = null;
+    const isProvisional = activeRegisterKind === 'PROVISIONAL';
+    if (userRole === 'WAITER' || userRole === 'BARISTA') {
+      if (isProvisional) {
+        approverUserId = userId;
+      } else {
+        approverUserId = await authorizeCashierPin(input.pin);
+      }
     }
 
     const total = new Decimal(order.total);

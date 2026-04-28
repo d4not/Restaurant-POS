@@ -68,15 +68,24 @@ WAITER ≈ BARISTA  <  CASHIER  ≈  MANAGER  <  ADMIN
 
 ## Cash register / shift
 
-| Action                                | WAITER | BARISTA | CASHIER | MANAGER | ADMIN |
-| ------------------------------------- | ------ | ------- | ------- | ------- | ----- |
-| Shift pill visible in topbar          | ❌     | ❌      | ✅      | ✅      | ✅    |
-| Open / close cash register            | ❌     | ❌      | ✅      | ✅      | ✅    |
-| Cash in / cash out movements          | ❌     | ❌      | ✅      | ✅      | ✅    |
-| Cash amount visible in pill           | —      | —       | hidden  | hidden  | hidden|
-| Cash amount visible in shift modal    | —      | —       | ✅      | ✅      | ✅    |
+The terminal runs in a **singleton-shift** model: at most one register is OPEN at any time, and *every* user's orders attach to it. After PIN login, if no shift is open the entire UI is gated behind a "No shift open" screen with two actions.
 
-The pill itself never shows money — only "Shift open" or "Open shift". The amount is only visible inside the management modal.
+| Action                                       | WAITER | BARISTA | CASHIER | MANAGER | ADMIN |
+| -------------------------------------------- | ------ | ------- | ------- | ------- | ----- |
+| Operations pill visible in topbar            | ✅     | ✅      | ✅      | ✅      | ✅    |
+| Open **normal** shift (counts opening cash)  | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Open **provisional** shift (`opening = 0`)   | ✅     | ✅      | ✅      | ✅      | ✅    |
+| Close any shift (counts cash, records diff)  | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Cash in / cash out movements                 | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Add expense / income card visible in hub     | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Daily report card visible in hub             | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Transfer supplies card visible in hub        | ✅     | ✅      | ✅      | ✅      | ✅    |
+| Printer check card visible in hub            | ✅     | ✅      | ✅      | ✅      | ✅    |
+
+The pill itself never shows money — only "Shift open" / "Provisional" / "Open shift". The amount is only visible inside the management modal.
+
+### Provisional shift flow
+Used when no cashier is on site yet. A waiter or barista opens one with `opening_amount = 0`; the UI shows a persistent gold banner reading **"Provisional shift in progress"** above the topbar. When a cashier arrives, they open the Operations Hub → Shift, count the cash physically, and submit. The system closes the provisional shift (recording the counted amount as `actual_amount` and the cashier as `closed_by_user_id`) and immediately opens a new normal shift with that counted amount as `opening_amount`. Cash carries over with no gap.
 
 ---
 

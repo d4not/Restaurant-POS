@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import * as controller from './controller.js';
 import {
@@ -14,6 +14,10 @@ import {
 export const reportRouter = Router();
 
 reportRouter.use(requireAuth);
+
+// Reports expose revenue and cash totals — gated to cashier+ in line with
+// PERMISSIONS.md. Floor staff don't see register money figures.
+const CASHIER_ROLES = requireRole('CASHIER', 'MANAGER', 'ADMIN');
 
 reportRouter.get(
   '/variance',
@@ -41,6 +45,7 @@ reportRouter.get(
 
 reportRouter.get(
   '/daily-summary',
+  CASHIER_ROLES,
   validate(dailySummaryQuerySchema, 'query'),
   asyncHandler(controller.dailySummary),
 );

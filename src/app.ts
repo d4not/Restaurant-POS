@@ -24,6 +24,9 @@ import { recipeRouter } from './modules/recipes/routes.js';
 import { alertRouter } from './modules/alerts/routes.js';
 import { reportRouter } from './modules/reports/routes.js';
 import { cashRegisterRouter } from './modules/cash-registers/routes.js';
+import { shiftsRouter } from './modules/shifts/routes.js';
+import { shiftReportRouter } from './modules/shift-reports/routes.js';
+import { dailyReportRouter } from './modules/daily-reports/routes.js';
 import { orderRouter } from './modules/orders/routes.js';
 import { authRouter } from './modules/auth/routes.js';
 import { employeeRouter } from './modules/employees/routes.js';
@@ -99,7 +102,13 @@ export function createApp(): Express {
   app.use('/api/v1/recipes', recipeRouter);
   app.use('/api/v1/alerts', alertRouter);
   app.use('/api/v1/reports', reportRouter);
+  // Mount shifts BEFORE cash-registers so /registers/provisional and
+  // /registers/:id/verify resolve to the new module. cash-registers still
+  // owns /current, /, /:id, /:id/close, and /:id/cash-movements.
+  app.use('/api/v1/registers', shiftsRouter);
   app.use('/api/v1/registers', cashRegisterRouter);
+  app.use('/api/v1/shift-reports', shiftReportRouter);
+  app.use('/api/v1/daily-reports', dailyReportRouter);
   app.use('/api/v1/orders', orderRouter);
   app.use('/api/v1/employees', employeeRouter);
   app.use('/api/v1/attendance', attendanceRouter);

@@ -7,6 +7,12 @@ export function fetchSettings(): Promise<SettingsMap> {
   return api.get<SettingsMap>('/settings');
 }
 
+// Bulk-update arbitrary settings (printer IPs, business name, etc.). Used by
+// the printer panel's "Assign as kitchen / receipt" buttons after a scan.
+export function updateSettings(values: Record<string, string>): Promise<SettingsMap> {
+  return api.patch<SettingsMap>('/settings', values);
+}
+
 export type LanguageCode = 'en' | 'es';
 
 export async function fetchLanguageSetting(): Promise<LanguageCode> {

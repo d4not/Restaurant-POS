@@ -4,6 +4,8 @@ import { TopBar } from './components/TopBar';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { OfflineBanner } from './components/OfflineBanner';
+import { NoActiveShiftScreen } from './components/NoActiveShiftScreen';
+import { ProvisionalShiftBanner } from './components/ProvisionalShiftBanner';
 import { PinLogin } from './pages/PinLogin';
 import { ActiveOrders } from './pages/ActiveOrders';
 import { FloorPlan } from './pages/FloorPlan';
@@ -13,9 +15,11 @@ import { useSession } from './store/session';
 import { useUi } from './store/ui';
 import { usePreferences } from './store/preferences';
 import { fetchMe } from './api/auth';
+import { fetchCurrentRegister } from './api/registers';
 import { useAutoLock } from './hooks/useAutoLock';
 import { useNetworkSync } from './hooks/useNetworkSync';
 import { syncLanguageFromServer } from './i18n';
+import { Spinner } from './components/Spinner';
 
 // Use 100% (not 100vw/100vh) so the shell tracks #root's size — important on
 // terminal-mobile, where mobile.css transforms #root and counter-sizes its
@@ -95,6 +99,20 @@ export function App() {
     if (token && user) void syncLanguageFromServer();
   }, [token, user]);
 
+  // Singleton-shift gate: every authed view depends on a shift being open.
+  // Polled every 30s so a barista who opened a provisional shift sees the
+  // banner clear automatically when a cashier closes it (and conversely, a
+  // cashier still on the floor plan re-enters the gate when their shift
+  // ends). Refetches on window focus so a sister tablet's open-shift propagates
+  // quickly.
+  const currentRegisterQuery = useQuery({
+    queryKey: ['register', 'current'],
+    queryFn: fetchCurrentRegister,
+    enabled: authed,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
   if (!authed) {
     return (
       <div style={shellStyle}>
@@ -104,9 +122,37 @@ export function App() {
     );
   }
 
+  // First load: show a small loading state instead of the no-shift screen so
+  // we don't flash the gate while we're still resolving the answer.
+  if (currentRegisterQuery.isLoading) {
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', gap: 10 }}>
+          <Spinner size={16} />
+        </div>
+      </div>
+    );
+  }
+
+  const currentRegister = currentRegisterQuery.data ?? null;
+
+  if (!currentRegister) {
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <NoActiveShiftScreen />
+        <ConfirmDialogHost />
+      </div>
+    );
+  }
+
   return (
     <div style={shellStyle}>
       <OfflineBanner />
+      {currentRegister.kind === 'PROVISIONAL' && (
+        <ProvisionalShiftBanner register={currentRegister} />
+      )}
       <TopBar />
       <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {view === 'orders' && <ActiveOrders />}

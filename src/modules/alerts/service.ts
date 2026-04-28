@@ -1,7 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { Decimal } from '../../lib/decimal.js';
-import type { LowStockQuery } from './schema.js';
+import { ConflictError, NotFoundError } from '../../lib/errors.js';
+import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
+import type { ListAlertQuery, LowStockQuery, ResolveAlertInput } from './schema.js';
 
 export interface LowStockAlert {
   supply_id: string;
@@ -52,4 +54,82 @@ export async function listLowStock(query: LowStockQuery): Promise<LowStockAlert[
         average_cost: new Decimal(r.supply.average_cost).toString(),
       };
     });
+}
+
+const alertInclude = {
+  user: { select: { id: true, name: true } },
+  shift_report: {
+    select: {
+      id: true,
+      shift_type: true,
+      user_id: true,
+      user_name: true,
+      cash_variance: true,
+      void_count: true,
+    },
+  },
+  daily_report: {
+    select: { id: true, date: true, folio: true, status: true },
+  },
+} satisfies Prisma.AlertInclude;
+
+/**
+ * Generic alert listing for the admin queue. Default ordering puts the
+ * highest-severity, most-recent alerts first so a manager scanning the page
+ * sees the urgent stuff at the top. `resolved=false` is the most common
+ * filter (the open queue) but we expose both directions for the audit log.
+ */
+export async function listAlerts(query: ListAlertQuery) {
+  const where: Prisma.AlertWhereInput = {
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.resolved !== undefined ? { resolved: query.resolved } : {}),
+    ...(query.from || query.to
+      ? {
+          created_at: {
+            ...(query.from ? { gte: query.from } : {}),
+            ...(query.to ? { lte: query.to } : {}),
+          },
+        }
+      : {}),
+  };
+  const rows = await prisma.alert.findMany({
+    where,
+    orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
+    include: alertInclude,
+    ...buildCursorArgs(query),
+  });
+  return toPageResult(rows, query.limit);
+}
+
+/**
+ * Mark an alert as resolved. Idempotent only by id — re-resolving an already
+ * resolved alert is rejected so the audit fields (resolved_by_id / resolved_at /
+ * resolution) stay write-once.
+ */
+export async function resolveAlert(
+  id: string,
+  resolverId: string,
+  input: ResolveAlertInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.alert.findUnique({
+      where: { id },
+      select: { id: true, resolved: true },
+    });
+    if (!existing) throw new NotFoundError('Alert');
+    if (existing.resolved) {
+      throw new ConflictError('Alert is already resolved');
+    }
+    await tx.alert.update({
+      where: { id },
+      data: {
+        resolved: true,
+        resolved_by_id: resolverId,
+        resolved_at: new Date(),
+        resolution: input.resolution,
+      },
+    });
+    return tx.alert.findUniqueOrThrow({ where: { id }, include: alertInclude });
+  });
 }

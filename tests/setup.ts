@@ -44,6 +44,9 @@ const TRUNCATE_TABLES = [
   'payroll_periods',
   'tables',
   'zones',
+  'shift_reports',
+  'daily_reports',
+  'alerts',
 ];
 
 beforeEach(async () => {

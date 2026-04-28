@@ -182,3 +182,74 @@ describe('POST /api/v1/registers/:id/close — expected_amount calculation', () 
     expect(second.status).toBe(409);
   });
 });
+
+// Provisional shifts under the report-spec contract require a parent OPEN
+// REGULAR shift; the parent stays OPEN while the side-flow runs. End-to-end
+// coverage of that flow lives in tests/shifts/provisional-shifts.test.ts.
+// These tests cover only the parts that intersect with the cash-register
+// lifecycle (close, role gate on close).
+describe('Provisional shifts — close and role gates', () => {
+  async function openProvisional(opener: { id: string; role: 'BARISTA' | 'WAITER' }) {
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+    const parent = await request(app)
+      .post('/api/v1/registers')
+      .set(cashierAuth)
+      .send({ opening_amount: 50000 })
+      .expect(201);
+
+    const openerAuth = authHeader(opener.id, opener.role);
+    const provisional = await request(app)
+      .post('/api/v1/registers/provisional')
+      .set(openerAuth)
+      .send({ parent_shift_id: parent.body.data.id })
+      .expect(201);
+
+    return {
+      cashier,
+      cashierAuth,
+      openerAuth,
+      parentId: parent.body.data.id as string,
+      provisionalId: provisional.body.data.id as string,
+    };
+  }
+
+  it('barista can open a provisional but not a normal shift', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+    // Direct normal-shift open is rejected by the requireRole gate before
+    // the singleton check runs.
+    const blocked = await request(app)
+      .post('/api/v1/registers')
+      .set(baristaAuth)
+      .send({ opening_amount: 0 });
+    expect(blocked.status).toBe(403);
+
+    const { provisionalId } = await openProvisional(barista);
+    expect(provisionalId).toBeTruthy();
+  });
+
+  it('cashier can close a provisional opened by a barista; closed_by reflects the cashier', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const { cashier, cashierAuth, provisionalId } = await openProvisional(barista);
+
+    const close = await request(app)
+      .post(`/api/v1/registers/${provisionalId}/close`)
+      .set(cashierAuth)
+      .send({ actual_amount: 12000 });
+    expect(close.status).toBe(200);
+    expect(close.body.data.actual_amount).toBe('12000');
+    expect(close.body.data.closed_by_user_id).toBe(cashier.id);
+  });
+
+  it('barista cannot close a shift even one they opened', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const { openerAuth, provisionalId } = await openProvisional(barista);
+
+    const close = await request(app)
+      .post(`/api/v1/registers/${provisionalId}/close`)
+      .set(openerAuth)
+      .send({ actual_amount: 0 });
+    expect(close.status).toBe(403);
+  });
+});

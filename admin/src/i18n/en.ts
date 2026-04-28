@@ -84,6 +84,7 @@ export const en = {
   'nav.salesReport': 'Sales',
   'nav.productCosts': 'Product costs',
   'nav.expenses': 'Expenses & Income',
+  'nav.dailyReports': 'Daily Reports',
   'nav.orders': 'Orders',
   'nav.inventory': 'Inventory',
   'nav.supplies': 'Supplies',

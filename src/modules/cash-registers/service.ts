@@ -1,14 +1,19 @@
 import {
   CashMovementType,
+  CashRegisterKind,
   CashRegisterStatus,
   OrderStatus,
   PaymentMethod,
   Prisma,
+  ShiftType,
+  UserRole,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import { Decimal } from '../../lib/decimal.js';
+import { logger } from '../../lib/logger.js';
+import { generateShiftReport } from '../shift-reports/service.js';
 import type {
   CloseRegisterInput,
   CreateCashMovementInput,
@@ -22,8 +27,18 @@ type PrismaLike = Tx | typeof prisma;
 
 const registerInclude = {
   user: { select: { id: true, name: true } },
+  closed_by: { select: { id: true, name: true } },
   cash_movements: { orderBy: { created_at: 'asc' } },
 } satisfies Prisma.CashRegisterInclude;
+
+// Roles allowed to close any shift (provisional or normal). Single source of
+// truth for both the route gate and the in-service authorisation when a
+// provisional close also opens a follow-up normal shift.
+export const CASHIER_ROLES: ReadonlySet<UserRole> = new Set([
+  UserRole.CASHIER,
+  UserRole.MANAGER,
+  UserRole.ADMIN,
+]);
 
 export async function loadOpenRegisterForUser(
   client: PrismaLike,
@@ -32,6 +47,17 @@ export async function loadOpenRegisterForUser(
   return client.cashRegister.findFirst({
     where: { user_id: userId, status: CashRegisterStatus.OPEN },
     select: { id: true },
+  });
+}
+
+// Singleton-shift lookup. The system runs at most one OPEN register at a
+// time — orders, takeout flows and the topbar all attach to whichever shift
+// is currently open regardless of opener. Returns the open register or null.
+export async function loadCurrentOpenRegister(client: PrismaLike = prisma) {
+  return client.cashRegister.findFirst({
+    where: { status: CashRegisterStatus.OPEN },
+    orderBy: { opened_at: 'desc' },
+    include: registerInclude,
   });
 }
 
@@ -46,7 +72,15 @@ export async function assertRegisterOpen(client: PrismaLike, registerId: string)
   }
 }
 
-export async function openRegister(userId: string, input: OpenRegisterInput) {
+export interface OpenRegisterContext {
+  kind: CashRegisterKind;
+}
+
+export async function openRegister(
+  userId: string,
+  input: OpenRegisterInput,
+  context: OpenRegisterContext = { kind: CashRegisterKind.NORMAL },
+) {
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({
       where: { id: userId },
@@ -55,14 +89,25 @@ export async function openRegister(userId: string, input: OpenRegisterInput) {
     if (!user) throw new BadRequestError('user not found');
     if (!user.active) throw new BadRequestError('user is inactive');
 
-    const existing = await loadOpenRegisterForUser(tx, userId);
+    // Singleton-shift invariant: if any register is already OPEN we refuse.
+    // The arriving cashier must close the current shift (often a provisional
+    // one) before opening a new normal shift.
+    const existing = await tx.cashRegister.findFirst({
+      where: { status: CashRegisterStatus.OPEN },
+      select: { id: true, kind: true },
+    });
     if (existing) {
-      throw new ConflictError('User already has an open cash register');
+      throw new ConflictError(
+        existing.kind === CashRegisterKind.PROVISIONAL
+          ? 'A provisional shift is already open — close it before opening a new one'
+          : 'A shift is already open — close it before opening a new one',
+      );
     }
 
     const register = await tx.cashRegister.create({
       data: {
         user_id: userId,
+        kind: context.kind,
         opening_amount: new Decimal(input.opening_amount),
         expected_amount: new Decimal(input.opening_amount),
         notes: input.notes,
@@ -73,7 +118,19 @@ export async function openRegister(userId: string, input: OpenRegisterInput) {
   });
 }
 
-export async function closeRegister(id: string, input: CloseRegisterInput) {
+export interface CloseRegisterContext {
+  closingUserId: string;
+  closingUserRole: UserRole;
+}
+
+export async function closeRegister(
+  id: string,
+  input: CloseRegisterInput,
+  context: CloseRegisterContext,
+) {
+  if (!CASHIER_ROLES.has(context.closingUserRole)) {
+    throw new ForbiddenError('Only a cashier, manager, or admin can close a shift');
+  }
   return prisma.$transaction(async (tx) => {
     // Atomic OPEN→CLOSED claim — prevents two close attempts from racing.
     const claim = await tx.cashRegister.updateMany({
@@ -132,9 +189,26 @@ export async function closeRegister(id: string, input: CloseRegisterInput) {
         actual_amount: actual,
         difference,
         closed_at: new Date(),
+        closed_by_user_id: context.closingUserId,
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
       },
     });
+
+    // Generate the immutable ShiftReport snapshot inside the same transaction
+    // so the report and the closed register commit together. Wrapped in
+    // try/catch so a JS-level failure in the report code (logic bug, missing
+    // related data, etc.) doesn't take down the close itself — the cashier's
+    // count must always land. A Postgres-level error inside the report would
+    // still abort the surrounding transaction; that's correct because we'd
+    // rather refuse to close than persist a half-built snapshot.
+    try {
+      await generateShiftReport(tx, id, actual);
+    } catch (err) {
+      logger.error(
+        { err, cash_register_id: id },
+        'failed to generate ShiftReport during closeRegister',
+      );
+    }
 
     return tx.cashRegister.findUniqueOrThrow({ where: { id }, include: registerInclude });
   });
@@ -153,6 +227,7 @@ export async function listRegisters(query: ListRegisterQuery) {
   const where: Prisma.CashRegisterWhereInput = {
     ...(query.status ? { status: query.status } : {}),
     ...(query.user_id ? { user_id: query.user_id } : {}),
+    ...(query.kind ? { kind: query.kind } : {}),
     ...(query.from || query.to
       ? {
           opened_at: {
@@ -178,6 +253,18 @@ export async function addCashMovement(
 ) {
   return prisma.$transaction(async (tx) => {
     await assertRegisterOpen(tx, registerId);
+    // Provisional shifts are payment-only. Any non-sale cash motion (tips
+    // dropped in, petty cash out) belongs on the parent regular shift —
+    // the cashier reconciles on close, not the floor staff mid-shift.
+    const reg = await tx.cashRegister.findUniqueOrThrow({
+      where: { id: registerId },
+      select: { type: true },
+    });
+    if (reg.type === ShiftType.PROVISIONAL) {
+      throw new ForbiddenError(
+        'Cash movements are not allowed on a provisional shift',
+      );
+    }
     const amount = new Decimal(input.amount);
 
     const movement = await tx.cashMovement.create({

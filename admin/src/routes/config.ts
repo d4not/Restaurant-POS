@@ -43,6 +43,7 @@ export const NAV: NavEntry[] = [
       { id: 'sales',          labelKey: 'nav.salesReport',  path: '/reports/sales' },
       { id: 'product-costs',  labelKey: 'nav.productCosts', path: '/reports/product-costs' },
       { id: 'expenses',       labelKey: 'nav.expenses',     path: '/reports/expenses' },
+      { id: 'daily-reports',  labelKey: 'nav.dailyReports', path: '/reports/daily' },
     ],
   },
   {

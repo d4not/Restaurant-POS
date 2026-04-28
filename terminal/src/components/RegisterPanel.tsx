@@ -1,13 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchOpenRegister, openRegister } from '../api/registers';
+import { fetchCurrentRegister, openRegister } from '../api/registers';
 import { useSession } from '../store/session';
 import { confirmDialog } from './ConfirmDialog';
 import { useTranslation, t as tStatic } from '../i18n';
-
-// Roles that can open or close their own register from the terminal. Waiters
-// and baristas don't have a personal register — orders they create attach to a
-// cashier's open register, which they don't own.
-const ROLES_WITH_REGISTER: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
 
 interface ShiftPillProps {
   onClick: () => void;
@@ -30,6 +25,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
     whiteSpace: 'nowrap',
   },
+  pillProvisional: {
+    background: 'rgba(201,164,92,0.18)',
+    border: '1px solid rgba(201,164,92,0.45)',
+    color: '#f0d9a4',
+  },
   pillDot: {
     width: 8,
     height: 8,
@@ -40,47 +40,52 @@ const styles: Record<string, React.CSSProperties> = {
 
 // ─── Top-bar pill ──────────────────────────────────────────────────────────
 // Renders the cashier's entry point to the Operations Hub. The pill keeps a
-// status dot showing shift open/closed at a glance — green = open, red =
-// closed, gray = checking — but the click target now opens the multi-feature
-// hub instead of just the shift modal.
+// status dot showing shift open/closed at a glance — green = normal open,
+// gold = provisional open (cashier needs to reconcile), red = closed,
+// gray = checking — but the click target now opens the multi-feature hub.
 
 export function OperationsPill({ onClick }: ShiftPillProps) {
   const { t } = useTranslation();
   const userId = useSession((s) => s.user?.id ?? null);
-  const role = useSession((s) => s.user?.role ?? 'WAITER');
-  const canManage = ROLES_WITH_REGISTER.has(role);
 
-  // Skip the network entirely for waiters/baristas — the hub is cashier-only
-  // and showing a perpetual closed pill is misleading.
-  const enabled = canManage && Boolean(userId);
-
+  // Always rendered while authed — every role uses the hub for at least
+  // transfers and printer diagnostics. Cashier-only actions inside the hub
+  // gate themselves.
   const { data, isLoading } = useQuery({
-    queryKey: ['register', 'open', userId],
-    queryFn: () => fetchOpenRegister(userId!),
-    enabled,
-    staleTime: 30_000,
+    queryKey: ['register', 'current'],
+    queryFn: fetchCurrentRegister,
+    enabled: Boolean(userId),
+    staleTime: 15_000,
   });
 
-  if (!enabled) return null;
+  if (!userId) return null;
 
   const isOpen = Boolean(data);
+  const isProvisional = data?.kind === 'PROVISIONAL';
   const dotColor = isLoading
     ? 'var(--text3)'
-    : isOpen
-      ? 'var(--green)'
-      : 'var(--red)';
+    : isProvisional
+      ? 'var(--gold)'
+      : isOpen
+        ? 'var(--green)'
+        : 'var(--red)';
 
   return (
-    <button type="button" style={styles.pill} onClick={onClick}>
+    <button
+      type="button"
+      style={{
+        ...styles.pill,
+        ...(isProvisional ? styles.pillProvisional : null),
+      }}
+      onClick={onClick}
+    >
       <span style={{ ...styles.pillDot, background: dotColor }} />
-      <span>{t('topbar.operations')}</span>
+      <span>
+        {isProvisional ? t('register.provisionalBadge') : t('topbar.operations')}
+      </span>
     </button>
   );
 }
-
-// The old ShiftManagerModal lives at terminal/src/components/operations-hub/
-// ShiftActionPanel.tsx — same logic, now mounted as a child of the
-// Operations Hub. The pill above is the only export this file needs.
 
 // Shared confirm helper exported for callers that want a one-click open with
 // $0 / default amount. Currently unused; left in for future "quick open" UX.

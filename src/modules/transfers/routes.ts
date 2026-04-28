@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { requireAuth } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import { uuidParamSchema } from '../../lib/schemas.js';
 import * as controller from './controller.js';
@@ -10,11 +10,11 @@ export const transferRouter = Router();
 
 transferRouter.use(requireAuth);
 
-// Creating a transfer mutates inventory across storages — gate to cashier+ to
-// match cash-registers. Reads stay open to all auth so floor staff can audit.
+// Transferring supplies between storages is operational rather than
+// financial — anyone on shift (waiter/barista/cashier+) can move stock. The
+// service layer still records who performed the move (StockMovement audit).
 transferRouter.post(
   '/',
-  requireRole('CASHIER', 'MANAGER', 'ADMIN'),
   validate(createTransferSchema),
   asyncHandler(controller.create),
 );

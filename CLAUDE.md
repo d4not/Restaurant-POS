@@ -127,6 +127,7 @@
 - Read @docs/MOBILE-SPEC.md for Android tablet app specification
 - Read @docs/pos-terminal-styles.js for terminal design tokens and component styles
 - Read @docs/PERMISSIONS.md for role-based access rules
+- Read @docs/REPORTS-SPEC.md for shift reports, daily reports, provisional shifts, alerts, and blind close
 - Terminal mobile shares code with terminal/ via platform abstraction — see terminal/src/platform/
 - Never use floating point for money
 - Always wrap multi-table writes in Prisma transactions

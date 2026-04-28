@@ -75,20 +75,23 @@ describe('POST /api/v1/transfers — role gate', () => {
     f = await setupFixtures();
   });
 
-  it('rejects WAITER with 403', async () => {
+  // Transfers are operational (moving stock between storages) and don't
+  // touch money, so any signed-in user can perform them. The StockMovement
+  // audit log still records the actor.
+  it('allows WAITER', async () => {
     const res = await request(app)
       .post('/api/v1/transfers')
       .set(f.waiterAuth)
       .send(transferBody(f));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
   });
 
-  it('rejects BARISTA with 403', async () => {
+  it('allows BARISTA', async () => {
     const res = await request(app)
       .post('/api/v1/transfers')
       .set(f.baristaAuth)
       .send(transferBody(f));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
   });
 
   it('allows CASHIER', async () => {

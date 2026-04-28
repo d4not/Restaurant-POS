@@ -32,6 +32,7 @@ import {
   type PrintResult,
   type PrinterTarget,
 } from './printer.js';
+import { scanForPrinters, type DiscoveredPrinter } from './discovery.js';
 
 export interface PrinterStatus {
   kitchen: { configured: boolean; connected: boolean; ip: string; port: number };
@@ -279,4 +280,137 @@ export async function getPrinterStatus(): Promise<PrinterStatus> {
     },
     paper_width: config.paperWidthMm,
   };
+}
+
+// ─── Auto-detection + diagnostics ──────────────────────────────────────────
+
+export type PrinterDiagnosticCode =
+  | 'OK'
+  | 'NOT_CONFIGURED'
+  | 'INVALID_PORT'
+  | 'UNREACHABLE'
+  | 'OTHER_HOST_BUT_OFF';
+
+export interface PrinterDiagnosticEntry {
+  configured: boolean;
+  connected: boolean;
+  ip: string;
+  port: number;
+  code: PrinterDiagnosticCode;
+  // Human-readable, rendered verbatim in the Settings UI banner. Translation
+  // keys live on the frontend; this keeps the wire format simple.
+  message: string;
+  // A short list of next-step bullets the operator can act on without calling
+  // support. Drawn from common ESC/POS failure modes.
+  remedies: string[];
+}
+
+export interface PrinterDiagnostics {
+  kitchen: PrinterDiagnosticEntry;
+  receipt: PrinterDiagnosticEntry;
+  paper_width: number;
+  scanned_at: string;
+}
+
+function buildDiagnosticEntry(target: {
+  ip: string;
+  port: number;
+  configured: boolean;
+  connected: boolean;
+}): PrinterDiagnosticEntry {
+  const { ip, port, configured, connected } = target;
+  if (!configured) {
+    return {
+      ip, port, configured, connected,
+      code: 'NOT_CONFIGURED',
+      message: 'Printer IP is not set yet.',
+      remedies: [
+        'Run a network scan from the printer panel and assign one of the discovered devices.',
+        'Or open Settings → Printers and enter the printer IP manually.',
+      ],
+    };
+  }
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    return {
+      ip, port, configured, connected,
+      code: 'INVALID_PORT',
+      message: 'Printer port is invalid.',
+      remedies: [
+        'Most ESC/POS printers listen on TCP 9100. Set the port to 9100 unless your model documents otherwise.',
+      ],
+    };
+  }
+  if (connected) {
+    return {
+      ip, port, configured, connected,
+      code: 'OK',
+      message: 'Printer reachable on the network.',
+      remedies: [],
+    };
+  }
+  return {
+    ip, port, configured, connected,
+    code: 'UNREACHABLE',
+    message: `Cannot reach ${ip}:${port}.`,
+    remedies: [
+      'Confirm the printer is powered on and not displaying an error light.',
+      'Check that the printer cable / Wi-Fi link is connected — many models require a brief power-cycle after a network drop.',
+      'Verify the printer\'s IP address — it may have changed if your router renews DHCP leases. Use "Scan network" to discover the current address.',
+      'On Windows hosts, ensure the printer driver is installed and the network spooler service is running.',
+      'If the printer reports "OFFLINE" on its display, check for a paper jam or empty paper roll.',
+    ],
+  };
+}
+
+export async function getPrinterDiagnostics(): Promise<PrinterDiagnostics> {
+  const status = await getPrinterStatus();
+  return {
+    kitchen: buildDiagnosticEntry(status.kitchen),
+    receipt: buildDiagnosticEntry(status.receipt),
+    paper_width: status.paper_width,
+    scanned_at: new Date().toISOString(),
+  };
+}
+
+export interface DiscoverPrintersResponse {
+  subnet: string | null;
+  port: number;
+  scanned: number;
+  printers: DiscoveredPrinter[];
+}
+
+export async function discoverPrinters(input: {
+  subnet?: string;
+  port?: number;
+  timeoutMs?: number;
+}): Promise<DiscoverPrintersResponse> {
+  return scanForPrinters({
+    subnet: input.subnet,
+    port: input.port,
+    timeoutMs: input.timeoutMs,
+  });
+}
+
+// Diagnostic test print — short fixed payload so the operator can confirm the
+// printer cuts paper and lays out characters correctly without depending on
+// an order being available.
+export async function testPrint(role: 'kitchen' | 'receipt'): Promise<PrintResult> {
+  const config = await loadPrinterConfig();
+  const target = role === 'kitchen' ? config.kitchen : config.receipt;
+  const lines = [
+    '================================',
+    role === 'kitchen' ? '       KITCHEN TEST PRINT' : '       RECEIPT TEST PRINT',
+    '================================',
+    `Printed: ${new Date().toLocaleString()}`,
+    '',
+    'If you can read these lines the',
+    'printer is wired correctly.',
+    '',
+    'Counter:',
+    '  1234567890',
+    '  abcdefghijklmnop',
+    '  ABCDEFGHIJKLMNOP',
+    '================================',
+  ];
+  return sendLines(target, lines);
 }

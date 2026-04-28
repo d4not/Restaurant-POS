@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { CashRegisterKind } from '@prisma/client';
 import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
 import type {
@@ -9,23 +10,27 @@ import type {
   OpenRegisterInput,
 } from './schema.js';
 
-function currentUserId(req: Request): string {
+function currentUser(req: Request): { id: string; role: import('@prisma/client').UserRole } {
   if (!req.auth) throw new UnauthorizedError('Missing auth context');
-  return req.auth.userId;
+  return { id: req.auth.userId, role: req.auth.role };
 }
 
 export async function open(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
   const register = await service.openRegister(
-    currentUserId(req),
+    user.id,
     req.body as OpenRegisterInput,
+    { kind: CashRegisterKind.NORMAL },
   );
   res.status(201).json({ success: true, data: register });
 }
 
 export async function close(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
   const register = await service.closeRegister(
     req.params.id as string,
     req.body as CloseRegisterInput,
+    { closingUserId: user.id, closingUserRole: user.role },
   );
   res.json({ success: true, data: register });
 }
@@ -40,10 +45,17 @@ export async function list(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: page });
 }
 
+// GET /registers/current — singleton lookup, returns the only OPEN register
+// (or null). Used by the terminal to gate the entire UI on an open shift.
+export async function current(_req: Request, res: Response): Promise<void> {
+  const register = await service.loadCurrentOpenRegister();
+  res.json({ success: true, data: register });
+}
+
 export async function addCashMovement(req: Request, res: Response): Promise<void> {
   const movement = await service.addCashMovement(
     req.params.id as string,
-    currentUserId(req),
+    currentUser(req).id,
     req.body as CreateCashMovementInput,
   );
   res.status(201).json({ success: true, data: movement });

@@ -19,7 +19,7 @@ import { PinConfirmModal } from './PinConfirmModal';
 import { verifyPin } from '../api/auth';
 import { ApiError } from '../api/client';
 import { createOrder, fetchOrder, type TakeoutChannel } from '../api/orders';
-import { fetchOpenRegister } from '../api/registers';
+import { fetchCurrentRegister } from '../api/registers';
 import { fetchSettings } from '../api/settings';
 import { useTakeoutChannelLabel } from './TakeoutChannelPicker';
 import { TakeoutChannelPicker } from './TakeoutChannelPicker';
@@ -352,14 +352,15 @@ export function TopBar() {
   const [takeoutError, setTakeoutError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Same shift lookup the floor plan uses — the backend rejects POST /orders
-  // without a register_id, and takeout has no table to fall back on.
+  // Singleton-shift lookup: any open register works for takeout creation,
+  // regardless of who opened it. App.tsx primes the cache with the same key
+  // so this typically hits without a network round-trip.
   const userId = user?.id ?? null;
   const registerQuery = useQuery({
-    queryKey: ['register', 'open', userId],
-    queryFn: () => (userId ? fetchOpenRegister(userId) : Promise.resolve(null)),
+    queryKey: ['register', 'current'],
+    queryFn: fetchCurrentRegister,
     enabled: !!userId,
-    staleTime: 60_000,
+    staleTime: 15_000,
   });
 
   // Fetch the per-channel active flags so the picker can grey out anything

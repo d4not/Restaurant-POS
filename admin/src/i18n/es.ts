@@ -83,6 +83,7 @@ export const es: Record<TranslationKey, string> = {
   'nav.salesReport': 'Ventas',
   'nav.productCosts': 'Costos de productos',
   'nav.expenses': 'Gastos e ingresos',
+  'nav.dailyReports': 'Reportes diarios',
   'nav.orders': 'Órdenes',
   'nav.inventory': 'Inventario',
   'nav.supplies': 'Insumos',

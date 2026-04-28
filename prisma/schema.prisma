@@ -86,9 +86,52 @@ enum CashRegisterStatus {
   CLOSED
 }
 
+// NORMAL    — opened by a cashier+ with a counted opening_amount.
+// PROVISIONAL — opened by a barista/waiter when no cashier is on site yet.
+// The system flags PROVISIONAL shifts in the UI and forces the cashier to
+// physically count cash before closing them. After a PROVISIONAL closes, a
+// new NORMAL shift is opened with that counted amount as opening_amount.
+enum CashRegisterKind {
+  NORMAL
+  PROVISIONAL
+}
+
 enum CashMovementType {
   CASH_IN
   CASH_OUT
+}
+
+// ShiftType drives the report/verification workflow added in the reports
+// module. REGULAR is a normal cashier-opened shift; PROVISIONAL is opened by
+// any authenticated employee when a cashier isn't available and must be
+// verified by a manager+ after close. Coexists with the older `kind` column
+// (NORMAL/PROVISIONAL) which still gates the existing singleton-shift logic;
+// new code should read `type` and the two are kept in sync at write time.
+enum ShiftType {
+  REGULAR
+  PROVISIONAL
+}
+
+enum DailyReportStatus {
+  OPEN
+  CLOSED
+}
+
+enum AlertType {
+  CASH_SHORTAGE
+  CASH_SURPLUS
+  RECURRING_SHORTAGE
+  EXCESSIVE_VOIDS
+  EXCESSIVE_DISCOUNTS
+  UNVERIFIED_PROVISIONAL
+  LATE_VOID
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
 enum OrderStatus {
@@ -197,6 +240,7 @@ model User {
   inventory_checks  InventoryCheck[]
   write_offs        WriteOff[]
   cash_registers    CashRegister[]
+  cash_registers_closed CashRegister[] @relation("CashRegisterClosedBy")
   cash_movements    CashMovement[]
   orders            Order[]
   orders_cancelled  Order[]             @relation("OrderCancelledBy")
@@ -209,6 +253,12 @@ model User {
   payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
   payroll_approvals PayrollPeriod[]     @relation("PayrollApprover")
   payment_approvals Payment[]           @relation("PaymentApprover")
+  // Reports/shifts module: shifts this user verified after a provisional
+  // close, daily reports they closed, and alerts surfaced about their
+  // activity.
+  shifts_verified      CashRegister[] @relation("ShiftVerifier")
+  daily_reports_closed DailyReport[]
+  alerts               Alert[]
 
   @@index([email])
   @@map("users")
@@ -832,8 +882,15 @@ model ModifierProductOverride {
 model CashRegister {
   id              String             @id @default(uuid()) @db.Uuid
   user_id         String             @db.Uuid
+  // PROVISIONAL shifts are opened by floor staff (barista/waiter) when no
+  // cashier is on site. They MUST be closed by a cashier+ with a counted
+  // actual_amount before normal operations resume.
+  kind            CashRegisterKind   @default(NORMAL)
   opened_at       DateTime           @default(now())
   closed_at       DateTime?
+  // Cashier+ who closed this shift — for provisional shifts this is the
+  // arriving cashier doing the count, distinct from user_id (the opener).
+  closed_by_user_id String?         @db.Uuid
   opening_amount  Decimal             @db.Decimal(14, 0)
   // expected_amount is maintained incrementally as cash payments, change-given
   // and CashMovements land. It's authoritative for the close-flow so the user
@@ -846,13 +903,39 @@ model CashRegister {
   created_at      DateTime            @default(now())
   updated_at      DateTime            @updatedAt
 
-  user           User           @relation(fields: [user_id], references: [id])
-  orders         Order[]
-  cash_movements CashMovement[]
+  // Reports module additions. `type` mirrors `kind` for the new workflow
+  // (REGULAR vs PROVISIONAL) and is the column the reports/verification code
+  // reads. `parent_shift_id` points a PROVISIONAL shift back at the REGULAR
+  // shift it was opened against (the cashier inherits the parent's drawer).
+  // `requires_verification` flips on for provisionals; the verified_* trio
+  // is filled when a manager+ signs off on the closed provisional.
+  // `daily_report_id` ties the shift into the consolidated DailyReport once
+  // the day is closed.
+  type                  ShiftType    @default(REGULAR)
+  parent_shift_id       String?      @db.Uuid
+  parent_shift          CashRegister?  @relation("ShiftHierarchy", fields: [parent_shift_id], references: [id])
+  child_shifts          CashRegister[] @relation("ShiftHierarchy")
+  requires_verification Boolean      @default(false)
+  verified_by_id        String?      @db.Uuid
+  verified_by           User?        @relation("ShiftVerifier", fields: [verified_by_id], references: [id])
+  verified_at           DateTime?
+  verification_notes    String?
+  daily_report_id       String?      @db.Uuid
+  daily_report          DailyReport? @relation(fields: [daily_report_id], references: [id])
+  shift_report          ShiftReport?
+
+  user            User           @relation(fields: [user_id], references: [id])
+  closed_by       User?          @relation("CashRegisterClosedBy", fields: [closed_by_user_id], references: [id])
+  orders          Order[]
+  cash_movements  CashMovement[]
 
   @@index([user_id])
   @@index([status])
   @@index([opened_at])
+  @@index([kind])
+  @@index([type])
+  @@index([parent_shift_id])
+  @@index([daily_report_id])
   @@map("cash_registers")
 }
 
@@ -1042,6 +1125,178 @@ model Payment {
   @@index([method])
   @@index([approved_by_user_id])
   @@map("payments")
+}
+
+// ============================================================================
+// Phase 7b — Shift Reports, Daily Reports, Alerts
+// ============================================================================
+
+// Immutable snapshot generated inside the closeRegister() transaction. Every
+// field is denormalised so the report survives later edits to the user, the
+// orders, the menu, etc. Money is centavos as integers (matches the rest of
+// the system). sales_by_category and top_products are Json because their
+// shape is report-specific and never queried relationally.
+model ShiftReport {
+  id                String    @id @default(uuid()) @db.Uuid
+
+  cash_register_id  String    @unique @db.Uuid
+  cash_register     CashRegister @relation(fields: [cash_register_id], references: [id])
+
+  user_id           String    @db.Uuid
+  user_name         String
+  user_role         String
+  shift_type        ShiftType
+  opened_at         DateTime
+  closed_at         DateTime
+
+  gross_sales       Int       @default(0)
+  discounts         Int       @default(0)
+  comps             Int       @default(0)
+  void_total        Int       @default(0)
+  void_count        Int       @default(0)
+  net_sales         Int       @default(0)
+  tax_collected     Int       @default(0)
+
+  total_tickets     Int       @default(0)
+  avg_ticket        Int       @default(0)
+
+  cash_sales        Int       @default(0)
+  card_sales        Int       @default(0)
+  transfer_sales    Int       @default(0)
+  other_sales       Int       @default(0)
+
+  opening_amount    Int       @default(0)
+  cash_in           Int       @default(0)
+  cash_out          Int       @default(0)
+  expected_cash     Int       @default(0)
+  actual_cash       Int?
+  cash_variance     Int?
+
+  sales_by_category Json      @default("[]")
+  top_products      Json      @default("[]")
+
+  verified_by_id    String?   @db.Uuid
+  verified_by_name  String?
+  verified_at       DateTime?
+
+  alerts            Alert[]
+
+  created_at        DateTime  @default(now())
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("shift_reports")
+}
+
+// Consolidated end-of-day report. One row per calendar day (date is unique,
+// stored at midnight UTC). folio is a global auto-incrementing counter — the
+// frontend prefixes "Z-". Status only flows OPEN → CLOSED; the close action
+// is gated on no shift still being open for that day.
+model DailyReport {
+  id                  String            @id @default(uuid()) @db.Uuid
+  date                DateTime          @unique @db.Date
+  folio               Int               @default(autoincrement())
+  status              DailyReportStatus @default(OPEN)
+
+  gross_sales         Int       @default(0)
+  discounts           Int       @default(0)
+  comps               Int       @default(0)
+  void_total          Int       @default(0)
+  void_count          Int       @default(0)
+  net_sales           Int       @default(0)
+  tax_collected       Int       @default(0)
+
+  total_tickets       Int       @default(0)
+  avg_ticket          Int       @default(0)
+
+  cash_sales          Int       @default(0)
+  card_sales          Int       @default(0)
+  transfer_sales      Int       @default(0)
+  other_sales         Int       @default(0)
+
+  total_opening_amount Int      @default(0)
+  total_cash_in       Int       @default(0)
+  total_cash_out      Int       @default(0)
+  total_expected_cash Int       @default(0)
+  total_actual_cash   Int?
+  total_cash_variance Int?
+
+  sales_by_category   Json      @default("[]")
+  top_products        Json      @default("[]")
+  bottom_products     Json      @default("[]")
+  sales_by_hour       Json      @default("[]")
+
+  total_shifts        Int       @default(0)
+  provisional_shifts  Int       @default(0)
+  unverified_provisionals Int   @default(0)
+
+  peak_hour           Int?
+  slowest_hour        Int?
+
+  shifts              CashRegister[]
+  alerts              Alert[]
+
+  // Snapshotted at close time so the printed report renders correctly even
+  // if the operator changes the active language/currency afterwards. See
+  // REPORTS-SPEC §2.4 and §5.1.
+  currency            String    @default("MXN")
+  language            String    @default("es")
+
+  // Optional bills/coins breakdown counted by the manager. JSON keys are
+  // denominations in centavos (as strings); values are counts. The sum of
+  // (denomination × count) must match total_actual_cash when present.
+  denomination_breakdown Json?
+
+  closed_by_id        String?   @db.Uuid
+  closed_by           User?     @relation(fields: [closed_by_id], references: [id])
+  closed_at           DateTime?
+  notes               String?
+  // Final cash verdict the manager writes at close time ("Corte cuadrado",
+  // "Faltante de $30, se descontará"). Separate from notes — notes are
+  // operational context, resolution is the sign-off.
+  resolution          String?
+
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  @@index([date])
+  @@index([status])
+  @@map("daily_reports")
+}
+
+// Auto-generated signal raised at shift close or day close when the
+// thresholds in `settings` (alert_*) are breached. Severity grades urgency;
+// `data` is a free-form JSON payload with the numbers behind the message
+// (e.g. {variance: -3050, threshold: 2000}). Resolved by a manager+ with a
+// short note for the audit trail.
+model Alert {
+  id              String        @id @default(uuid()) @db.Uuid
+  type            AlertType
+  severity        AlertSeverity
+  message         String
+  data            Json          @default("{}")
+
+  user_id         String?       @db.Uuid
+  user            User?         @relation(fields: [user_id], references: [id])
+
+  shift_report_id String?       @db.Uuid
+  shift_report    ShiftReport?  @relation(fields: [shift_report_id], references: [id])
+  daily_report_id String?       @db.Uuid
+  daily_report    DailyReport?  @relation(fields: [daily_report_id], references: [id])
+
+  resolved        Boolean       @default(false)
+  resolved_by_id  String?       @db.Uuid
+  resolved_at     DateTime?
+  resolution      String?
+
+  created_at      DateTime      @default(now())
+
+  @@index([type, resolved])
+  @@index([severity])
+  @@index([user_id])
+  @@index([shift_report_id])
+  @@index([daily_report_id])
+  @@map("alerts")
 }
 
 // ============================================================================
