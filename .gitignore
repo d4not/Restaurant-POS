@@ -22,3 +22,6 @@ uploads/
 # OS / editor junk
 .DS_Store
 Thumbs.db
+
+# Claude Code internal worktrees — local-only, never commit.
+.claude/
