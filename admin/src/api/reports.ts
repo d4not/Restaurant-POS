@@ -155,3 +155,53 @@ export function getProductAnalysis(params: {
 }) {
   return api.get<ProductAnalysisReport>('/reports/product-analysis', { ...params });
 }
+
+/* ── Products sold (Poster-style breakdown) ──────────────────── */
+
+export interface ProductsSoldRow {
+  key: string;
+  product_id: string;
+  product_name: string;
+  category_id: string | null;
+  category_name: string | null;
+  variant_id: string | null;
+  variant_name: string | null;
+  modifier_signature: string;
+  quantity: number;
+  gross_sales: string;
+  discount: string;
+  revenue: string;
+  cost: string;
+  profit: string;
+}
+
+export interface ProductsSoldTotals {
+  quantity: number;
+  gross_sales: string;
+  discount: string;
+  revenue: string;
+  cost: string;
+  profit: string;
+}
+
+export interface ProductsSoldReport {
+  from: string;
+  to: string;
+  filters: {
+    category_id: string | null;
+    user_id: string | null;
+    q: string | null;
+  };
+  totals: ProductsSoldTotals;
+  rows: ProductsSoldRow[];
+}
+
+export function getProductsSold(params: {
+  from: string;
+  to: string;
+  category_id?: string;
+  user_id?: string;
+  q?: string;
+}) {
+  return api.get<ProductsSoldReport>('/reports/products-sold', { ...params });
+}

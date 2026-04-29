@@ -12,6 +12,12 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      // Uploaded images are served by the backend at /uploads/*; proxy them
+      // here so <img src="/uploads/<uuid>.png"> works in the dev SPA.
+      '/uploads': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
 });

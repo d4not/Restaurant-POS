@@ -27,6 +27,7 @@ import { EmployeeDetail } from './pages/staff/EmployeeDetail';
 import { SalesReport } from './pages/reports/SalesReport';
 import { ExpensesReport } from './pages/reports/ExpensesReport';
 import { ProductCostsReport } from './pages/reports/ProductCostsReport';
+import { ProductsSoldReport } from './pages/reports/ProductsSoldReport';
 import { DailyReportsList } from './pages/reports/DailyReportsList';
 import { DailyReportDetail } from './pages/reports/DailyReportDetail';
 import { ModifierGroupsPage } from './pages/menu/ModifierGroupsPage';
@@ -34,6 +35,7 @@ import { ModifierGroupDetail } from './pages/menu/ModifierGroupDetail';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { TablesZonesPage } from './pages/system/TablesZonesPage';
 import { StoragesPage } from './pages/system/StoragesPage';
+import { ReportTemplatePage } from './pages/system/ReportTemplatePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -83,11 +85,12 @@ export default function App() {
             {/* Reports */}
             <Route path="reports">
               <Route index element={<Navigate to="sales" replace />} />
-              <Route path="sales"         element={<SalesReport />} />
-              <Route path="product-costs" element={<ProductCostsReport />} />
-              <Route path="expenses"      element={<ExpensesReport />} />
-              <Route path="daily"         element={<DailyReportsList />} />
-              <Route path="daily/:id"     element={<DailyReportDetail />} />
+              <Route path="sales"          element={<SalesReport />} />
+              <Route path="products-sold"  element={<ProductsSoldReport />} />
+              <Route path="product-costs"  element={<ProductCostsReport />} />
+              <Route path="expenses"       element={<ExpensesReport />} />
+              <Route path="daily"          element={<DailyReportsList />} />
+              <Route path="daily/:id"      element={<DailyReportDetail />} />
             </Route>
 
             {/* Inventory */}
@@ -128,8 +131,9 @@ export default function App() {
 
             {/* System */}
             <Route path="system">
-              <Route path="tables-zones" element={<TablesZonesPage />} />
-              <Route path="storages"     element={<StoragesPage />} />
+              <Route path="tables-zones"    element={<TablesZonesPage />} />
+              <Route path="storages"        element={<StoragesPage />} />
+              <Route path="report-template" element={<ReportTemplatePage />} />
             </Route>
 
             {/* Settings */}

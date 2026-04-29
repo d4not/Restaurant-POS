@@ -65,3 +65,12 @@ printRouter.post(
   validate(testPrintSchema),
   asyncHandler(controller.test),
 );
+
+// Bundled default stylesheet for the corte-Z print template. The admin's
+// Report-template editor calls this to pre-fill the CSS textarea so an
+// operator can start from the default and tweak rather than editing blind.
+printRouter.get(
+  '/report-template/default',
+  requireRole('ADMIN'),
+  asyncHandler(controller.defaultTemplate),
+);

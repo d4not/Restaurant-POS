@@ -4,6 +4,7 @@ import type {
   DailySummaryQuery,
   ProductAnalysisQuery,
   ProductCostsQuery,
+  ProductsSoldQuery,
   SupplyMovementsQuery,
   VarianceQuery,
 } from './schema.js';
@@ -28,6 +29,13 @@ export async function productCosts(req: Request, res: Response): Promise<void> {
 export async function productAnalysis(req: Request, res: Response): Promise<void> {
   const report = await service.getProductAnalysisReport(
     req.query as unknown as ProductAnalysisQuery,
+  );
+  res.json({ success: true, data: report });
+}
+
+export async function productsSold(req: Request, res: Response): Promise<void> {
+  const report = await service.getProductsSoldReport(
+    req.query as unknown as ProductsSoldQuery,
   );
   res.json({ success: true, data: report });
 }

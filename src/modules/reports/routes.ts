@@ -7,6 +7,7 @@ import {
   dailySummaryQuerySchema,
   productAnalysisQuerySchema,
   productCostsQuerySchema,
+  productsSoldQuerySchema,
   supplyMovementsQuerySchema,
   varianceQuerySchema,
 } from './schema.js';
@@ -41,6 +42,12 @@ reportRouter.get(
   '/product-analysis',
   validate(productAnalysisQuerySchema, 'query'),
   asyncHandler(controller.productAnalysis),
+);
+
+reportRouter.get(
+  '/products-sold',
+  validate(productsSoldQuerySchema, 'query'),
+  asyncHandler(controller.productsSold),
 );
 
 reportRouter.get(

@@ -28,6 +28,7 @@ import {
   getReportLabels,
   longDate,
   renderToolbar,
+  resolveReportOverrides,
   shortDate,
   signedFormatter,
   sortAlertsForPrint,
@@ -578,12 +579,59 @@ function readShiftProducts(value: unknown): ShiftProductRow[] {
 export async function renderShiftReportHtml(id: string): Promise<string> {
   const report = await getShiftReport(id);
 
-  const [businessName, businessAddress, languageRaw, currencyRaw] = await Promise.all([
+  // Same setting bundle as renderDailyReportHtml: language/currency live in
+  // current settings (no per-shift snapshot — shift reports are printed
+  // seconds after close), plus the four template-override knobs and section-
+  // visibility flags from the admin's Report-template editor. The "shifts"
+  // flag is omitted because per-shift reports don't render a shifts roll-up.
+  const [
+    businessName,
+    businessAddress,
+    languageRaw,
+    currencyRaw,
+    customCss,
+    customHeaderHtml,
+    customFooterHtml,
+    showCash,
+    showSales,
+    showPayments,
+    showProducts,
+    showAlerts,
+    showVerification,
+  ] = await Promise.all([
     getSetting(SETTING_KEYS.BUSINESS_NAME),
     getSetting(SETTING_KEYS.BUSINESS_ADDRESS),
     getSetting(SETTING_KEYS.LANGUAGE),
     getSetting(SETTING_KEYS.CURRENCY),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_CSS),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_HEADER_HTML),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_FOOTER_HTML),
+    getSetting(SETTING_KEYS.REPORT_SHOW_CASH),
+    getSetting(SETTING_KEYS.REPORT_SHOW_SALES),
+    getSetting(SETTING_KEYS.REPORT_SHOW_PAYMENTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_PRODUCTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_ALERTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_VERIFICATION),
   ]);
+
+  const overrides = resolveReportOverrides((key) => {
+    switch (key) {
+      case 'report_custom_css': return customCss;
+      case 'report_custom_header_html': return customHeaderHtml;
+      case 'report_custom_footer_html': return customFooterHtml;
+      case 'report_show_cash': return showCash;
+      case 'report_show_sales': return showSales;
+      case 'report_show_payments': return showPayments;
+      case 'report_show_products': return showProducts;
+      case 'report_show_alerts': return showAlerts;
+      // The verification toggle hides the "Verified by …" / "UNVERIFIED"
+      // line that provisional shifts emit at the foot of the report.
+      case 'report_show_verification': return showVerification;
+      // The shifts flag doesn't apply to the per-shift report — there's no
+      // shifts roll-up section to hide.
+      default: return null;
+    }
+  });
 
   const language: LanguageCode = (LANGUAGE_VALUES as readonly string[]).includes(languageRaw ?? '')
     ? (languageRaw as LanguageCode)
@@ -604,7 +652,9 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     ? ` · ${escapeHtml(labels.unverified.toUpperCase())}`
     : '';
 
-  const headerHtml = `<header class="hdr">
+  // Custom header replaces the default outright when provided. Same trust
+  // model as the daily renderer — only ADMINs can write `report_*` keys.
+  const headerHtml = overrides.customHeaderHtml ?? `<header class="hdr">
     <div class="hdr-left">
       <div class="biz">${escapeHtml(bizName)}</div>
       ${bizAddr ? `<div class="biz-sub">${escapeHtml(bizAddr)}</div>` : ''}
@@ -668,7 +718,9 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     <span class="num">${escapeHtml(fmtSigned(report.cash_variance))}</span>
   </div>`);
   cashLines.push(`<div class="diff-status ${status.cls}">${escapeHtml(status.label)}</div>`);
-  const cashHtml = `<section><h2>${escapeHtml(labels.cashInDrawer)}</h2>${cashLines.join('\n')}</section>`;
+  const cashHtml = overrides.visibility.cash
+    ? `<section><h2>${escapeHtml(labels.cashInDrawer)}</h2>${cashLines.join('\n')}</section>`
+    : '';
 
   // Sales (gross/net/tax + tickets) — discounts only when present.
   const salesLines: string[] = [];
@@ -699,9 +751,12 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     <span>${escapeHtml(report.total_tickets)} ${escapeHtml(labels.tickets)} · ${escapeHtml(labels.avg)} ${escapeHtml(fmt(report.avg_ticket))}</span>
     <span></span>
   </div>`);
-  const salesHtml = `<section><h2>${escapeHtml(labels.sales)}</h2>${salesLines.join('\n')}</section>`;
+  const salesHtml = overrides.visibility.sales
+    ? `<section><h2>${escapeHtml(labels.sales)}</h2>${salesLines.join('\n')}</section>`
+    : '';
 
-  // Payments — only render the section when at least one method has > 0.
+  // Payments — only render the section when at least one method has > 0
+  // and the operator hasn't hidden it from the editor.
   const payRows: Array<[string, number]> = [
     [labels.cash, report.cash_sales],
     [labels.card, report.card_sales],
@@ -714,7 +769,7 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
       <span>${escapeHtml(label)}</span>
       <span class="num">${escapeHtml(fmt(amount))}</span>
     </div>`);
-  const paymentsHtml = payLines.length > 0
+  const paymentsHtml = overrides.visibility.payments && payLines.length > 0
     ? `<section><h2>${escapeHtml(labels.paymentMethods)}</h2>${payLines.join('\n')}</section>`
     : '';
 
@@ -726,13 +781,13 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     <span class="num">${escapeHtml(p.quantity)}</span>
     <span class="num">${escapeHtml(fmt(p.total))}</span>
   </div>`).join('');
-  const productsHtml = topProducts.length > 0
+  const productsHtml = overrides.visibility.products && topProducts.length > 0
     ? `<section><h2>${escapeHtml(labels.topProducts)}</h2>${topRows}</section>`
     : '';
 
   // Alerts attached to this shift. Suppress the section entirely when none.
   const alertRows = sortAlertsForPrint(report.alerts);
-  const alertsHtml = alertRows.length > 0
+  const alertsHtml = overrides.visibility.alerts && alertRows.length > 0
     ? `<section><h2>${escapeHtml(labels.alerts)}</h2>${alertRows.map((a) => {
         const resolved = a.resolved
           ? `<span class="alert-resolved"> — ${escapeHtml(labels.resolved)}${a.resolution ? `: ${escapeHtml(a.resolution)}` : ''}</span>`
@@ -743,15 +798,18 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
 
   // Provisional shifts surface their verifier (or "Sin verificar") at the
   // foot of the report so the next reader can see whether the shift cleared.
-  const verifyLine = isProv
+  // Rendered as its own block so a custom footer can't accidentally drop the
+  // audit signal, and gated on the verification visibility flag so the
+  // editor's "Verification & signatures" toggle hides it consistently.
+  const verifyLine = isProv && overrides.visibility.verification
     ? (report.verified_at && report.verified_by_name
         ? `${escapeHtml(labels.verifiedBy)} ${escapeHtml(report.verified_by_name)}`
         : escapeHtml(labels.unverified.toUpperCase()))
     : '';
+  const verifyHtml = verifyLine ? `<div class="ftr verify-line">${verifyLine}</div>` : '';
 
   const closedDate = `${shortDate(report.closed_at, language)} ${timeUtc(report.closed_at)}`;
-  const footerHtml = `<footer class="ftr">
-    ${verifyLine ? `<div>${verifyLine}</div>` : ''}
+  const footerHtml = overrides.customFooterHtml ?? `<footer class="ftr">
     <div>${escapeHtml(labels.closedBy)} ${escapeHtml(report.user_name)} · ${escapeHtml(closedDate)}</div>
   </footer>`;
 
@@ -764,8 +822,9 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     paymentsHtml,
     productsHtml,
     alertsHtml,
+    verifyHtml,
     footerHtml,
   ].filter(Boolean).join('\n');
 
-  return wrapHtmlPage(body, language);
+  return wrapHtmlPage(body, language, overrides.customCss);
 }

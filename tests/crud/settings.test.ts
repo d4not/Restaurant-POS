@@ -71,6 +71,43 @@ describe('Settings — key/value store for singleton configuration', () => {
     const res = await request(app).patch('/api/v1/settings').set(auth).send({});
     expect(res.status).toBe(422);
   });
+
+  it('rejects non-admin writes to report-template keys (XSS guard)', async () => {
+    // Cashier tries to inject a stylesheet that would otherwise render raw
+    // into the printable corte-Z. Renderer escapes business fields but
+    // interpolates report_custom_css verbatim, so write access must be
+    // ADMIN-only. See settings/controller.ts:ADMIN_ONLY_SETTING_KEYS.
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+    const res = await request(app)
+      .patch('/api/v1/settings')
+      .set(cashierAuth)
+      .send({ report_custom_css: '</style><script>alert(1)</script>' });
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects non-admin writes to non-printer business keys', async () => {
+    // Same gate covers business_name etc. — printer keys stay open to
+    // CASHIER+ so the operations-hub printer-check assign keeps working.
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+    const res = await request(app)
+      .patch('/api/v1/settings')
+      .set(cashierAuth)
+      .send({ business_name: 'Hijacked' });
+    expect(res.status).toBe(403);
+  });
+
+  it('allows non-admin writes to printer keys', async () => {
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+    const res = await request(app)
+      .patch('/api/v1/settings')
+      .set(cashierAuth)
+      .send({ printer_kitchen_ip: '192.168.1.50', printer_kitchen_port: '9100' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.printer_kitchen_ip).toBe('192.168.1.50');
+  });
 });
 
 describe('Default tax — applied at order-item time when Product.tax_id is null', () => {

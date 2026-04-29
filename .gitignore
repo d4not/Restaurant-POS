@@ -3,5 +3,22 @@ dist/
 dist-electron/
 release/
 coverage/
-.env
 *.log
+
+# Environment / secrets — never commit; only .example templates are tracked.
+.env*
+!.env.example
+!.env*.example
+
+# Database dumps — backups live on the server, never in git.
+*.dump
+*.sql.gz
+
+# User-uploaded images (product photos, category covers). Path is configurable
+# via UPLOAD_DIR; this matches the default. Backups live wherever the operator
+# decides, not git.
+uploads/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db

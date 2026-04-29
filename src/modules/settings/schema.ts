@@ -4,8 +4,16 @@ import { z } from 'zod';
 // use — e.g. default_tax_id reads as a UUID or an empty string meaning "no
 // default tax configured". Clients send a partial object of {key: value} and
 // the service upserts each pair.
+//
+// The 50_000-char value cap is a global sanity guard against bloat — it
+// applies uniformly to every key in the record (z.record has no per-key
+// validation). The generous ceiling exists because `report_custom_css` and
+// the report header/footer HTML can legitimately run several KB; smaller
+// keys (business_name, printer_*, alert thresholds) just don't use the
+// headroom in practice. Settings.value is TEXT in Postgres so the DB itself
+// imposes no limit.
 export const updateSettingsSchema = z
-  .record(z.string().min(1).max(200), z.string().max(500))
+  .record(z.string().min(1).max(200), z.string().max(50_000))
   .refine((obj) => Object.keys(obj).length > 0, {
     message: 'At least one setting must be provided',
   });
@@ -37,7 +45,62 @@ export const SETTING_KEYS = {
   ALERT_CASH_SURPLUS_THRESHOLD: 'alert_cash_surplus_threshold',
   ALERT_MAX_VOIDS_PER_SHIFT: 'alert_max_voids_per_shift',
   ALERT_MAX_DISCOUNT_PCT: 'alert_max_discount_pct',
+  // Printable corte Z customisation — the admin "Report template" page lets
+  // an ADMIN replace the bundled stylesheet, swap in a custom header/footer,
+  // or hide individual sections. Empty / missing → fall back to defaults.
+  REPORT_CUSTOM_CSS: 'report_custom_css',
+  REPORT_CUSTOM_HEADER_HTML: 'report_custom_header_html',
+  REPORT_CUSTOM_FOOTER_HTML: 'report_custom_footer_html',
+  REPORT_SHOW_CASH: 'report_show_cash',
+  REPORT_SHOW_SALES: 'report_show_sales',
+  REPORT_SHOW_PAYMENTS: 'report_show_payments',
+  REPORT_SHOW_SHIFTS: 'report_show_shifts',
+  REPORT_SHOW_PRODUCTS: 'report_show_products',
+  REPORT_SHOW_ALERTS: 'report_show_alerts',
+  REPORT_SHOW_VERIFICATION: 'report_show_verification',
 } as const;
+
+// Section keys → tag used by the front-end editor. Default to true (section
+// shown) when the row is missing or holds anything but the literal "false".
+export const REPORT_SECTION_KEYS = [
+  'cash',
+  'sales',
+  'payments',
+  'shifts',
+  'products',
+  'alerts',
+  'verification',
+] as const;
+export type ReportSectionKey = (typeof REPORT_SECTION_KEYS)[number];
+
+// Keys that only ADMIN may write through the bulk PATCH /settings endpoint.
+// The report_custom_* keys are the XSS-relevant ones — they're interpolated
+// raw into the printable-report HTML on purpose (so admins can paste a logo
+// in the header, etc.), so write access has to match the trust model the
+// renderer assumes. The non-printer business knobs are bundled in because
+// they're operational decisions a cashier shouldn't be flipping silently.
+// Printer keys stay off this list so the terminal's "Printer check" hub can
+// keep assigning IPs as CASHIER+.
+export const ADMIN_ONLY_SETTING_KEYS = [
+  SETTING_KEYS.DEFAULT_TAX_ID,
+  SETTING_KEYS.BUSINESS_NAME,
+  SETTING_KEYS.BUSINESS_ADDRESS,
+  SETTING_KEYS.CURRENCY,
+  SETTING_KEYS.ALERT_CASH_SHORTAGE_THRESHOLD,
+  SETTING_KEYS.ALERT_CASH_SURPLUS_THRESHOLD,
+  SETTING_KEYS.ALERT_MAX_VOIDS_PER_SHIFT,
+  SETTING_KEYS.ALERT_MAX_DISCOUNT_PCT,
+  SETTING_KEYS.REPORT_CUSTOM_CSS,
+  SETTING_KEYS.REPORT_CUSTOM_HEADER_HTML,
+  SETTING_KEYS.REPORT_CUSTOM_FOOTER_HTML,
+  SETTING_KEYS.REPORT_SHOW_CASH,
+  SETTING_KEYS.REPORT_SHOW_SALES,
+  SETTING_KEYS.REPORT_SHOW_PAYMENTS,
+  SETTING_KEYS.REPORT_SHOW_SHIFTS,
+  SETTING_KEYS.REPORT_SHOW_PRODUCTS,
+  SETTING_KEYS.REPORT_SHOW_ALERTS,
+  SETTING_KEYS.REPORT_SHOW_VERIFICATION,
+] as const;
 
 export const ALERT_THRESHOLD_DEFAULTS = {
   CASH_SHORTAGE: 2000,

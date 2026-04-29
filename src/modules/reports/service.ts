@@ -14,6 +14,7 @@ import type {
   DailySummaryQuery,
   ProductAnalysisQuery,
   ProductCostsQuery,
+  ProductsSoldQuery,
   SupplyMovementsQuery,
   VarianceQuery,
 } from './schema.js';
@@ -865,5 +866,257 @@ export async function getDailySummary(query: DailySummaryQuery): Promise<DailySu
     },
     expected_cash: expectedCash,
     generated_at: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Products-sold — every (product × variant × modifier-combo) row sold in a
+// window. Mirrors the "Productos" view in mainstream POS reporting tools.
+// ---------------------------------------------------------------------------
+//
+// Grouping: items collapse into a single row when they share product_id +
+// variant_id + the same modifier set. The modifier signature is the snapshot
+// names sorted alphabetically and joined with ", " — that way "Pepperoni,
+// Ranch" and "Ranch, Pepperoni" merge.
+//
+// "Discount" in this report covers BOTH voided line items and apportioned
+// order-level discounts. The kitchen-side reading of quantity (89 pizzas
+// rang up) often matters even when the customer wasn't charged for all of
+// them, so we keep voided items in gross_sales/quantity and offset their
+// full value through the discount column. That mirrors how Poster-style
+// reports are read: gross − discount = revenue.
+//
+// A void only counts as a cancellation when the kitchen had already been
+// told (sent_to_kitchen = true). Items removed before they ever fired are
+// waiter typos with no operational impact — `removeOrderItem` hard-deletes
+// those, so under normal operation they never reach this query, but we
+// gate on sent_to_kitchen anyway to stay correct against legacy/seed data.
+//
+// Money per line:
+//   gross_sales += line_total                 (always — includes voided)
+//   discount    += line_total                 (when item is voided)
+//                  +  order.discount × line_total / order.subtotal
+//                                             (when item is live; subtotal
+//                                              already excludes voided lines)
+//   revenue      = gross_sales − discount
+//   cost        += (variant.recipe_cost ?? product.recipe_cost) × quantity
+//                                             (only live lines — voided items
+//                                              never reached the kitchen for
+//                                              cost-of-goods purposes)
+//   profit       = revenue − cost
+
+export interface ProductsSoldRow {
+  key: string;
+  product_id: string;
+  product_name: string;
+  category_id: string | null;
+  category_name: string | null;
+  variant_id: string | null;
+  variant_name: string | null;
+  modifier_signature: string;
+  quantity: number;
+  gross_sales: string;
+  discount: string;
+  revenue: string;
+  cost: string;
+  profit: string;
+}
+
+export interface ProductsSoldTotals {
+  quantity: number;
+  gross_sales: string;
+  discount: string;
+  revenue: string;
+  cost: string;
+  profit: string;
+}
+
+export interface ProductsSoldReport {
+  from: string;
+  to: string;
+  filters: {
+    category_id: string | null;
+    user_id: string | null;
+    q: string | null;
+  };
+  totals: ProductsSoldTotals;
+  rows: ProductsSoldRow[];
+}
+
+export async function getProductsSoldReport(
+  query: ProductsSoldQuery,
+): Promise<ProductsSoldReport> {
+  const itemWhere: Prisma.OrderItemWhereInput = {
+    // Live items OR sent-then-voided items. Items voided before reaching
+    // the kitchen are waiter typos and shouldn't appear at all.
+    OR: [
+      { voided_at: null },
+      { voided_at: { not: null }, sent_to_kitchen: true },
+    ],
+    order: {
+      status: OrderStatus.PAID,
+      created_at: { gte: query.from, lte: query.to },
+      ...(query.user_id ? { user_id: query.user_id } : {}),
+    },
+    ...(query.category_id ? { product: { category_id: query.category_id } } : {}),
+    ...(query.q
+      ? { product: { name: { contains: query.q, mode: 'insensitive' } } }
+      : {}),
+  };
+
+  // Combining the category and search filters above when both are present.
+  // Prisma's `where` shape collapses them — `product: { category_id, name: {…} }`
+  // — so re-merge by hand when both apply.
+  if (query.category_id && query.q) {
+    itemWhere.product = {
+      category_id: query.category_id,
+      name: { contains: query.q, mode: 'insensitive' },
+    };
+  }
+
+  const items = await prisma.orderItem.findMany({
+    where: itemWhere,
+    select: {
+      id: true,
+      quantity: true,
+      line_total: true,
+      voided_at: true,
+      variant_id: true,
+      variant: { select: { name: true, recipe_cost: true } },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          recipe_cost: true,
+          category: { select: { id: true, name: true } },
+        },
+      },
+      modifiers: {
+        select: { name: true },
+      },
+      order: {
+        select: { subtotal: true, discount_amount: true },
+      },
+    },
+  });
+
+  type Bucket = {
+    product_id: string;
+    product_name: string;
+    category_id: string | null;
+    category_name: string | null;
+    variant_id: string | null;
+    variant_name: string | null;
+    modifier_signature: string;
+    quantity: number;
+    gross: Decimal;
+    discount: Decimal;
+    cost: Decimal;
+  };
+  const buckets = new Map<string, Bucket>();
+
+  for (const item of items) {
+    const modSignature = [...item.modifiers]
+      .map((m) => m.name)
+      .sort((a, b) => a.localeCompare(b))
+      .join(', ');
+    const key = `${item.product.id}|${item.variant_id ?? ''}|${modSignature}`;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        product_id: item.product.id,
+        product_name: item.product.name,
+        category_id: item.product.category?.id ?? null,
+        category_name: item.product.category?.name ?? null,
+        variant_id: item.variant_id,
+        variant_name: item.variant?.name ?? null,
+        modifier_signature: modSignature,
+        quantity: 0,
+        gross: new Decimal(0),
+        discount: new Decimal(0),
+        cost: new Decimal(0),
+      };
+      buckets.set(key, bucket);
+    }
+
+    const lineTotal = new Decimal(item.line_total);
+    bucket.quantity += item.quantity;
+    bucket.gross = bucket.gross.add(lineTotal);
+
+    if (item.voided_at != null) {
+      // Voided line: customer wasn't charged. Treat the whole line_total as a
+      // discount and skip cost-of-goods (the line never produced revenue).
+      bucket.discount = bucket.discount.add(lineTotal);
+      continue;
+    }
+
+    const orderSubtotal = new Decimal(item.order.subtotal);
+    const orderDiscount = new Decimal(item.order.discount_amount);
+    if (orderDiscount.gt(0) && orderSubtotal.gt(0)) {
+      bucket.discount = bucket.discount.add(
+        orderDiscount.mul(lineTotal).div(orderSubtotal),
+      );
+    }
+
+    const unitCost = item.variant
+      ? new Decimal(item.variant.recipe_cost)
+      : new Decimal(item.product.recipe_cost);
+    bucket.cost = bucket.cost.add(unitCost.mul(item.quantity));
+  }
+
+  const rows: ProductsSoldRow[] = [];
+  let totalQty = 0;
+  let totalGross = new Decimal(0);
+  let totalDiscount = new Decimal(0);
+  let totalCost = new Decimal(0);
+
+  for (const [key, b] of buckets) {
+    const revenue = b.gross.sub(b.discount);
+    const profit = revenue.sub(b.cost);
+    totalQty += b.quantity;
+    totalGross = totalGross.add(b.gross);
+    totalDiscount = totalDiscount.add(b.discount);
+    totalCost = totalCost.add(b.cost);
+    rows.push({
+      key,
+      product_id: b.product_id,
+      product_name: b.product_name,
+      category_id: b.category_id,
+      category_name: b.category_name,
+      variant_id: b.variant_id,
+      variant_name: b.variant_name,
+      modifier_signature: b.modifier_signature,
+      quantity: b.quantity,
+      gross_sales: b.gross.toFixed(0),
+      discount: b.discount.toFixed(0),
+      revenue: revenue.toFixed(0),
+      cost: b.cost.toFixed(0),
+      profit: profit.toFixed(0),
+    });
+  }
+
+  rows.sort((a, b) => b.quantity - a.quantity || a.product_name.localeCompare(b.product_name));
+
+  const totalRevenue = totalGross.sub(totalDiscount);
+  const totalProfit = totalRevenue.sub(totalCost);
+
+  return {
+    from: query.from.toISOString(),
+    to: query.to.toISOString(),
+    filters: {
+      category_id: query.category_id ?? null,
+      user_id: query.user_id ?? null,
+      q: query.q ?? null,
+    },
+    totals: {
+      quantity: totalQty,
+      gross_sales: totalGross.toFixed(0),
+      discount: totalDiscount.toFixed(0),
+      revenue: totalRevenue.toFixed(0),
+      cost: totalCost.toFixed(0),
+      profit: totalProfit.toFixed(0),
+    },
+    rows,
   };
 }

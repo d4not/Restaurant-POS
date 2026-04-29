@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Modal, Button, Badge } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { Select } from '../../components/forms/Select';
+import { ImagePicker } from '../../components/forms/ImagePicker';
 import {
   useCreateProduct,
   useUpdateProduct,
@@ -43,6 +44,7 @@ interface FormState {
   // Exempt" 0% row, which is just a regular tax with rate 0).
   tax_id: string;
   icon_color: string;
+  image_url: string;
   sold_by_weight: boolean;
   allow_discount: boolean;
   active: boolean;
@@ -57,6 +59,7 @@ const EMPTY: FormState = {
   supply_id: '',
   tax_id: '',
   icon_color: '',
+  image_url: '',
   sold_by_weight: false,
   allow_discount: true,
   active: true,
@@ -72,6 +75,7 @@ function fromProduct(p: Product): FormState {
     supply_id: p.supply_id ?? '',
     tax_id: p.tax_id ?? '',
     icon_color: p.icon_color ?? '',
+    image_url: p.image_url ?? '',
     sold_by_weight: p.sold_by_weight,
     allow_discount: p.allow_discount,
     active: p.active,
@@ -165,6 +169,9 @@ export function ProductFormModal({
       if (form.icon_color.trim() && !/^#[0-9a-fA-F]{6}$/.test(form.icon_color.trim())) {
         e.icon_color = 'Must be a #rrggbb hex color';
       }
+      if (form.image_url.trim().length > 500) {
+        e.image_url = 'URL is too long (max 500 chars)';
+      }
     }
 
     setErrors(e);
@@ -191,6 +198,7 @@ export function ProductFormModal({
       // tax_id='' means "use the default tax from settings" → persist null.
       tax_id: isPrep ? null : form.tax_id || null,
       icon_color: isPrep ? null : form.icon_color.trim() || null,
+      image_url: isPrep ? null : form.image_url.trim() || null,
       sold_by_weight: isPrep ? false : form.sold_by_weight,
       allow_discount: form.allow_discount,
       active: form.active,
@@ -367,6 +375,16 @@ export function ProductFormModal({
             }
             options={supplyOptions}
             disabled={suppliesQ.isLoading}
+          />
+        )}
+
+        {!isPrep && (
+          <ImagePicker
+            label="Image (optional)"
+            value={form.image_url}
+            onChange={(v) => set('image_url', v)}
+            error={errors.image_url}
+            hint="Click Upload to pick a file from your computer (JPEG/PNG/WebP, ≤2 MB), or paste an external URL."
           />
         )}
 

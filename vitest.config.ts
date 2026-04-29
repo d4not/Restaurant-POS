@@ -14,6 +14,9 @@ export default defineConfig({
       DATABASE_URL: TEST_DATABASE_URL,
       JWT_SECRET: 'test-secret-at-least-sixteen-characters-long',
       LOG_LEVEL: 'silent',
+      // Quarantine test uploads under a dedicated subdir so cleanup can't
+      // wipe operator-uploaded production images out of ./uploads/.
+      UPLOAD_DIR: './uploads/__test__',
     },
     globalSetup: ['./tests/global-setup.ts'],
     setupFiles: ['./tests/setup.ts'],

@@ -35,6 +35,24 @@ export function getServerRoot(): string {
   return apiBase.replace(/\/api\/v\d+\/?$/, '').replace(/\/$/, '');
 }
 
+/**
+ * Resolve a stored `image_url` (Product.image_url, ProductCategory.image_url)
+ * to a fully-qualified URL the renderer can load.
+ *
+ * Backend uploads come back as "/uploads/<uuid>.ext" — relative paths that
+ * resolve to nothing under Electron's `file://` origin and to the Vite dev
+ * server (not the backend) under `http://`. We rebase those onto the API
+ * host. Pasted external URLs ("https://…", "data:…") are returned as-is.
+ */
+export function resolveImageUrl(stored: string | null | undefined): string | null {
+  if (!stored) return null;
+  const trimmed = stored.trim();
+  if (!trimmed) return null;
+  if (/^(https?:|data:|blob:)/i.test(trimmed)) return trimmed;
+  if (!trimmed.startsWith('/')) return trimmed;
+  return `${getServerRoot()}${trimmed}`;
+}
+
 interface ApiEnvelope<T> {
   success: boolean;
   data?: T;

@@ -319,3 +319,317 @@ describe('GET /api/v1/reports/product-costs', () => {
     expect(latte.variants).toHaveLength(1);
   });
 });
+
+describe('GET /api/v1/reports/products-sold', () => {
+  // Helper: create a PAID order directly via prisma so we don't go through the
+  // full register-open / payment lifecycle. The aggregator only reads fields
+  // (status, created_at, items, modifiers, discount/subtotal), so a minimal
+  // record is enough.
+  async function makePaidOrder(opts: {
+    userId: string;
+    productId: string;
+    variantId?: string;
+    quantity: number;
+    unitPrice: number;
+    modifierNames?: string[];
+    discountAmount?: number;
+  }) {
+    const register = await prisma.cashRegister.create({
+      data: { user_id: opts.userId, opening_amount: 0, status: 'CLOSED', kind: 'NORMAL' },
+    });
+    const lineTotal = opts.unitPrice * opts.quantity;
+    const order = await prisma.order.create({
+      data: {
+        register_id: register.id,
+        user_id: opts.userId,
+        order_number: Math.floor(Math.random() * 100000),
+        status: 'PAID',
+        order_type: 'DINE_IN',
+        subtotal: lineTotal,
+        tax_amount: 0,
+        discount_amount: opts.discountAmount ?? 0,
+        total: lineTotal - (opts.discountAmount ?? 0),
+        order_date: new Date(new Date().toISOString().slice(0, 10)),
+      },
+    });
+    // Need at least one modifier in the system if names are given, so we wire
+    // them up minimally via a dummy modifier_group + modifiers and snapshot
+    // them on the order item.
+    let modifierIds: string[] = [];
+    if (opts.modifierNames?.length) {
+      const group = await prisma.modifierGroup.create({
+        data: { name: 'Test Group' },
+      });
+      modifierIds = await Promise.all(
+        opts.modifierNames.map(async (name) => {
+          const m = await prisma.modifier.create({
+            data: { group_id: group.id, name, extra_price: 0 },
+          });
+          return m.id;
+        }),
+      );
+    }
+    await prisma.orderItem.create({
+      data: {
+        order_id: order.id,
+        product_id: opts.productId,
+        variant_id: opts.variantId,
+        quantity: opts.quantity,
+        unit_price: opts.unitPrice,
+        line_total: lineTotal,
+        modifiers: opts.modifierNames?.length
+          ? {
+              create: opts.modifierNames.map((name, i) => ({
+                modifier_id: modifierIds[i]!,
+                name,
+                extra_price: 0,
+              })),
+            }
+          : undefined,
+      },
+    });
+    return order;
+  }
+
+  it('aggregates rows by (product, variant, modifier-set) with totals', async () => {
+    const s = await setup();
+    // Two orders that share product+variant+modifiers — should collapse into
+    // one row with quantity = 1 + 2 = 3.
+    await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 1,
+      unitPrice: 6500,
+      modifierNames: ['Almond Milk'],
+    });
+    await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 2,
+      unitPrice: 6500,
+      modifierNames: ['Almond Milk'],
+    });
+    // A third order with a different modifier set — separate row.
+    await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 1,
+      unitPrice: 6500,
+      modifierNames: ['Soy Milk'],
+    });
+
+    const from = new Date('2026-04-01T00:00:00Z').toISOString();
+    const to = new Date('2099-01-01T00:00:00Z').toISOString();
+    const res = await request(app)
+      .get(`/api/v1/reports/products-sold?from=${from}&to=${to}`)
+      .set(s.auth)
+      .expect(200);
+
+    const data = res.body.data;
+    const lattes = (data.rows as Array<{ product_id: string; quantity: number; modifier_signature: string; gross_sales: string }>).filter(
+      (r) => r.product_id === s.latteProductId,
+    );
+    expect(lattes).toHaveLength(2);
+    const almond = lattes.find((r) => r.modifier_signature === 'Almond Milk');
+    const soy = lattes.find((r) => r.modifier_signature === 'Soy Milk');
+    expect(almond).toBeDefined();
+    expect(soy).toBeDefined();
+    expect(almond!.quantity).toBe(3);
+    expect(soy!.quantity).toBe(1);
+    // 3 × 6500 = 19500
+    expect(almond!.gross_sales).toBe('19500');
+
+    // Totals
+    expect(data.totals.quantity).toBeGreaterThanOrEqual(4);
+    expect(Number(data.totals.gross_sales)).toBeGreaterThanOrEqual(26000);
+  });
+
+  it('apportions order-level discount across lines', async () => {
+    const s = await setup();
+    // One order with two items: each is 50% of the order so discount splits 50/50.
+    const second = await prisma.product.create({
+      data: { name: 'Espresso', type: ProductType.DISH },
+    });
+    const register = await prisma.cashRegister.create({
+      data: { user_id: s.userId, opening_amount: 0, status: 'CLOSED', kind: 'NORMAL' },
+    });
+    const subtotal = 10000;
+    const order = await prisma.order.create({
+      data: {
+        register_id: register.id,
+        user_id: s.userId,
+        order_number: Math.floor(Math.random() * 100000),
+        status: 'PAID',
+        order_type: 'DINE_IN',
+        subtotal,
+        discount_amount: 1000,
+        total: 9000,
+        order_date: new Date(new Date().toISOString().slice(0, 10)),
+        items: {
+          create: [
+            {
+              product_id: s.latteProductId,
+              variant_id: s.latteVariantId,
+              quantity: 1,
+              unit_price: 5000,
+              line_total: 5000,
+            },
+            {
+              product_id: second.id,
+              quantity: 1,
+              unit_price: 5000,
+              line_total: 5000,
+            },
+          ],
+        },
+      },
+    });
+    expect(order.id).toBeDefined();
+
+    const from = new Date('2026-04-01T00:00:00Z').toISOString();
+    const to = new Date('2099-01-01T00:00:00Z').toISOString();
+    const res = await request(app)
+      .get(`/api/v1/reports/products-sold?from=${from}&to=${to}`)
+      .set(s.auth)
+      .expect(200);
+
+    const rows = res.body.data.rows as Array<{
+      product_id: string;
+      gross_sales: string;
+      discount: string;
+      revenue: string;
+    }>;
+    const latteRow = rows.find((r) => r.product_id === s.latteProductId);
+    const espressoRow = rows.find((r) => r.product_id === second.id);
+    expect(latteRow).toBeDefined();
+    expect(espressoRow).toBeDefined();
+    // 1000 × 5000/10000 = 500 each
+    expect(latteRow!.discount).toBe('500');
+    expect(espressoRow!.discount).toBe('500');
+    expect(latteRow!.revenue).toBe('4500');
+    expect(espressoRow!.revenue).toBe('4500');
+  });
+
+  it('filters by user_id (waiter)', async () => {
+    const s = await setup();
+    const otherUser = await makeUser({ role: 'WAITER' });
+    await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 5,
+      unitPrice: 6500,
+    });
+    await makePaidOrder({
+      userId: otherUser.id,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 2,
+      unitPrice: 6500,
+    });
+
+    const from = new Date('2026-04-01T00:00:00Z').toISOString();
+    const to = new Date('2099-01-01T00:00:00Z').toISOString();
+    const res = await request(app)
+      .get(
+        `/api/v1/reports/products-sold?from=${from}&to=${to}&user_id=${otherUser.id}`,
+      )
+      .set(s.auth)
+      .expect(200);
+    expect(res.body.data.totals.quantity).toBe(2);
+  });
+
+  it('counts a sent-then-voided line as discount (real cancellation)', async () => {
+    const s = await setup();
+    const order = await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 4,
+      unitPrice: 6500,
+    });
+    // Item was sent to kitchen, then voided — the kitchen prepared (or was
+    // about to) so this is a real cancellation, not a typo.
+    await prisma.orderItem.updateMany({
+      where: { order_id: order.id },
+      data: {
+        sent_to_kitchen: true,
+        sent_at: new Date(),
+        voided_at: new Date(),
+        voided_by: s.userId,
+        void_reason: 'customer changed mind',
+      },
+    });
+
+    const from = new Date('2026-04-01T00:00:00Z').toISOString();
+    const to = new Date('2099-01-01T00:00:00Z').toISOString();
+    const res = await request(app)
+      .get(`/api/v1/reports/products-sold?from=${from}&to=${to}`)
+      .set(s.auth)
+      .expect(200);
+    const lattes = (res.body.data.rows as Array<{
+      product_id: string;
+      quantity: number;
+      gross_sales: string;
+      discount: string;
+      revenue: string;
+      cost: string;
+    }>).filter((r) => r.product_id === s.latteProductId);
+    expect(lattes).toHaveLength(1);
+    const row = lattes[0]!;
+    expect(row.quantity).toBe(4);
+    expect(row.gross_sales).toBe('26000');
+    expect(row.discount).toBe('26000');
+    expect(row.revenue).toBe('0');
+    // Voided lines don't accrue cost-of-goods.
+    expect(row.cost).toBe('0');
+  });
+
+  it('ignores voided lines that were never sent to kitchen (waiter typo)', async () => {
+    const s = await setup();
+    const order = await makePaidOrder({
+      userId: s.userId,
+      productId: s.latteProductId,
+      variantId: s.latteVariantId,
+      quantity: 3,
+      unitPrice: 6500,
+    });
+    // Voided BEFORE the kitchen knew about it — equivalent to the waiter
+    // hitting the wrong button. removeOrderItem hard-deletes this case in
+    // production; we simulate it via direct prisma to be sure the report
+    // hides it even when the data lingers.
+    await prisma.orderItem.updateMany({
+      where: { order_id: order.id },
+      data: {
+        sent_to_kitchen: false,
+        voided_at: new Date(),
+        voided_by: s.userId,
+        void_reason: 'mis-press',
+      },
+    });
+
+    const from = new Date('2026-04-01T00:00:00Z').toISOString();
+    const to = new Date('2099-01-01T00:00:00Z').toISOString();
+    const res = await request(app)
+      .get(`/api/v1/reports/products-sold?from=${from}&to=${to}`)
+      .set(s.auth)
+      .expect(200);
+    const lattes = (res.body.data.rows as Array<{ product_id: string }>).filter(
+      (r) => r.product_id === s.latteProductId,
+    );
+    expect(lattes).toHaveLength(0);
+  });
+
+  it('rejects invalid date ranges', async () => {
+    const s = await setup();
+    const from = new Date('2026-05-10T00:00:00Z').toISOString();
+    const to = new Date('2026-05-05T00:00:00Z').toISOString();
+    await request(app)
+      .get(`/api/v1/reports/products-sold?from=${from}&to=${to}`)
+      .set(s.auth)
+      .expect(422);
+  });
+});

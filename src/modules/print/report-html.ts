@@ -565,15 +565,26 @@ export const PRINT_STYLES = `
  * margin, which would leak "Daily Report Z-0001" onto the page. Empty title
  * suppresses it. The blob: URL leak is a separate browser-print-settings
  * concern — caller mitigates it client-side.
+ *
+ * `customCss`, when provided, replaces the bundled `PRINT_STYLES` block
+ * verbatim. The "Report template" page in the admin panel lets an operator
+ * paste their own stylesheet, persisted in Settings as `report_custom_css`.
+ * When empty/missing the bundled default is used so an unconfigured deploy
+ * looks the same as it always did.
  */
-export function wrapHtmlPage(content: string, lang: LanguageCode): string {
+export function wrapHtmlPage(
+  content: string,
+  lang: LanguageCode,
+  customCss?: string | null,
+): string {
+  const css = customCss && customCss.trim().length > 0 ? customCss : PRINT_STYLES;
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
 <head>
 <meta charset="utf-8">
 <title></title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${PRINT_STYLES}</style>
+<style>${css}</style>
 </head>
 <body>
 <div class="page">
@@ -595,4 +606,91 @@ export function renderToolbar(labels: ReportLabels): string {
     <button type="button" class="close-btn" onclick="window.close()">${escapeHtml(labels.closeButton)}</button>
     <button type="button" class="print-btn" onclick="window.print()">${escapeHtml(labels.printButton)}</button>
   </div>`;
+}
+
+/**
+ * Per-section visibility flags read from Settings. The "Report template"
+ * editor in the admin panel lets the operator hide individual sections of
+ * the printed corte Z. A missing setting is treated as `true` so the
+ * out-of-the-box template renders fully.
+ */
+export interface ReportSectionVisibility {
+  cash: boolean;
+  sales: boolean;
+  payments: boolean;
+  shifts: boolean;
+  products: boolean;
+  alerts: boolean;
+  verification: boolean;
+}
+
+export const ALL_SECTIONS_VISIBLE: ReportSectionVisibility = {
+  cash: true,
+  sales: true,
+  payments: true,
+  shifts: true,
+  products: true,
+  alerts: true,
+  verification: true,
+};
+
+/**
+ * Bundle of overrides resolved from Settings. Callers pass this to the
+ * renderer instead of re-querying inside each per-section helper.
+ */
+export interface ReportTemplateOverrides {
+  customCss: string | null;
+  customHeaderHtml: string | null;
+  customFooterHtml: string | null;
+  visibility: ReportSectionVisibility;
+}
+
+/**
+ * Build an empty / no-op overrides object — used by tests and any caller
+ * that wants to render with the bundled defaults regardless of stored
+ * settings (e.g. the editor's draft preview in the future).
+ */
+export function defaultReportOverrides(): ReportTemplateOverrides {
+  return {
+    customCss: null,
+    customHeaderHtml: null,
+    customFooterHtml: null,
+    visibility: { ...ALL_SECTIONS_VISIBLE },
+  };
+}
+
+/** Coerce a Settings string into a boolean — only the literal "false" disables a section. */
+function parseVisibilityFlag(raw: string | null | undefined): boolean {
+  if (raw === undefined || raw === null) return true;
+  return raw.trim().toLowerCase() !== 'false';
+}
+
+/** Trim and normalise a raw text setting; empty becomes null. */
+function nonEmpty(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Resolve the four template-override settings into a typed bundle. The
+ * caller already has the raw key/value map from `getSetting` calls; this
+ * function does the parsing + defaulting in one place so each render path
+ * doesn't repeat the logic.
+ */
+export function resolveReportOverrides(getRaw: (key: string) => string | null | undefined): ReportTemplateOverrides {
+  return {
+    customCss: nonEmpty(getRaw('report_custom_css')),
+    customHeaderHtml: nonEmpty(getRaw('report_custom_header_html')),
+    customFooterHtml: nonEmpty(getRaw('report_custom_footer_html')),
+    visibility: {
+      cash: parseVisibilityFlag(getRaw('report_show_cash')),
+      sales: parseVisibilityFlag(getRaw('report_show_sales')),
+      payments: parseVisibilityFlag(getRaw('report_show_payments')),
+      shifts: parseVisibilityFlag(getRaw('report_show_shifts')),
+      products: parseVisibilityFlag(getRaw('report_show_products')),
+      alerts: parseVisibilityFlag(getRaw('report_show_alerts')),
+      verification: parseVisibilityFlag(getRaw('report_show_verification')),
+    },
+  };
 }

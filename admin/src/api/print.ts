@@ -28,3 +28,13 @@ export function printKitchen(orderId: string) {
 export function printReceipt(orderId: string) {
   return api.post<PrintResult>('/print/receipt', { order_id: orderId });
 }
+
+/**
+ * Fetch the bundled stylesheet for the corte-Z print template. The admin's
+ * Report-template editor calls this on mount so an operator who has never
+ * customised the template starts with the default CSS in the textarea
+ * instead of an empty box.
+ */
+export function getDefaultReportTemplateCss() {
+  return api.get<{ css: string }>('/print/report-template/default');
+}

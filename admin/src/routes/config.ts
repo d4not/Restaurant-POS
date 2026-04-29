@@ -40,10 +40,11 @@ export const NAV: NavEntry[] = [
     labelKey: 'nav.reports',
     icon: '📊',
     items: [
-      { id: 'sales',          labelKey: 'nav.salesReport',  path: '/reports/sales' },
-      { id: 'product-costs',  labelKey: 'nav.productCosts', path: '/reports/product-costs' },
-      { id: 'expenses',       labelKey: 'nav.expenses',     path: '/reports/expenses' },
-      { id: 'daily-reports',  labelKey: 'nav.dailyReports', path: '/reports/daily' },
+      { id: 'sales',          labelKey: 'nav.salesReport',   path: '/reports/sales' },
+      { id: 'products-sold',  labelKey: 'nav.productsSold',  path: '/reports/products-sold' },
+      { id: 'product-costs',  labelKey: 'nav.productCosts',  path: '/reports/product-costs' },
+      { id: 'expenses',       labelKey: 'nav.expenses',      path: '/reports/expenses' },
+      { id: 'daily-reports',  labelKey: 'nav.dailyReports',  path: '/reports/daily' },
     ],
   },
   {
@@ -92,9 +93,10 @@ export const NAV: NavEntry[] = [
     labelKey: 'nav.system',
     icon: '⚙',
     items: [
-      { id: 'tables-zones', labelKey: 'nav.tablesZones', path: '/system/tables-zones' },
-      { id: 'storages',     labelKey: 'nav.storages',    path: '/system/storages' },
-      { id: 'settings',     labelKey: 'nav.settings',    path: '/settings' },
+      { id: 'tables-zones',    labelKey: 'nav.tablesZones',    path: '/system/tables-zones' },
+      { id: 'storages',        labelKey: 'nav.storages',       path: '/system/storages' },
+      { id: 'report-template', labelKey: 'nav.reportTemplate', path: '/system/report-template' },
+      { id: 'settings',        labelKey: 'nav.settings',       path: '/settings' },
     ],
   },
 ];

@@ -31,6 +31,7 @@ import {
   getReportLabels,
   longDate,
   renderToolbar,
+  resolveReportOverrides,
   shortDate,
   signedFormatter,
   sortAlertsForPrint,
@@ -875,10 +876,55 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
     ? (report.currency as CurrencyCode)
     : CURRENCY_DEFAULT;
 
-  const [businessName, businessAddress] = await Promise.all([
+  // One round-trip pulls every setting the renderer reads. Faster than
+  // chaining individual `getSetting` calls and keeps the override resolution
+  // colocated with the data load.
+  const [
+    businessName,
+    businessAddress,
+    customCss,
+    customHeaderHtml,
+    customFooterHtml,
+    showCash,
+    showSales,
+    showPayments,
+    showShifts,
+    showProducts,
+    showAlerts,
+    showVerification,
+  ] = await Promise.all([
     getSetting(SETTING_KEYS.BUSINESS_NAME),
     getSetting(SETTING_KEYS.BUSINESS_ADDRESS),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_CSS),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_HEADER_HTML),
+    getSetting(SETTING_KEYS.REPORT_CUSTOM_FOOTER_HTML),
+    getSetting(SETTING_KEYS.REPORT_SHOW_CASH),
+    getSetting(SETTING_KEYS.REPORT_SHOW_SALES),
+    getSetting(SETTING_KEYS.REPORT_SHOW_PAYMENTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_SHIFTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_PRODUCTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_ALERTS),
+    getSetting(SETTING_KEYS.REPORT_SHOW_VERIFICATION),
   ]);
+
+  // Resolve overrides via the shared helper so the parsing rules ("only the
+  // literal 'false' disables a section", "empty string ≡ unset") stay in one
+  // place across the daily and shift renderers.
+  const overrides = resolveReportOverrides((key) => {
+    switch (key) {
+      case 'report_custom_css': return customCss;
+      case 'report_custom_header_html': return customHeaderHtml;
+      case 'report_custom_footer_html': return customFooterHtml;
+      case 'report_show_cash': return showCash;
+      case 'report_show_sales': return showSales;
+      case 'report_show_payments': return showPayments;
+      case 'report_show_shifts': return showShifts;
+      case 'report_show_products': return showProducts;
+      case 'report_show_alerts': return showAlerts;
+      case 'report_show_verification': return showVerification;
+      default: return null;
+    }
+  });
 
   const labels = getReportLabels(language);
   const fmt = currencyFormatter(language, currency);
@@ -890,7 +936,11 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
   const categories = readJsonArray<CategoryRow>(report.sales_by_category);
   const topProducts = readJsonArray<ProductRow>(report.top_products);
 
-  const headerHtml = `<header class="hdr">
+  // Header — operator's custom HTML wins when provided. We keep it raw on
+  // purpose (no escapeHtml) because the editor's whole point is that the
+  // admin can paste their own markup. Only an ADMIN role can hit the Save
+  // endpoint so the trust model is the same as for any other admin write.
+  const headerHtml = overrides.customHeaderHtml ?? `<header class="hdr">
     <div class="hdr-left">
       <div class="biz">${escapeHtml(bizName)}</div>
       ${bizAddr ? `<div class="biz-sub">${escapeHtml(bizAddr)}</div>` : ''}
@@ -901,7 +951,7 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
     </div>
   </header>`;
 
-  const cashHtml = renderCashSection(
+  const cashHtml = overrides.visibility.cash ? renderCashSection(
     {
       total_opening_amount: report.total_opening_amount,
       cash_sales: report.cash_sales,
@@ -916,11 +966,15 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
     labels,
     fmt,
     fmtSigned,
-  );
-  const salesHtml = renderSalesSection(report, labels, fmt);
-  const paymentsHtml = renderPaymentsSection(report, labels, fmt);
-  const shiftsHtml = renderShiftsSection(report.shifts as unknown as ShiftRow[], labels, fmt, fmtSigned);
-  const productsHtml = renderProductsSection(topProducts, categories, labels, fmt);
+  ) : '';
+  const salesHtml = overrides.visibility.sales ? renderSalesSection(report, labels, fmt) : '';
+  const paymentsHtml = overrides.visibility.payments ? renderPaymentsSection(report, labels, fmt) : '';
+  const shiftsHtml = overrides.visibility.shifts
+    ? renderShiftsSection(report.shifts as unknown as ShiftRow[], labels, fmt, fmtSigned)
+    : '';
+  const productsHtml = overrides.visibility.products
+    ? renderProductsSection(topProducts, categories, labels, fmt)
+    : '';
 
   // Combine day-level and per-shift alerts for the print roll-up.
   const dayAlerts = report.alerts.map((a) => ({
@@ -937,14 +991,15 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
       severity: a.severity,
     })),
   );
-  const alertsHtml = renderAlertsSection(dayAlerts, shiftAlerts, labels);
-  const verifyHtml = renderVerificationSection(report, labels);
+  const alertsHtml = overrides.visibility.alerts ? renderAlertsSection(dayAlerts, shiftAlerts, labels) : '';
+  const verifyHtml = overrides.visibility.verification ? renderVerificationSection(report, labels) : '';
 
   const closedBy = report.closed_by?.name ?? '—';
   const closedDate = report.closed_at
     ? `${shortDate(report.closed_at, language)} ${timeUtc(report.closed_at)}`
     : '—';
-  const footerHtml = `<footer class="ftr">${escapeHtml(labels.closedBy)} ${escapeHtml(closedBy)} · ${escapeHtml(closedDate)}</footer>`;
+  const footerHtml = overrides.customFooterHtml
+    ?? `<footer class="ftr">${escapeHtml(labels.closedBy)} ${escapeHtml(closedBy)} · ${escapeHtml(closedDate)}</footer>`;
 
   const body = [
     renderToolbar(labels),
@@ -959,5 +1014,5 @@ export async function renderDailyReportHtml(id: string): Promise<string> {
     footerHtml,
   ].filter(Boolean).join('\n');
 
-  return wrapHtmlPage(body, language);
+  return wrapHtmlPage(body, language, overrides.customCss);
 }

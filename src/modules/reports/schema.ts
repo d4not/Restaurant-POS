@@ -52,6 +52,24 @@ export const productAnalysisQuerySchema = z
 
 export type ProductAnalysisQuery = z.infer<typeof productAnalysisQuerySchema>;
 
+// Products-sold report — Poster-style breakdown of every (product × variant ×
+// modifier-combo) sold in a window. Optional filters narrow by category, the
+// waiter who took the order, or a free-text product-name search.
+export const productsSoldQuerySchema = z
+  .object({
+    from: z.coerce.date(),
+    to: z.coerce.date(),
+    category_id: z.string().uuid().optional(),
+    user_id: z.string().uuid().optional(),
+    q: z.string().trim().min(1).max(120).optional(),
+  })
+  .refine((v) => v.from <= v.to, {
+    message: 'from must be <= to',
+    path: ['from'],
+  });
+
+export type ProductsSoldQuery = z.infer<typeof productsSoldQuerySchema>;
+
 // Daily summary: one cashier-facing snapshot of a single day's sales activity.
 // `date` is interpreted in UTC against the Order.order_date column (a DATE).
 // `register_id` scopes to a single shift and unlocks `expected_cash`.

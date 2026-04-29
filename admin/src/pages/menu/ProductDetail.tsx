@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge, Button, Card, EmptyState, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
+import { ImagePicker } from '../../components/forms/ImagePicker';
 import {
   useDeleteProduct,
   useDeleteVariant,
@@ -165,6 +166,9 @@ export function ProductDetail() {
     ) {
       errors.icon_color = 'Must be a #rrggbb hex color';
     }
+    if (!isPrepForm && form.image_url.trim().length > 500) {
+      errors.image_url = 'URL is too long (max 500 chars)';
+    }
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       return;
@@ -188,6 +192,9 @@ export function ProductDetail() {
     }
     if (form.icon_color !== original.icon_color) {
       payload.icon_color = form.icon_color.trim() || null;
+    }
+    if (form.image_url !== original.image_url) {
+      payload.image_url = form.image_url.trim() || null;
     }
     if (form.sold_by_weight !== original.sold_by_weight) {
       payload.sold_by_weight = form.sold_by_weight;
@@ -640,6 +647,16 @@ export function ProductDetail() {
                 )}
               </div>
             )}
+
+            {!isPrep && (
+              <ImagePicker
+                label="Image"
+                value={form.image_url}
+                onChange={(v) => setField('image_url', v)}
+                error={fieldErrors.image_url}
+                compact
+              />
+            )}
           </div>
 
           <div
@@ -949,6 +966,7 @@ interface HeaderFormState {
   // '' means "use the default tax from settings" (persisted as null).
   tax_id: string;
   icon_color: string;
+  image_url: string;
   sold_by_weight: boolean;
   allow_discount: boolean;
   active: boolean;
@@ -964,6 +982,7 @@ function buildFormState(p: Product): HeaderFormState {
     barcode: p.barcode ?? '',
     tax_id: p.tax_id ?? '',
     icon_color: p.icon_color ?? '',
+    image_url: p.image_url ?? '',
     sold_by_weight: p.sold_by_weight,
     allow_discount: p.allow_discount,
     active: p.active,

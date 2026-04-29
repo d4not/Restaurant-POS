@@ -41,6 +41,7 @@ import { floorRouter } from './modules/floors/routes.js';
 import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
 import { printRouter } from './modules/print/routes.js';
+import { uploadRouter, uploadRoot } from './modules/uploads/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -84,6 +85,28 @@ export function createApp(): Express {
     res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });
   });
 
+  // Public read of uploaded images. Files are randomly-named UUIDs so the
+  // path itself acts as the unguessable token; no auth gate is needed and
+  // an authenticated browser fetching `<img src="/uploads/…">` would fail
+  // anyway because <img> doesn't carry the bearer header. Cached for a day
+  // — files are immutable (uploads create a new UUID) so the TTL is safe.
+  //
+  // Helmet's default Cross-Origin-Resource-Policy is `same-origin`, which
+  // would block the admin SPA (port 5173/5174) and the POS terminal from
+  // embedding images served on port 3000. Relax it to `cross-origin` for
+  // this prefix only, the same trust level a public CDN would use.
+  app.use('/uploads', (_req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  });
+  app.use(
+    '/uploads',
+    express.static(uploadRoot, {
+      maxAge: '1d',
+      index: false,
+    }),
+  );
+
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/supply-categories', supplyCategoryRouter);
   app.use('/api/v1/suppliers', supplierRouter);
@@ -122,6 +145,7 @@ export function createApp(): Express {
   app.use('/api/v1/floor-decor', floorDecorRouter);
   app.use('/api/v1/suggestions', suggestionRouter);
   app.use('/api/v1/print', printRouter);
+  app.use('/api/v1/uploads', uploadRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

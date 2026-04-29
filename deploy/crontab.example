@@ -1,0 +1,22 @@
+# Restaurant POS — example cron schedule (root crontab)
+#
+# Install:
+#   sudo cp deploy/crontab.example /etc/cron.d/restaurant-pos
+#   sudo chmod 644 /etc/cron.d/restaurant-pos
+#
+# Then verify:
+#   sudo systemctl restart cron     # or `crond` on Arch
+#   sudo grep CRON /var/log/syslog  # check scheduled runs
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=root
+
+# Daily DB backup at 03:00
+0 3 * * * root /opt/restaurant-pos/deploy/backup.sh >> /var/log/restaurant-pos/backup.log 2>&1
+
+# Weekly: prune old logs (keep 90 days)
+30 4 * * 0 root find /var/log/restaurant-pos -name "*.log" -mtime +90 -delete
+
+# Health check every 5 minutes — write to a status file pollable by monitoring
+*/5 * * * * pos curl -fsS http://localhost:3000/health > /tmp/pos-health.last 2>&1 || logger -t pos-health "backend unreachable"
