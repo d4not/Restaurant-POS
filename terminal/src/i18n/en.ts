@@ -539,6 +539,23 @@ export const en = {
   'cancel.lengthMin': 'Minimum {n} characters',
   'cancel.confirmPin': 'Confirm with your PIN',
 
+  // ─── Remove sent item modal (cashier-authorized void)
+  'remove.title': 'Remove sent item?',
+  'remove.subtitle':
+    '{item} was already sent to the kitchen. Pick a reason and enter the cashier PIN — the kitchen will be notified on the next ticket.',
+  'remove.reasonLabel': 'Reason',
+  'remove.reason.change': 'Product change',
+  'remove.reason.defect': 'Product defect',
+  'remove.reason.beforePrep': 'Change before preparation',
+  'remove.reason.beforePrepHelper': 'No waste recorded',
+  'remove.reason.other': 'Other',
+  'remove.commentLabel': 'Explanation',
+  'remove.commentOptionalHint': 'Optional — the kitchen will see whatever you add',
+  'remove.commentPlaceholder':
+    'Brief note for the kitchen and the audit log (e.g., wrong order, customer changed mind, dish cold)…',
+  'remove.confirmPin': 'Confirm with cashier PIN',
+  'remove.confirmButton': 'Remove item',
+
   // ─── PIN confirm modal
   'pin.title': 'Authorization required',
   'pin.cashierTitle': 'Cashier authorization',

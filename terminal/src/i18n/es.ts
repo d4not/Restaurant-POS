@@ -538,6 +538,23 @@ export const es: Record<TranslationKey, string> = {
   'cancel.lengthMin': 'Mínimo {n} caracteres',
   'cancel.confirmPin': 'Confirma con tu PIN',
 
+  // ─── Eliminar producto enviado (autorización de cajero)
+  'remove.title': '¿Eliminar producto enviado?',
+  'remove.subtitle':
+    '{item} ya se envió a cocina. Elige un motivo e ingresa el PIN del cajero — la cocina se notificará en el próximo ticket.',
+  'remove.reasonLabel': 'Motivo',
+  'remove.reason.change': 'Cambio de producto',
+  'remove.reason.defect': 'Defecto en el producto',
+  'remove.reason.beforePrep': 'Cambio antes de su preparación',
+  'remove.reason.beforePrepHelper': 'No descuenta merma',
+  'remove.reason.other': 'Otro',
+  'remove.commentLabel': 'Explicación',
+  'remove.commentOptionalHint': 'Opcional — la cocina verá lo que agregues',
+  'remove.commentPlaceholder':
+    'Nota breve para la cocina y el registro (p.ej., orden equivocada, el cliente cambió, plato frío)…',
+  'remove.confirmPin': 'Confirma con el PIN de cajero',
+  'remove.confirmButton': 'Eliminar producto',
+
   // ─── PIN confirm
   'pin.title': 'Se requiere autorización',
   'pin.cashierTitle': 'Autorización de cajero',

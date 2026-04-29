@@ -1055,6 +1055,20 @@ export async function removeOrderItem(
   }
   let approverId: string | null = null;
   if (preflight.sent_to_kitchen) {
+    // Sent lines always need a categorical reason_code — reporting splits
+    // merma vs. non-merma off it. The free-text `reason` is required ONLY
+    // when the cashier picked OTHER, since the three named categories speak
+    // for themselves. The kitchen still sees whatever text was provided on
+    // the next comanda's REMOVED block.
+    if (!input.reason_code) {
+      throw new BadRequestError('reason_code is required when removing a sent item');
+    }
+    if (input.reason_code === 'OTHER') {
+      const trimmedReason = input.reason?.trim() ?? '';
+      if (trimmedReason.length < 3) {
+        throw new BadRequestError('reason must be at least 3 characters when reason_code is OTHER');
+      }
+    }
     approverId = await authorizeCashierPin(input.pin);
   }
 
@@ -1070,6 +1084,7 @@ export async function removeOrderItem(
     }
 
     if (existing.sent_to_kitchen) {
+      const trimmedReason = input.reason?.trim();
       // Soft delete — preserve the line as a tombstone the cashier can
       // restore and the kitchen comanda can announce.
       await tx.orderItem.update({
@@ -1077,7 +1092,8 @@ export async function removeOrderItem(
         data: {
           voided_at: new Date(),
           voided_by: approverId,
-          void_reason: input.reason ?? null,
+          void_reason_code: input.reason_code ?? null,
+          void_reason: trimmedReason && trimmedReason.length > 0 ? trimmedReason : null,
           // void_printed_at stays null so the next Send to Kitchen catches it
           // and prints the REMOVE notification.
           void_printed_at: null,
@@ -1147,6 +1163,7 @@ export async function restoreOrderItem(
       data: {
         voided_at: null,
         voided_by: null,
+        void_reason_code: null,
         void_reason: null,
         void_printed_at: null,
         // If the kitchen was already told the item was removed, the only safe

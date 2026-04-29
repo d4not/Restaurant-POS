@@ -19,10 +19,11 @@ import {
   type AddOrderItemInput,
   type CreatePaymentInput,
   type PaymentMethodType,
+  type VoidReasonCode,
 } from '../api/orders';
 import { fetchAllCategories, type ProductCategory } from '../api/categories';
 import { fetchAllProducts, type PosProduct } from '../api/products';
-import { ApiError } from '../api/client';
+import { ApiError, resolveImageUrl } from '../api/client';
 import { ProductPicker } from '../components/ProductPicker';
 import { Spinner } from '../components/Spinner';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -35,6 +36,7 @@ import {
 } from '../components/Icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { PinConfirmModal } from '../components/PinConfirmModal';
+import { RemoveSentItemModal } from '../components/RemoveSentItemModal';
 import { TakeoutCustomerPanel } from '../components/TakeoutCustomerPanel';
 import { useSession } from '../store/session';
 import { useUi } from '../store/ui';
@@ -984,11 +986,19 @@ interface SplitPaymentDraft {
 }
 
 // Pending action that needs a PIN before it fires. Captures the user-visible
-// label so the modal can show what's about to happen.
+// label so the modal can show what's about to happen. Removing a sent line
+// goes through the richer RemoveSentItemModal (PIN + reason category +
+// comment) so it has its own piece of state below.
 type PinPromptAction =
-  | { kind: 'remove'; itemId: string; itemName: string }
   | { kind: 'updateQty'; itemId: string; itemName: string; nextQty: number }
   | { kind: 'restore'; itemId: string; itemName: string };
+
+// Pending soft-delete of a sent line. Caches the user-visible name so the
+// remove modal can show what's about to disappear from the kitchen's slip.
+interface RemoveSentPrompt {
+  itemId: string;
+  itemName: string;
+}
 
 // Item edit/remove is open to all order-writers; the backend gates *sent*
 // items behind a cashier-PIN authorization, surfaced here via the PIN modal.
@@ -1073,11 +1083,22 @@ export function TableDetail() {
     },
   });
   const removeItemMutation = useMutation({
-    mutationFn: ({ itemId, pin }: { itemId: string; pin?: string }) =>
-      removeOrderItem(orderId!, itemId, { pin }),
+    mutationFn: ({
+      itemId,
+      pin,
+      reason_code,
+      reason,
+    }: {
+      itemId: string;
+      pin?: string;
+      reason_code?: VoidReasonCode;
+      reason?: string;
+    }) => removeOrderItem(orderId!, itemId, { pin, reason_code, reason }),
     onSuccess: () => {
       invalidateOrder();
-      setPinPrompt(null);
+      // Clear whichever modal triggered this — sent lines come from
+      // removePrompt, unsent lines have neither modal open.
+      setRemovePrompt(null);
     },
   });
   const restoreItemMutation = useMutation({
@@ -1214,6 +1235,7 @@ export function TableDetail() {
   // pending in `pinPrompt` until the cashier (re-)enters their PIN, at which
   // point we replay the action with the PIN attached.
   const [pinPrompt, setPinPrompt] = useState<PinPromptAction | null>(null);
+  const [removePrompt, setRemovePrompt] = useState<RemoveSentPrompt | null>(null);
 
   // Reset payment fields when switching to a different order so a stale
   // amount from the previous ticket doesn't carry over.
@@ -1437,7 +1459,9 @@ export function TableDetail() {
     const itemName =
       item.product.name + (item.variant ? ` · ${item.variant.name}` : '');
     if (item.sent_to_kitchen) {
-      setPinPrompt({ kind: 'remove', itemId: item.id, itemName });
+      // Sent lines need cashier PIN + a categorical reason + ≥3-char comment;
+      // the dedicated modal collects all three before firing the mutation.
+      setRemovePrompt({ itemId: item.id, itemName });
       return;
     }
     removeItemMutation.mutate({ itemId: item.id });
@@ -1445,9 +1469,7 @@ export function TableDetail() {
 
   function handlePinConfirm(pin: string) {
     if (!pinPrompt) return;
-    if (pinPrompt.kind === 'remove') {
-      removeItemMutation.mutate({ itemId: pinPrompt.itemId, pin });
-    } else if (pinPrompt.kind === 'restore') {
+    if (pinPrompt.kind === 'restore') {
       restoreItemMutation.mutate({ itemId: pinPrompt.itemId, pin });
     } else {
       updateItemMutation.mutate({
@@ -1490,11 +1512,16 @@ export function TableDetail() {
 
   function pinPromptError(): string | null {
     const err =
-      pinPrompt?.kind === 'remove'
-        ? removeItemMutation.error
-        : pinPrompt?.kind === 'restore'
-          ? restoreItemMutation.error
-          : updateItemMutation.error;
+      pinPrompt?.kind === 'restore'
+        ? restoreItemMutation.error
+        : updateItemMutation.error;
+    if (err instanceof ApiError) return err.message;
+    if (err) return 'Action failed';
+    return null;
+  }
+
+  function removePromptError(): string | null {
+    const err = removeItemMutation.error;
     if (err instanceof ApiError) return err.message;
     if (err) return 'Action failed';
     return null;
@@ -2126,9 +2153,9 @@ export function TableDetail() {
                   onClick={() => handleProductTap(p)}
                 >
                   <div style={styles.productImageWrap}>
-                    {p.image_url ? (
+                    {resolveImageUrl(p.image_url) ? (
                       <img
-                        src={p.image_url}
+                        src={resolveImageUrl(p.image_url)!}
                         alt=""
                         style={styles.productImage}
                         loading="lazy"
@@ -2555,41 +2582,50 @@ export function TableDetail() {
       {pinPrompt && (
         <PinConfirmModal
           title={
-            pinPrompt.kind === 'remove'
-              ? 'Remove sent item?'
-              : pinPrompt.kind === 'restore'
-                ? 'Restore voided item?'
-                : 'Change quantity?'
+            pinPrompt.kind === 'restore'
+              ? 'Restore voided item?'
+              : 'Change quantity?'
           }
           message={
-            pinPrompt.kind === 'remove'
-              ? `${pinPrompt.itemName} was already sent to the kitchen. Enter your PIN to remove it — the kitchen will be notified on the next ticket.`
-              : pinPrompt.kind === 'restore'
-                ? `Restore ${pinPrompt.itemName} to the order? Enter your PIN to confirm; if the kitchen was already told it was removed, you'll need to Send to Kitchen again.`
-                : `${pinPrompt.itemName} was already sent to the kitchen. Enter your PIN to set quantity to ${pinPrompt.nextQty}.`
+            pinPrompt.kind === 'restore'
+              ? `Restore ${pinPrompt.itemName} to the order? Enter your PIN to confirm; if the kitchen was already told it was removed, you'll need to Send to Kitchen again.`
+              : `${pinPrompt.itemName} was already sent to the kitchen. Enter your PIN to set quantity to ${pinPrompt.nextQty}.`
           }
           confirmLabel={
-            pinPrompt.kind === 'remove'
-              ? 'Remove item'
-              : pinPrompt.kind === 'restore'
-                ? 'Restore item'
-                : 'Update quantity'
+            pinPrompt.kind === 'restore' ? 'Restore item' : 'Update quantity'
           }
           busy={
-            pinPrompt.kind === 'remove'
-              ? removeItemMutation.isPending
-              : pinPrompt.kind === 'restore'
-                ? restoreItemMutation.isPending
-                : updateItemMutation.isPending
+            pinPrompt.kind === 'restore'
+              ? restoreItemMutation.isPending
+              : updateItemMutation.isPending
           }
           error={pinPromptError()}
           onClose={() => {
             setPinPrompt(null);
-            removeItemMutation.reset();
             updateItemMutation.reset();
             restoreItemMutation.reset();
           }}
           onConfirm={handlePinConfirm}
+        />
+      )}
+
+      {removePrompt && (
+        <RemoveSentItemModal
+          itemName={removePrompt.itemName}
+          busy={removeItemMutation.isPending}
+          error={removePromptError()}
+          onClose={() => {
+            setRemovePrompt(null);
+            removeItemMutation.reset();
+          }}
+          onConfirm={({ reasonCode, reason, pin }) =>
+            removeItemMutation.mutate({
+              itemId: removePrompt.itemId,
+              pin,
+              reason_code: reasonCode,
+              reason,
+            })
+          }
         />
       )}
     </div>

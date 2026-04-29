@@ -10,6 +10,10 @@ export type OrderType = 'DINE_IN' | 'TAKEOUT';
 export type TakeoutChannel = 'LOCAL' | 'DELIVERY_LOCAL' | 'DELIVERY_APP';
 export type ProductType = 'PRODUCT' | 'DISH' | 'PREPARATION';
 export type PaymentMethodType = 'CASH' | 'CARD' | 'TRANSFER';
+// Why a sent line was voided. The first three are kitchen-side outcomes;
+// BEFORE_PREP is the only one that doesn't represent waste (the kitchen
+// hadn't started cooking yet).
+export type VoidReasonCode = 'PRODUCT_CHANGE' | 'PRODUCT_DEFECT' | 'BEFORE_PREP' | 'OTHER';
 
 export interface ActiveOrderItemModifier {
   id: string;
@@ -41,6 +45,7 @@ export interface ActiveOrderItem {
   // void the next Send to Kitchen owes the kitchen a "REMOVED" notification.
   voided_at: string | null;
   voided_by: string | null;
+  void_reason_code: VoidReasonCode | null;
   void_reason: string | null;
   void_printed_at: string | null;
   created_at: string;
@@ -205,9 +210,12 @@ export function updateOrderItem(
 
 export interface RemoveOrderItemInput {
   pin?: string;
-  // Optional free-text the cashier may attach when soft-deleting a sent line.
-  // Stored on the OrderItem as void_reason and printed on the comanda's
-  // "REMOVED" section so the kitchen knows why.
+  // Categorical reason. Required by the backend together with `reason` (≥3
+  // chars) when the target line has sent_to_kitchen=true; both are ignored on
+  // the unsent free-cancel path.
+  reason_code?: VoidReasonCode;
+  // Free-text explanation the kitchen sees on the next comanda. Backend
+  // requires ≥ 3 chars when removing a sent line.
   reason?: string;
 }
 

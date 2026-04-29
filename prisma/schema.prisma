@@ -57,6 +57,18 @@ enum WriteOffReason {
   OTHER
 }
 
+// Categorises why a sent OrderItem was voided. The first three are post-send
+// realities the kitchen cares about; BEFORE_PREP is the only code that does
+// not represent waste (the kitchen hadn't started cooking yet, so ingredients
+// weren't consumed). Reporting downstream uses this split to keep merma
+// accounting honest.
+enum VoidReasonCode {
+  PRODUCT_CHANGE
+  PRODUCT_DEFECT
+  BEFORE_PREP
+  OTHER
+}
+
 enum StockMovementType {
   PURCHASE
   SALE
@@ -1067,10 +1079,15 @@ model OrderItem {
   // Send to Kitchen prints a "REMOVED" notification. void_printed_at is set
   // once the kitchen has been told; restoring an item whose void was already
   // printed clears sent_to_kitchen so the kitchen sees a fresh request.
-  voided_at       DateTime?
-  voided_by       String?  @db.Uuid
-  void_reason     String?
-  void_printed_at DateTime?
+  voided_at        DateTime?
+  voided_by        String?  @db.Uuid
+  // Categorical code chosen by the cashier from the void modal. Required at
+  // the service layer when sent_to_kitchen=true (along with void_reason ≥ 3
+  // chars); null for unsent free-cancel paths and for legacy rows voided
+  // before this column existed.
+  void_reason_code VoidReasonCode?
+  void_reason      String?
+  void_printed_at  DateTime?
   created_at      DateTime @default(now())
 
   order      Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)

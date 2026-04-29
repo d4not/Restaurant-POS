@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { OrderStatus, OrderType, PaymentMethod, TakeoutChannel } from '@prisma/client';
+import {
+  OrderStatus,
+  OrderType,
+  PaymentMethod,
+  TakeoutChannel,
+  VoidReasonCode,
+} from '@prisma/client';
 
 // Free-text fields shared by create + update. Empty strings are coerced to
 // null at the service layer so blanks from the form don't leak into the DB.
@@ -87,11 +93,17 @@ export const updateOrderItemSchema = z
   .strict();
 
 // Remove may carry an optional reason (mirrors the cancel-order audit trail).
-// The reason is only stored when the line is sent — for unsent items the row
-// is hard-deleted, so there's nowhere to keep the reason.
+// The reason fields are only stored when the line is sent — for unsent items
+// the row is hard-deleted, so there's nowhere to keep the reason. The
+// service layer requires `reason_code` for sent lines, and additionally
+// requires `reason` (≥3 chars) when reason_code = OTHER. Everything stays
+// optional in Zod so the unsent free-cancel path validates without a payload
+// and the categorical reasons (PRODUCT_CHANGE / PRODUCT_DEFECT / BEFORE_PREP)
+// can fire without any extra typing.
 export const removeOrderItemSchema = z
   .object({
     pin: z.string().regex(/^\d{4,6}$/).optional(),
+    reason_code: z.nativeEnum(VoidReasonCode).optional(),
     reason: z.string().trim().max(500).optional(),
   })
   .strict();

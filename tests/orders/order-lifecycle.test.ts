@@ -885,17 +885,32 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
       .expect(200);
     expect(sent.body.data.printed_count).toBe(1);
 
-    // Soft-delete requires a cashier PIN because the line is sent.
+    // Soft-delete requires reason_code + reason ≥3 chars + cashier PIN. Hit
+    // each gate separately so a regression in any of the three is caught.
+    const noReasonCode = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234', reason: 'customer changed their mind' });
+    expect(noReasonCode.status).toBe(400);
+
+    // OTHER requires reason ≥ 3 chars (service-layer BadRequest = 400). The
+    // three named codes don't, so this guard only fires when OTHER is picked.
+    const shortReason = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'no' });
+    expect(shortReason.status).toBe(400);
+
     const noPin = await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ reason: 'customer changed their mind' });
+      .send({ reason_code: 'OTHER', reason: 'customer changed their mind' });
     expect(noPin.status).toBe(403);
 
     const voided = await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ pin: '1234', reason: 'customer changed their mind' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'customer changed their mind' })
       .expect(200);
 
     // Tombstone present, but totals zeroed.
@@ -903,9 +918,45 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     const tombstone = voided.body.data.items[0];
     expect(tombstone.id).toBe(itemId);
     expect(tombstone.voided_at).toBeTruthy();
+    expect(tombstone.void_reason_code).toBe('OTHER');
     expect(tombstone.void_reason).toBe('customer changed their mind');
     expect(tombstone.void_printed_at).toBeNull();
     expect(voided.body.data.total).toBe('0');
+  });
+
+  it('accepts a sent-line removal with a named code and no free-text comment', async () => {
+    const order = await request(app)
+      .post('/api/v1/orders')
+      .set(s.auth)
+      .send({ register_id: s.registerId, order_type: 'DINE_IN' })
+      .expect(201);
+    const orderId = order.body.data.id as string;
+
+    const add = await request(app)
+      .post(`/api/v1/orders/${orderId}/items`)
+      .set(s.auth)
+      .send({ product_id: s.waterProductId, quantity: 1 })
+      .expect(201);
+    const itemId = add.body.data.items[0].id as string;
+
+    await request(app)
+      .post(`/api/v1/orders/${orderId}/send-to-kitchen`)
+      .set(s.auth)
+      .expect(200);
+
+    // Named code (BEFORE_PREP here — the "no merma" path) speaks for itself,
+    // so the cashier doesn't have to type a comment. The tombstone records
+    // the code and leaves void_reason=null.
+    const voided = await request(app)
+      .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
+      .set(s.auth)
+      .send({ pin: '1234', reason_code: 'BEFORE_PREP' })
+      .expect(200);
+
+    const tombstone = voided.body.data.items[0];
+    expect(tombstone.voided_at).toBeTruthy();
+    expect(tombstone.void_reason_code).toBe('BEFORE_PREP');
+    expect(tombstone.void_reason).toBeNull();
   });
 
   it('a follow-up Send to Kitchen prints a CORRECTION snapshot with the voided line struck through', async () => {
@@ -946,7 +997,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${voidId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
 
     const second = await request(app)
@@ -1001,7 +1052,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${aId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
     // First correction surfaces the void.
     await request(app)
@@ -1052,7 +1103,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
 
     const restored = await request(app)
@@ -1093,7 +1144,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
     // Print the void to flip void_printed_at.
     await request(app)
@@ -1156,7 +1207,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${voidId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
 
     // total = surviving line ($2500). Pay it.
@@ -1197,7 +1248,7 @@ describe('Void / Restore — soft-delete for sent items + comanda update', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
 
     const noPin = await request(app)
@@ -1270,7 +1321,7 @@ describe('Tap-to-edit — variant + modifier changes via updateOrderItem', () =>
     await request(app)
       .delete(`/api/v1/orders/${orderId}/items/${itemId}`)
       .set(s.auth)
-      .send({ pin: '1234' })
+      .send({ pin: '1234', reason_code: 'OTHER', reason: 'test cleanup' })
       .expect(200);
 
     const editVoided = await request(app)
