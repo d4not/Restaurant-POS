@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -25,6 +26,7 @@ export function useModifierGroups(
     queryKey: ['modifier-groups', params],
     queryFn: () => listModifierGroups({ ...params, limit: 100 }),
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 
