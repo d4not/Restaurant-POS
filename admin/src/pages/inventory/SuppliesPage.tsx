@@ -159,14 +159,14 @@ export function SuppliesPage() {
           {showInactive ? `✓ ${t('common.inactive')}` : t('supplies.showInactive')}
         </button>
 
+        <Button variant="secondary" onClick={() => navigate('/inventory/supplies/new')}>
+          + {t('supplies.newSupply')}
+        </Button>
         <Button
-          variant="secondary"
+          variant="primary"
           onClick={() => navigate('/inventory/supplies/quick-add')}
         >
           ⚡ {t('supplies.quickAdd')}
-        </Button>
-        <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
-          + {t('supplies.newSupply')}
         </Button>
       </div>
 
@@ -182,8 +182,8 @@ export function SuppliesPage() {
         emptyMessage={t('supplies.empty')}
         emptySub={t('supplies.subtitle')}
         emptyAction={
-          <Button variant="primary" onClick={() => navigate('/inventory/supplies/new')}>
-            + {t('supplies.newSupply')}
+          <Button variant="primary" onClick={() => navigate('/inventory/supplies/quick-add')}>
+            ⚡ {t('supplies.quickAdd')}
           </Button>
         }
         hasMore={!!query.hasNextPage}
