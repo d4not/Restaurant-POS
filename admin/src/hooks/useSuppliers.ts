@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueryClient,
@@ -20,6 +21,7 @@ export function useSuppliers(filters: Omit<ListSuppliersParams, 'cursor' | 'limi
       listSuppliers({ ...filters, cursor: pageParam, limit: LIMIT }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    placeholderData: keepPreviousData,
   });
 }
 
