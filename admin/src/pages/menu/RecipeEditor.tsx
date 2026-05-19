@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Badge, EmptyState } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { Select } from '../../components/forms/Select';
@@ -189,13 +189,18 @@ function RecipeEditorInner({
     return { total, hasUnknown };
   }, [items]);
 
-  const displayCost =
-    cachedCost != null ? Number(cachedCost) : totalLocalCost.total;
+  const displayCost = useMemo(
+    () => (cachedCost != null ? Number(cachedCost) : totalLocalCost.total),
+    [cachedCost, totalLocalCost.total],
+  );
 
-  const foodCostPct =
-    sellPrice && Number(sellPrice) > 0
-      ? (displayCost / Number(sellPrice)) * 100
-      : null;
+  const foodCostPct = useMemo(
+    () =>
+      sellPrice && Number(sellPrice) > 0
+        ? (displayCost / Number(sellPrice)) * 100
+        : null,
+    [sellPrice, displayCost],
+  );
 
   const onAddItem = (input: {
     supply_id?: string | null;
@@ -206,10 +211,21 @@ function RecipeEditorInner({
     waste_pct?: number;
   }) => addItem.mutateAsync({ recipeId: recipe.id, input });
 
-  const onUpdateItem = (
-    itemId: string,
-    input: { quantity?: number; waste_pct?: number },
-  ) => updateItem.mutateAsync({ recipeId: recipe.id, itemId, input });
+  // Stable handlers so memoized RecipeItemRow doesn't re-render on
+  // every keystroke. Identity only changes when the recipe id or the
+  // mutation hook objects swap.
+  const handleDelete = useCallback(
+    (id: string) => deleteItem.mutate({ recipeId: recipe.id, itemId: id }),
+    [deleteItem, recipe.id],
+  );
+  const handleUpdate = useCallback(
+    (
+      id: string,
+      input: { quantity?: number; waste_pct?: number },
+    ) =>
+      updateItem.mutateAsync({ recipeId: recipe.id, itemId: id, input }),
+    [updateItem, recipe.id],
+  );
 
   return (
     <div>
@@ -284,11 +300,9 @@ function RecipeEditorInner({
               key={it.id}
               item={it}
               even={idx % 2 === 0}
-              onDelete={() =>
-                deleteItem.mutate({ recipeId: recipe.id, itemId: it.id })
-              }
+              onDelete={handleDelete}
               deleting={deleteItem.isPending}
-              onUpdate={(input) => onUpdateItem(it.id, input)}
+              onUpdate={handleUpdate}
             />
           ))
         )}
@@ -396,18 +410,31 @@ function estimateItemCost(it: RecipeItem): number | null {
 interface RecipeItemRowProps {
   item: RecipeItem;
   even: boolean;
-  onDelete: () => void;
+  onDelete: (id: string) => void;
   deleting: boolean;
-  onUpdate: (input: { quantity?: number; waste_pct?: number }) => Promise<unknown>;
+  onUpdate: (
+    id: string,
+    input: { quantity?: number; waste_pct?: number },
+  ) => Promise<unknown>;
 }
 
-function RecipeItemRow({
+const RecipeItemRow = memo(function RecipeItemRow({
   item,
   even,
   onDelete,
   deleting,
   onUpdate,
 }: RecipeItemRowProps) {
+  // Optimistic adds use tmp_ ids before the POST resolves — any
+  // PATCH/DELETE against them would 404. Gate the row's mutations.
+  const isTemp = item.id.startsWith('tmp_');
+  const handleUpdate = useCallback(
+    (input: { quantity?: number; waste_pct?: number }) => {
+      if (isTemp) return Promise.resolve();
+      return onUpdate(item.id, input);
+    },
+    [isTemp, onUpdate, item.id],
+  );
   const estCost = estimateItemCost(item);
   const kind: 'modifier' | 'preparation' | 'supply' = item.modifier_group_id
     ? 'modifier'
@@ -462,7 +489,7 @@ function RecipeItemRow({
           min={0}
           step="any"
           validate={(n) => (n > 0 ? null : 'Must be positive')}
-          onSave={(n) => onUpdate({ quantity: n })}
+          onSave={(n) => handleUpdate({ quantity: n })}
         />
       </div>
       <div className="fs-13 text-muted">{item.unit}</div>
@@ -474,7 +501,7 @@ function RecipeItemRow({
           step="any"
           emptyAs={0}
           validate={(n) => (n >= 0 && n < 100 ? null : '0–99')}
-          onSave={(n) => onUpdate({ waste_pct: n })}
+          onSave={(n) => handleUpdate({ waste_pct: n })}
         />
       </div>
       <div className="fs-13 fw-600">
@@ -484,8 +511,8 @@ function RecipeItemRow({
         <button
           type="button"
           className="btn btn-ghost btn-icon"
-          onClick={onDelete}
-          disabled={deleting}
+          onClick={() => onDelete(item.id)}
+          disabled={deleting || isTemp}
           title="Remove"
           aria-label="Remove item"
         >
@@ -494,7 +521,7 @@ function RecipeItemRow({
       </div>
     </div>
   );
-}
+});
 
 /* ───────────────────────────────────────────────────────── */
 
