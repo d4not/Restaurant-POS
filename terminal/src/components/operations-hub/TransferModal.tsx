@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listStorages, type Storage } from '../../api/storages';
-import {
-  lookupSupplyByBarcode,
-  type SupplyBarcodeResult,
-} from '../../api/supplies';
 import { createTransfer, type CreateTransferInput } from '../../api/transfers';
 import { ApiError } from '../../api/client';
-import { useBarcodeScanner } from '../../hooks/use-barcode-scanner';
 import { Spinner } from '../Spinner';
 import { useTranslation } from '../../i18n';
 import { hubStyles } from './styles';
-import { IconBarcode, IconTrash } from './HubIcons';
+import { IconTrash } from './HubIcons';
+import { SupplyScanPicker, type SupplyPicked } from './SupplyScanPicker';
+import {
+  loadTransferDefaults,
+  saveTransferDefaults,
+} from '../../utils/transferDefaults';
 
 interface TransferModalProps {
   open: boolean;
@@ -19,8 +19,6 @@ interface TransferModalProps {
 }
 
 interface ScannedRow {
-  // Stable client key — barcode is the natural id; if a duplicate scan happens
-  // we just bump quantity on the existing row.
   key: string;
   supplyId: string;
   supplyName: string;
@@ -35,35 +33,6 @@ const localStyles: Record<string, React.CSSProperties> = {
     gap: 12,
     marginBottom: 14,
   },
-  scanWrap: {
-    display: 'flex',
-    gap: 10,
-    alignItems: 'stretch',
-    marginBottom: 12,
-  },
-  scanInput: {
-    flex: 1,
-    height: 48,
-    padding: '0 14px 0 42px',
-    border: '2px solid var(--gold)',
-    borderRadius: 10,
-    background: 'var(--bg2)',
-    color: 'var(--text1)',
-    fontSize: 15,
-    outline: 'none',
-    fontFamily: 'inherit',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  scanIcon: {
-    position: 'absolute',
-    left: 12,
-    top: '50%',
-    transform: 'translateY(-50%)',
-    fontSize: 20,
-    color: 'var(--gold)',
-    pointerEvents: 'none',
-  },
-  scanBox: { position: 'relative', flex: 1 },
   rowsTable: {
     background: 'var(--bg)',
     border: '1px solid var(--border)',
@@ -155,12 +124,6 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
   const [toId, setToId] = useState<string>('');
   const [rows, setRows] = useState<ScannedRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [scanInput, setScanInput] = useState('');
-  // We surface lookup feedback in a transient banner (toast-like) above the
-  // table. Replaced by every new scan; cleared after success.
-  const [notice, setNotice] = useState<{ kind: 'warn' | 'err'; text: string } | null>(null);
-  const [lookupBusy, setLookupBusy] = useState(false);
-  const noticeTimer = useRef<number | null>(null);
 
   const storagesQuery = useQuery<Storage[]>({
     queryKey: ['storages', 'active'],
@@ -171,10 +134,14 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
 
   const submitMutation = useMutation({
     mutationFn: (input: CreateTransferInput) => createTransfer(input),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({ queryKey: ['daily-summary'] });
-      // Clear and close — no toast on success since the modal closing is the
-      // confirmation. A future improvement could show a banner on the hub.
+      // Remember this pair so the next open of the modal prefills the same
+      // direction — most operators repeat the same flow (e.g. Warehouse → Bar).
+      void saveTransferDefaults({
+        fromId: variables.from_storage_id,
+        toId: variables.to_storage_id,
+      });
       onClose();
     },
     onError: (err) => {
@@ -195,86 +162,54 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
     if (!open) return;
     setRows([]);
     setError(null);
-    setScanInput('');
-    setNotice(null);
     setFromId('');
     setToId('');
   }, [open]);
 
-  function flashNotice(kind: 'warn' | 'err', text: string) {
-    setNotice({ kind, text });
-    if (noticeTimer.current != null) window.clearTimeout(noticeTimer.current);
-    noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
-  }
-
-  async function handleScan(code: string) {
-    setScanInput('');
-    if (!code) return;
-    if (!fromId || !toId) {
-      flashNotice('warn', t('transfer.pickStoragesFirst'));
-      return;
-    }
-    if (fromId === toId) {
-      flashNotice('err', t('transfer.sameStorage'));
-      return;
-    }
-    setLookupBusy(true);
-    setError(null);
-    try {
-      const result: SupplyBarcodeResult = await lookupSupplyByBarcode(code);
-      if (!result.existing) {
-        if (result.lookup) {
-          flashNotice('warn', t('transfer.notFoundCta'));
-        } else {
-          flashNotice('warn', t('transfer.unknownBarcode'));
-        }
-        return;
-      }
-      const hit = result.existing;
-      // We need the unit for display — fetch the supply only when this is a
-      // first-time scan in this session. Cache hits are deduped automatically
-      // because we keep the row keyed by supplyId.
-      setRows((prev) => {
-        const existing = prev.find((r) => r.supplyId === hit.id);
-        if (existing) {
-          return prev.map((r) =>
-            r.supplyId === hit.id ? { ...r, quantity: r.quantity + 1 } : r,
-          );
-        }
-        return [
-          ...prev,
-          {
-            key: `${hit.id}-${Date.now()}`,
-            supplyId: hit.id,
-            supplyName: hit.name,
-            unit: '',
-            quantity: 1,
-          },
-        ];
-      });
-    } catch (err) {
-      flashNotice('err', err instanceof ApiError ? err.message : t('transfer.lookupFailed'));
-    } finally {
-      setLookupBusy(false);
-    }
-  }
-
-  const scanner = useBarcodeScanner({
-    onScan: (code) => {
-      // The hook fires once per buffer flush. Drain into the controlled input
-      // state via handleScan so React doesn't fight the user's manual Enter.
-      void handleScan(code);
-    },
-    enabled: open,
-  });
-
-  // Keep focus on the scanner input as much as possible — after every render
-  // and after every row mutation. Refocus is a no-op when the user is typing
-  // in another field (the browser keeps focus on the active element).
+  // After the storage list loads, prefill from saved defaults — but only if
+  // both saved IDs are still active storages. If one was deactivated since
+  // the last transfer we fall back to "—" rather than silently picking a
+  // wrong location.
+  const storagesData = storagesQuery.data;
   useEffect(() => {
-    if (!open) return;
-    scanner.ref.current?.focus();
-  }, [open, scanner.ref, rows.length]);
+    if (!open || !storagesData) return;
+    let cancelled = false;
+    (async () => {
+      const defaults = await loadTransferDefaults();
+      if (cancelled || !defaults) return;
+      const ids = new Set(storagesData.map((s) => s.id));
+      setFromId((cur) => (cur === '' && ids.has(defaults.fromId) ? defaults.fromId : cur));
+      setToId((cur) =>
+        cur === '' && ids.has(defaults.toId) && defaults.toId !== defaults.fromId
+          ? defaults.toId
+          : cur,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, storagesData]);
+
+  function addSupply(s: SupplyPicked) {
+    setRows((prev) => {
+      const existing = prev.find((r) => r.supplyId === s.id);
+      if (existing) {
+        return prev.map((r) =>
+          r.supplyId === s.id ? { ...r, quantity: r.quantity + 1 } : r,
+        );
+      }
+      return [
+        ...prev,
+        {
+          key: `${s.id}-${Date.now()}`,
+          supplyId: s.id,
+          supplyName: s.name,
+          unit: s.unit,
+          quantity: 1,
+        },
+      ];
+    });
+  }
 
   function setQty(key: string, delta: number | 'set', value?: number) {
     setRows((prev) =>
@@ -317,7 +252,8 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
     });
   }
 
-  // ESC closes; Enter on the scan input is consumed by the barcode hook.
+  // ESC closes the modal — the picker swallows Escape only when it has a
+  // value to clear, so the parent listener still fires for plain ESC.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -330,6 +266,18 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  const storagesPicked = Boolean(fromId && toId && fromId !== toId);
+  const disabledReason = !fromId || !toId
+    ? t('transfer.pickStoragesFirst')
+    : fromId === toId
+      ? t('transfer.sameStorage')
+      : undefined;
+
+  const hideIds = useMemo(
+    () => new Set(rows.map((r) => r.supplyId)),
+    [rows],
+  );
 
   if (!open) return null;
   const storages = storagesQuery.data ?? [];
@@ -380,46 +328,14 @@ export function TransferModal({ open, onClose }: TransferModalProps) {
             </div>
           </div>
 
-          <div style={localStyles.scanWrap}>
-            <div style={localStyles.scanBox}>
-              <span style={localStyles.scanIcon}>
-                <IconBarcode />
-              </span>
-              <input
-                ref={scanner.ref}
-                style={localStyles.scanInput}
-                placeholder={t('transfer.scanPrompt')}
-                value={scanInput}
-                onChange={(e) => setScanInput(e.target.value)}
-                disabled={lookupBusy}
-                aria-label={t('transfer.scanPrompt')}
-              />
-            </div>
-            {lookupBusy && <Spinner size={18} />}
-          </div>
-          <div style={hubStyles.hint}>{t('transfer.scanHint')}</div>
-
-          {notice && (
-            <div
-              style={{
-                ...(notice.kind === 'err' ? hubStyles.errBanner : hubStyles.okBanner),
-                background:
-                  notice.kind === 'warn'
-                    ? 'rgba(201,164,92,0.10)'
-                    : notice.kind === 'err'
-                      ? 'rgba(196,80,64,0.10)'
-                      : 'rgba(74,140,92,0.10)',
-                color:
-                  notice.kind === 'warn'
-                    ? '#8a6d2a'
-                    : notice.kind === 'err'
-                      ? 'var(--red)'
-                      : 'var(--green)',
-              }}
-            >
-              {notice.text}
-            </div>
-          )}
+          <SupplyScanPicker
+            active={open}
+            enabled={storagesPicked}
+            disabledReason={disabledReason}
+            onPick={addSupply}
+            hideIds={hideIds}
+          />
+          <div style={hubStyles.hint}>{t('supplyPicker.hint')}</div>
 
           <div style={{ marginTop: 14 }}>
             <div style={localStyles.rowsTable}>
