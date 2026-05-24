@@ -311,7 +311,8 @@ export function QuickAbsenceView({ onBack }: QuickAbsenceViewProps) {
               onClick={() => setIsPaid((v) => !v)}
               style={{
                 ...toggleTrack,
-                background: isPaid ? 'var(--green)' : 'rgba(168,152,136,0.35)',
+                background: isPaid ? 'var(--green)' : '#cdc5b8',
+                boxShadow: isPaid ? 'none' : 'inset 0 1px 3px rgba(0,0,0,0.1)',
               }}
               role="switch"
               aria-checked={isPaid}
@@ -568,24 +569,24 @@ const segBtn: CSSProperties = {
 
 const toggleTrack: CSSProperties = {
   position: 'relative',
-  width: 48,
-  height: 28,
+  width: 52,
+  height: 32,
   borderRadius: 999,
   border: 'none',
   cursor: 'pointer',
   padding: 0,
-  transition: 'background 200ms ease',
+  transition: 'background 200ms ease, box-shadow 200ms ease',
   flexShrink: 0,
 };
 
 const toggleThumb: CSSProperties = {
   position: 'absolute',
   top: 2,
-  width: 24,
-  height: 24,
+  width: 28,
+  height: 28,
   borderRadius: '50%',
   background: '#fff',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(0,0,0,0.04)',
+  boxShadow: '0 2px 4px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.04)',
   transition: 'transform 200ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
