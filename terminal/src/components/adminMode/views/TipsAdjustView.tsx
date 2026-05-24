@@ -145,14 +145,11 @@ export function TipsAdjustView({ onBack }: TipsAdjustViewProps) {
     },
   });
 
-  // Sort: included rows first, then alpha. Keeps the team that's getting paid
-  // pinned to the top for a quick visual tally.
   const allocations = useMemo<TipAllocation[]>(() => {
     if (!pool) return [];
-    return [...pool.allocations].sort((a, b) => {
-      if (a.included !== b.included) return a.included ? -1 : 1;
-      return (a.user?.name ?? '').localeCompare(b.user?.name ?? '');
-    });
+    return [...pool.allocations].sort((a, b) =>
+      (a.user?.name ?? '').localeCompare(b.user?.name ?? ''),
+    );
   }, [pool]);
 
   const includedCount = allocations.filter((a) => a.included).length;
