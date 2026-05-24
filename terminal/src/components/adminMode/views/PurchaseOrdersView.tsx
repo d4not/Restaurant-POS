@@ -769,31 +769,66 @@ function shortRef(p: PurchaseDetail): string {
   });
 }
 
+// Color buckets — VERIFIED (terminal success) and CONFIRMED (legacy alias)
+// share green; mid-flight states share gold; rejected/cancelled share muted.
+function statusBucket(status: PurchaseStatus): 'gold' | 'green' | 'muted' | 'red' | 'blue' {
+  switch (status) {
+    case 'DRAFT':
+      return 'gold';
+    case 'SENT_TO_SUPPLIER':
+    case 'IN_TRANSIT':
+      return 'blue';
+    case 'SUPPLIER_REPLIED':
+    case 'ARRIVED':
+    case 'DISPATCHED':
+    case 'RETURNED':
+      return 'gold';
+    case 'PAID':
+    case 'VERIFIED':
+    case 'CONFIRMED':
+      return 'green';
+    case 'REJECTED':
+      return 'red';
+    case 'CANCELLED':
+    default:
+      return 'muted';
+  }
+}
+
 function StatusDot({ status }: { status: PurchaseStatus }) {
+  const bucket = statusBucket(status);
   const color =
-    status === 'DRAFT'
-      ? 'var(--gold)'
-      : status === 'CONFIRMED'
-        ? 'var(--green)'
-        : 'var(--text3)';
+    bucket === 'gold' ? 'var(--gold)'
+      : bucket === 'green' ? 'var(--green)'
+        : bucket === 'red' ? 'var(--red)'
+          : bucket === 'blue' ? '#2a6ac8'
+            : 'var(--text3)';
   return <span style={{ ...S.statusDot, background: color }} />;
 }
 
+const STATUS_I18N: Record<PurchaseStatus, string> = {
+  DRAFT: 'admin.purchaseOrders.status.draft',
+  SENT_TO_SUPPLIER: 'admin.purchaseOrders.status.sent',
+  SUPPLIER_REPLIED: 'admin.purchaseOrders.status.replied',
+  PAID: 'admin.purchaseOrders.status.paid',
+  IN_TRANSIT: 'admin.purchaseOrders.status.inTransit',
+  ARRIVED: 'admin.purchaseOrders.status.arrived',
+  DISPATCHED: 'admin.purchaseOrders.status.dispatched',
+  RETURNED: 'admin.purchaseOrders.status.returned',
+  VERIFIED: 'admin.purchaseOrders.status.verified',
+  REJECTED: 'admin.purchaseOrders.status.rejected',
+  CANCELLED: 'admin.purchaseOrders.status.cancelled',
+  CONFIRMED: 'admin.purchaseOrders.status.confirmed',
+};
+
 function StatusPill({ status }: { status: PurchaseStatus }) {
   const { t } = useTranslation();
+  const bucket = statusBucket(status);
   const tint =
-    status === 'DRAFT'
-      ? S.badgeGold
-      : status === 'CONFIRMED'
-        ? S.badgeGreen
+    bucket === 'gold' ? S.badgeGold
+      : bucket === 'green' ? S.badgeGreen
         : S.badgeMuted;
-  const label =
-    status === 'DRAFT'
-      ? t('admin.purchaseOrders.status.draft')
-      : status === 'CONFIRMED'
-        ? t('admin.purchaseOrders.status.confirmed')
-        : t('admin.purchaseOrders.status.cancelled');
-  return <span style={{ ...S.badge, ...tint }}>{label}</span>;
+  return <span style={{ ...S.badge, ...tint }}>{t(STATUS_I18N[status])}</span>;
 }
 
 // ─── Items subgrid (inline expansion body) ─────────────────────────────────

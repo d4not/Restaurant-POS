@@ -19,6 +19,7 @@ import { CashMovementModal } from './CashMovementModal';
 // lives only in Admin Mode (Reports section) so cashiers focus on shift /
 // cash / supply actions here.
 import { TransferModal } from './TransferModal';
+import { ErrandModal } from './ErrandModal';
 import { PrinterCheckPanel } from './PrinterCheckPanel';
 import { PrinterAutoSetupPanel } from './PrinterAutoSetupPanel';
 import { formatTime } from '../../utils/clock';
@@ -35,6 +36,7 @@ type SubFlow =
   | 'expense'
   | 'income'
   | 'transfer'
+  | 'errand'
   | 'printerCheck'
   | 'printerAuto';
 
@@ -138,6 +140,17 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
               accent="gold"
               onClick={() => setSubFlow('transfer')}
             />
+            {isCashier && (
+              <OperationsHubCard
+                Icon={IconArrowDown}
+                title={t('hub.action.errand')}
+                hint={t('hub.action.errandHint')}
+                accent="gold"
+                disabled={!hasOpenShift}
+                disabledTitle={t('hub.disabled.noShift')}
+                onClick={() => setSubFlow('errand')}
+              />
+            )}
             <OperationsHubCard
               Icon={IconWaste}
               title={t('hub.action.waste')}
@@ -180,6 +193,11 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
         onClose={() => setSubFlow(null)}
       />
       <TransferModal open={subFlow === 'transfer'} onClose={() => setSubFlow(null)} />
+      <ErrandModal
+        open={subFlow === 'errand'}
+        registerId={reg?.id ?? null}
+        onClose={() => setSubFlow(null)}
+      />
       <PrinterCheckPanel open={subFlow === 'printerCheck'} onClose={() => setSubFlow(null)} />
       <PrinterAutoSetupPanel open={subFlow === 'printerAuto'} onClose={() => setSubFlow(null)} />
     </>

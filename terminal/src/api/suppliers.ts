@@ -1,6 +1,8 @@
 import { api } from './client';
 import type { PageResult } from './pagination';
 
+export type SupplierKind = 'DELIVERY' | 'ERRAND' | 'BOTH';
+
 export interface Supplier {
   id: string;
   name: string;
@@ -11,6 +13,12 @@ export interface Supplier {
   credit_days: number;
   notes: string | null;
   active: boolean;
+  // Purchase Orders Phase 2026-05: distinguishes "remote supplier I message"
+  // from "local store I send a runner to with cash". Optional in the type so
+  // older codepaths that don't care still parse cleanly.
+  kind?: SupplierKind;
+  whatsapp_phone?: string | null;
+  message_template?: string | null;
 }
 
 // PATCH /suppliers/:id payload. All fields optional; pass null to clear an

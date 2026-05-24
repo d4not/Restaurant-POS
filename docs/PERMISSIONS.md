@@ -198,6 +198,36 @@ Returns the matching user (`approver`) so audit fields can record who said yes (
 
 ---
 
+## Purchase orders
+
+Two flows over the same `Purchase` entity:
+
+- **`kind=DELIVERY`** — remote supplier reachable by WhatsApp/courier. Statuses progress `DRAFT → SENT_TO_SUPPLIER → SUPPLIER_REPLIED → PAID → IN_TRANSIT → ARRIVED → VERIFIED`. Stock is absorbed only on `/verify`.
+- **`kind=ERRAND`** — employee walks to a local store with drawer cash. Statuses progress `DRAFT → DISPATCHED → RETURNED → VERIFIED`. Dispatch posts a `CashMovement(CASH_OUT)` against the open shift; return posts a `CashMovement(CASH_IN)` for the change. Stock is absorbed on `/verify`.
+
+`/verify` is the **only** stock-mutating transition — it is the manager+ gate. Everything else is cashier-and-up. The legacy `POST /:id/confirm` endpoint stays as an alias of `/verify` (received = ordered) for old admin callers.
+
+| Action                                       | WAITER | BARISTA | CASHIER | MANAGER | ADMIN |
+| -------------------------------------------- | ------ | ------- | ------- | ------- | ----- |
+| View list / detail                           | ✅     | ✅      | ✅      | ✅      | ✅    |
+| Create draft (`POST /`)                      | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Edit header / items while DRAFT              | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/send` (open WhatsApp)                      | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/reply` `/pay` `/in-transit` `/receive`     | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/dispatch` (errand → requires open shift)   | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/return` (errand)                           | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/cancel` / `/reject`                        | ❌     | ❌      | ✅      | ✅      | ✅    |
+| `/verify` (absorbs stock + WAC)              | ❌     | ❌      | ❌      | ✅      | ✅    |
+| `/confirm` (legacy alias of `/verify`)       | ❌     | ❌      | ❌      | ✅      | ✅    |
+
+Cashier-facing entry points:
+- Operations Hub → **Hacer mandado** card (errand wizard: list active → new → return).
+- Admin → `/inventory/purchases` (full lifecycle with WhatsApp preview, Reply/Pay/Receive/Verify modals, status timeline).
+
+Backend route gates live in `src/modules/purchases/routes.ts` (`requireRole(CASHIER, MANAGER, ADMIN)` and `requireRole(MANAGER, ADMIN)` for verify/confirm). Frontend pre-checks hide CTAs the operator can't act on, but every route is also enforced server-side.
+
+---
+
 ## Known gaps / not implemented yet
 
 - **No UI for `TABLE_UPDATE` / `TABLE_DELETE` suggestions** — cashier can only suggest a *new* table today; edit/delete go through directly when permitted, otherwise are blocked.
