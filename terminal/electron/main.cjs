@@ -4,11 +4,20 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const printerService = require('./printer.cjs');
+const usbDiscovery = require('./usb-discovery.cjs');
+const printerResolver = require('./printer-resolver.cjs');
 
 const IS_DEV = process.env.ELECTRON_DEV === '1';
 
+// Admin panel URL. In dev the admin Vite server runs on port 5174 by default;
+// in production the admin ships as a built bundle served alongside the backend
+// at /admin. Override via ADMIN_URL when packaging for a real deployment.
+const ADMIN_URL = process.env.ADMIN_URL || (IS_DEV ? 'http://localhost:5174' : 'http://localhost:3000/admin');
+
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
+/** @type {BrowserWindow | null} */
+let adminWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -70,3 +79,127 @@ ipcMain.handle('printer:print-receipt', (_event, data) => printerService.printRe
 ipcMain.handle('printer:get-config', () => printerService.loadConfig());
 ipcMain.handle('printer:set-config', (_event, next) => printerService.saveConfig(next));
 ipcMain.handle('printer:test-print', (_event, role) => printerService.testPrint(role));
+
+// Enumerate USB / OS-spooler printers on demand. Settings → Printers calls
+// this from the renderer when the operator taps "Detect". Needs a valid
+// BrowserWindow to reach webContents.getPrintersAsync, so we lazy-pick any
+// surviving window rather than capturing `mainWindow` (which can be null
+// during early boot or after the user closes the primary window on macOS).
+ipcMain.handle('printer:list-usb', async () => {
+  const window =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null;
+  return usbDiscovery.listDetectedPrinters(window);
+});
+
+// Resolve auto-pick / auto-fix recommendations for both roles in one call.
+// The renderer uses this on first paint of SettingsModal or PrinterCheckPanel
+// to render a banner like "We detected a printer — apply?" and on print
+// failure to look up the next-best candidate to retry against.
+//
+// Reads lastWorking from printer.cjs's in-memory map so the IPC layer doesn't
+// keep its own copy (the printer service is the source of truth — it knows
+// which address last produced a real successful print, not just a test).
+ipcMain.handle('printer:resolve', async () => {
+  const window =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null;
+  const [detected, config] = await Promise.all([
+    usbDiscovery.listDetectedPrinters(window),
+    Promise.resolve(printerService.loadConfig()),
+  ]);
+  const buildPlan = (role) =>
+    printerResolver.resolvePlan({
+      currentConfig: config[role],
+      detected,
+      lastWorking: printerService.getLastWorking(role),
+    });
+  return {
+    platform: detected.platform,
+    counts: detected.counts,
+    receipt: { currentConfig: config.receipt, plan: buildPlan('receipt') },
+    kitchen: { currentConfig: config.kitchen, plan: buildPlan('kitchen') },
+  };
+});
+
+// Apply a resolver candidate to a role, persisting to printers.json. Renderer
+// hands us { role, candidate } where candidate is one entry from the resolver's
+// `primary` / `alternatives` list. We merge address + connection into the
+// existing role config so type/width/characterSet are preserved.
+ipcMain.handle('printer:apply-candidate', (_event, payload) => {
+  const role = payload?.role;
+  const candidate = payload?.candidate;
+  if (role !== 'receipt' && role !== 'kitchen') {
+    return { ok: false, error: 'invalid_role' };
+  }
+  if (!candidate || typeof candidate.address !== 'string' || !candidate.address) {
+    return { ok: false, error: 'invalid_candidate' };
+  }
+  const current = printerService.loadConfig();
+  const next = {
+    ...current[role],
+    address: candidate.address,
+    connection: 'usb',
+    enabled: true,
+  };
+  const merged = printerService.saveConfig({ [role]: next });
+  return { ok: true, config: merged };
+});
+
+// Renderer pings this after a successful test/print so the resolver gives the
+// same physical device a sticky boost on subsequent resolves. Avoids the
+// flicker of "switch to printer X" being suggested right after the operator
+// just made printer Y work.
+ipcMain.handle('printer:mark-working', (_event, payload) => {
+  printerService.setLastWorking(payload?.role, payload?.address);
+  return { ok: true };
+});
+
+// Mode picker: a MANAGER/ADMIN operator chose "Admin Mode" after PIN login.
+// We pop the admin web app in a second window with the JWT pre-filled via
+// query string so the operator skips the email/password form. The admin
+// renderer reads ?token & ?uid in pages/Login.tsx and hydrates the session.
+ipcMain.handle('app:open-admin', (_event, payload) => {
+  const token = payload && typeof payload.token === 'string' ? payload.token : '';
+  const userId = payload && typeof payload.userId === 'string' ? payload.userId : '';
+  if (!token) {
+    return { ok: false, error: 'Missing token' };
+  }
+
+  const url = `${ADMIN_URL.replace(/\/$/, '')}/login?token=${encodeURIComponent(token)}&uid=${encodeURIComponent(userId)}`;
+
+  if (adminWindow && !adminWindow.isDestroyed()) {
+    adminWindow.loadURL(url);
+    adminWindow.focus();
+    return { ok: true };
+  }
+
+  adminWindow = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 720,
+    backgroundColor: '#f5f0e8',
+    title: 'Restaurant POS — Admin',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  adminWindow.webContents.setWindowOpenHandler(({ url: next }) => {
+    shell.openExternal(next);
+    return { action: 'deny' };
+  });
+
+  adminWindow.loadURL(url);
+  adminWindow.on('closed', () => {
+    adminWindow = null;
+  });
+
+  return { ok: true };
+});
