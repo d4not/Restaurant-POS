@@ -1,4 +1,4 @@
-import { type ChangeEvent } from 'react';
+import { type ChangeEvent, type KeyboardEvent } from 'react';
 import { formatCurrencyAmount } from '../../utils/cashCount';
 
 export interface DenominationRowProps {
@@ -10,6 +10,8 @@ export interface DenominationRowProps {
   onIncrement: () => void;
   onDecrement: () => void;
   onSetCount: (count: number) => void;
+  inputRef?: (el: HTMLInputElement | null) => void;
+  onNavigate?: (direction: 'next' | 'prev') => void;
 }
 
 function formatDenomLabel(centavos: number, currency: string): string {
@@ -90,14 +92,9 @@ const subtotalActive: React.CSSProperties = {
 };
 
 export function DenominationRow(props: DenominationRowProps) {
-  const { denomCentavos, count, currency, isCoin, even = false, onSetCount } = props;
+  const { denomCentavos, count, currency, isCoin, onSetCount, inputRef, onNavigate } = props;
   const subtotal = denomCentavos * count;
   const active = count > 0;
-
-  const rowStyle: React.CSSProperties = {
-    ...rowBase,
-    background: 'var(--bg2)',
-  };
 
   const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/[^\d]/g, '');
@@ -105,18 +102,32 @@ export function DenominationRow(props: DenominationRowProps) {
     onSetCount(Math.max(0, Math.min(parsed, 9999)));
   };
 
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      onNavigate?.('next');
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      onNavigate?.('prev');
+    } else if (e.key === 'Escape') {
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
   return (
-    <div style={rowStyle}>
+    <div style={rowBase}>
       <span style={isCoin ? denomCoinLabel : denomLabel}>
         {formatDenomLabel(denomCentavos, currency)}
       </span>
       <input
+        ref={inputRef}
         type="text"
         inputMode="numeric"
         pattern="[0-9]*"
         value={count}
         onChange={handleInput}
         onFocus={(e) => e.target.select()}
+        onKeyDown={handleKeyDown}
         style={active ? inputActive : inputBase}
         aria-label={`${formatDenomLabel(denomCentavos, currency)} count`}
       />

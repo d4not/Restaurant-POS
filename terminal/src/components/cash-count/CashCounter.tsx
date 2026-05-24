@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   breakdownToCentavos,
   formatCurrencyAmount,
@@ -150,6 +150,22 @@ export function CashCounter(props: CashCounterProps) {
   const bills = denoms.filter((d) => d >= coinThreshold);
   const coins = denoms.filter((d) => d < coinThreshold);
 
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const totalDenoms = bills.length + coins.length;
+  if (inputRefs.current.length !== totalDenoms) {
+    inputRefs.current.length = totalDenoms;
+  }
+
+  const focusAt = useCallback((idx: number) => {
+    const clamped = Math.max(0, Math.min(idx, totalDenoms - 1));
+    inputRefs.current[clamped]?.focus();
+  }, [totalDenoms]);
+
+  useEffect(() => {
+    const t = setTimeout(() => inputRefs.current[0]?.focus(), 80);
+    return () => clearTimeout(t);
+  }, []);
+
   const total = useMemo(() => breakdownToCentavos(value), [value]);
   const showExpected = !blind && typeof expected === 'number';
   const diff = showExpected ? total - (expected ?? 0) : 0;
@@ -239,10 +255,11 @@ export function CashCounter(props: CashCounterProps) {
                 denomCentavos={d}
                 count={Number(value[String(d)] ?? 0)}
                 currency={currency}
-                even={i % 2 === 0}
                 onIncrement={() => increment(d)}
                 onDecrement={() => decrement(d)}
                 onSetCount={(c) => setCount(d, c)}
+                inputRef={(el) => { inputRefs.current[i] = el; }}
+                onNavigate={(dir) => focusAt(dir === 'next' ? i + 1 : i - 1)}
               />
             ))}
           </div>
@@ -251,19 +268,23 @@ export function CashCounter(props: CashCounterProps) {
         {coins.length > 0 && (
           <div>
             <div style={sectionLabel}>{t('cashCount.coins')}</div>
-            {coins.map((d, i) => (
-              <DenominationRow
-                key={d}
-                denomCentavos={d}
-                count={Number(value[String(d)] ?? 0)}
-                currency={currency}
-                isCoin
-                even={(bills.length + i) % 2 === 0}
-                onIncrement={() => increment(d)}
-                onDecrement={() => decrement(d)}
-                onSetCount={(c) => setCount(d, c)}
-              />
-            ))}
+            {coins.map((d, i) => {
+              const idx = bills.length + i;
+              return (
+                <DenominationRow
+                  key={d}
+                  denomCentavos={d}
+                  count={Number(value[String(d)] ?? 0)}
+                  currency={currency}
+                  isCoin
+                  onIncrement={() => increment(d)}
+                  onDecrement={() => decrement(d)}
+                  onSetCount={(c) => setCount(d, c)}
+                  inputRef={(el) => { inputRefs.current[idx] = el; }}
+                  onNavigate={(dir) => focusAt(dir === 'next' ? idx + 1 : idx - 1)}
+                />
+              );
+            })}
           </div>
         )}
 
