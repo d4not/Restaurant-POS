@@ -359,7 +359,7 @@ function AllocationRow({ alloc, disabled, onChange }: AllocationRowProps) {
           <span
             style={{
               ...toggleThumb,
-              transform: alloc.included ? 'translateX(22px)' : 'translateX(2px)',
+              transform: alloc.included ? 'translateX(24px)' : 'translateX(4px)',
             }}
           />
         </button>
@@ -629,9 +629,10 @@ const toggleTrack: CSSProperties = {
 
 const toggleThumb: CSSProperties = {
   position: 'absolute',
-  top: 2,
-  width: 28,
-  height: 28,
+  top: 4,
+  left: 0,
+  width: 24,
+  height: 24,
   borderRadius: '50%',
   background: '#fff',
   boxShadow: '0 2px 4px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.04)',
