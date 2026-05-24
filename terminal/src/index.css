@@ -153,7 +153,6 @@ input, textarea, [contenteditable] { user-select: text; }
   .topbar-tab-label { display: none !important; }
   .topbar-tab { padding: 8px 10px !important; }
 }
-
 /* Order History row hover. Inline styles can't express :hover, so the row
    carries this class and we tint the warm surface here. Skipped while the
    row is expanded — the row already wears a stronger gold tint then, and

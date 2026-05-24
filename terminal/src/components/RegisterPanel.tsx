@@ -64,6 +64,8 @@ export function OperationsPill({ onClick }: ShiftPillProps) {
 
   const pillLabel = t('topbar.operations');
 
+  const pillLabel = isProvisional ? t('register.provisionalBadge') : t('topbar.operations');
+
   return (
     <button
       type="button"
