@@ -20,6 +20,7 @@ import { CashMovementModal } from './CashMovementModal';
 // cash / supply actions here.
 import { TransferModal } from './TransferModal';
 import { PrinterCheckPanel } from './PrinterCheckPanel';
+import { PrinterAutoSetupPanel } from './PrinterAutoSetupPanel';
 import { formatTime } from '../../utils/clock';
 import { useUi } from '../../store/ui';
 
@@ -34,7 +35,8 @@ type SubFlow =
   | 'expense'
   | 'income'
   | 'transfer'
-  | 'printerCheck';
+  | 'printerCheck'
+  | 'printerAuto';
 
 // Cash + reporting actions are limited to roles that handle money. Floor
 // staff (waiter/barista) still see transfer + printer check.
@@ -155,6 +157,17 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
               accent="neutral"
               onClick={() => setSubFlow('printerCheck')}
             />
+            {/* Desktop-only auto-setup. The card stays mounted in non-Electron
+                contexts so cashiers see it during demos — the panel itself
+                renders an "only in desktop terminal" hint when window.electron
+                isn't around. */}
+            <OperationsHubCard
+              Icon={IconPrinter}
+              title="Auto-detect printer"
+              hint="One-click USB / OS printer setup"
+              accent="gold"
+              onClick={() => setSubFlow('printerAuto')}
+            />
           </div>
         </div>
       </div>
@@ -168,6 +181,7 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
       />
       <TransferModal open={subFlow === 'transfer'} onClose={() => setSubFlow(null)} />
       <PrinterCheckPanel open={subFlow === 'printerCheck'} onClose={() => setSubFlow(null)} />
+      <PrinterAutoSetupPanel open={subFlow === 'printerAuto'} onClose={() => setSubFlow(null)} />
     </>
   );
 }

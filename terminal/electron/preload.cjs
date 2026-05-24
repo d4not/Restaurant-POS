@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('electron', {
     setConfig: (next) => ipcRenderer.invoke('printer:set-config', next),
     testPrint: (role) => ipcRenderer.invoke('printer:test-print', role),
     listUsb: () => ipcRenderer.invoke('printer:list-usb'),
+    resolve: () => ipcRenderer.invoke('printer:resolve'),
+    applyCandidate: (payload) => ipcRenderer.invoke('printer:apply-candidate', payload),
+    markWorking: (payload) => ipcRenderer.invoke('printer:mark-working', payload),
   },
   app: {
     openAdmin: (payload) => ipcRenderer.invoke('app:open-admin', payload),

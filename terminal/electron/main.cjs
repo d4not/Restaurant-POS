@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const printerService = require('./printer.cjs');
 const usbDiscovery = require('./usb-discovery.cjs');
+const printerResolver = require('./printer-resolver.cjs');
 
 const IS_DEV = process.env.ELECTRON_DEV === '1';
 
@@ -90,6 +91,70 @@ ipcMain.handle('printer:list-usb', async () => {
       ? mainWindow
       : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null;
   return usbDiscovery.listDetectedPrinters(window);
+});
+
+// Resolve auto-pick / auto-fix recommendations for both roles in one call.
+// The renderer uses this on first paint of SettingsModal or PrinterCheckPanel
+// to render a banner like "We detected a printer — apply?" and on print
+// failure to look up the next-best candidate to retry against.
+//
+// Reads lastWorking from printer.cjs's in-memory map so the IPC layer doesn't
+// keep its own copy (the printer service is the source of truth — it knows
+// which address last produced a real successful print, not just a test).
+ipcMain.handle('printer:resolve', async () => {
+  const window =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null;
+  const [detected, config] = await Promise.all([
+    usbDiscovery.listDetectedPrinters(window),
+    Promise.resolve(printerService.loadConfig()),
+  ]);
+  const buildPlan = (role) =>
+    printerResolver.resolvePlan({
+      currentConfig: config[role],
+      detected,
+      lastWorking: printerService.getLastWorking(role),
+    });
+  return {
+    platform: detected.platform,
+    counts: detected.counts,
+    receipt: { currentConfig: config.receipt, plan: buildPlan('receipt') },
+    kitchen: { currentConfig: config.kitchen, plan: buildPlan('kitchen') },
+  };
+});
+
+// Apply a resolver candidate to a role, persisting to printers.json. Renderer
+// hands us { role, candidate } where candidate is one entry from the resolver's
+// `primary` / `alternatives` list. We merge address + connection into the
+// existing role config so type/width/characterSet are preserved.
+ipcMain.handle('printer:apply-candidate', (_event, payload) => {
+  const role = payload?.role;
+  const candidate = payload?.candidate;
+  if (role !== 'receipt' && role !== 'kitchen') {
+    return { ok: false, error: 'invalid_role' };
+  }
+  if (!candidate || typeof candidate.address !== 'string' || !candidate.address) {
+    return { ok: false, error: 'invalid_candidate' };
+  }
+  const current = printerService.loadConfig();
+  const next = {
+    ...current[role],
+    address: candidate.address,
+    connection: 'usb',
+    enabled: true,
+  };
+  const merged = printerService.saveConfig({ [role]: next });
+  return { ok: true, config: merged };
+});
+
+// Renderer pings this after a successful test/print so the resolver gives the
+// same physical device a sticky boost on subsequent resolves. Avoids the
+// flicker of "switch to printer X" being suggested right after the operator
+// just made printer Y work.
+ipcMain.handle('printer:mark-working', (_event, payload) => {
+  printerService.setLastWorking(payload?.role, payload?.address);
+  return { ok: true };
 });
 
 // Mode picker: a MANAGER/ADMIN operator chose "Admin Mode" after PIN login.

@@ -19,8 +19,33 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { app } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const { ThermalPrinter, PrinterTypes, CharacterSet } = require('node-thermal-printer');
+const usbDiscovery = require('./usb-discovery.cjs');
+const resolver = require('./printer-resolver.cjs');
+
+// Lazy native printer driver. Used only when the printer's interface URI is
+// "printer:NAME" (OS spooler). Most terminals talk to ESC/POS hardware over
+// TCP and never load this; the require is deferred so a missing/broken native
+// binary doesn't stop the app from booting — buildPrinter surfaces a clean
+// error instead. Cached after the first successful load so repeated prints
+// don't pay the require cost.
+let cachedSpoolDriver = null;
+let spoolDriverChecked = false;
+function loadSpoolDriver() {
+  if (spoolDriverChecked) return cachedSpoolDriver;
+  spoolDriverChecked = true;
+  try {
+    // eslint-disable-next-line global-require
+    cachedSpoolDriver = require('@thiagoelg/node-printer');
+  } catch (err) {
+    // Logged once. The renderer turns the error message into a friendly
+    // "install the OS print driver" hint when Test print fails.
+    console.warn('[printer] spool driver unavailable:', err?.message ?? err);
+    cachedSpoolDriver = null;
+  }
+  return cachedSpoolDriver;
+}
 
 // Lazy native printer driver. Used only when the printer's interface URI is
 // "printer:NAME" (OS spooler). Most terminals talk to ESC/POS hardware over
@@ -181,6 +206,157 @@ async function probeStatus(roleConfig) {
   } catch {
     return false;
   }
+}
+
+// In-memory map of the last address that produced a successful print for each
+// role. Resets on app restart. Used by the auto-fix wrapper to give a sticky
+// preference to whatever printer most recently worked, and by main.cjs's
+// resolve handler to feed scoreCandidate. Exported via setLastWorking +
+// getLastWorking so main.cjs can keep its own copy in sync.
+const lastWorkingByRole = { receipt: null, kitchen: null };
+function setLastWorking(role, address) {
+  if ((role === 'receipt' || role === 'kitchen') && typeof address === 'string' && address) {
+    lastWorkingByRole[role] = address;
+  }
+}
+function getLastWorking(role) {
+  return lastWorkingByRole[role] ?? null;
+}
+
+function pickBrowserWindow() {
+  try {
+    const windows = BrowserWindow.getAllWindows();
+    return windows.find((w) => !w.isDestroyed()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Run one print attempt against a given roleConfig. `render` mutates the
+// ThermalPrinter instance to set up the content. Returns { ok, error?, raw? }.
+// The "raw" field carries the underlying execute() result when the lib hands
+// back a non-throwing failure (some transports return false instead of throwing).
+async function runPrintAttempt(roleConfig, render) {
+  try {
+    const printer = buildPrinter(roleConfig);
+    render(printer);
+    const raw = await printer.execute();
+    // node-thermal-printer's execute() returns truthy on success on most
+    // transports; the OS spooler path returns the spool job id (string/number).
+    // A literal `false` means the lib detected a failure without throwing —
+    // surface that as an attempt failure so the fallback path can take over.
+    if (raw === false) {
+      return { ok: false, error: 'execute_returned_false', raw };
+    }
+    return { ok: true, raw };
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+// Wrap a single print job with the auto-fix fallback path:
+//   1. First attempt: use the saved roleConfig as-is.
+//   2. On failure: ask the resolver for the best replacement.
+//        • If recommendation === 'switch-primary' (saved address gone), retry
+//          with primary AND persist it for next time.
+//        • If recommendation === 'investigate-current' (saved found but
+//          unhealthy), retry with primary for this print only — don't persist
+//          because the operator may want to recover the original printer.
+//        • Otherwise: don't retry, return the original failure.
+//   3. On success: record lastWorking so subsequent resolves prefer it.
+//
+// Returns the rich object that the IPC handlers serialise to the renderer.
+// `fallback_applied` is set when we successfully recovered via a different
+// printer; the UI uses it to show a "we switched to printer X" toast.
+async function tryPrintWithFallback(role, render) {
+  const cfg = loadConfig();
+  const roleCfg = cfg[role];
+  if (!roleCfg.enabled) {
+    return { ok: false, error: `${role}_printer_disabled`, attempts: [] };
+  }
+
+  const attempts = [];
+
+  // ─── Attempt 1: saved config ────────────────────────────────────────────
+  const first = await runPrintAttempt(roleCfg, render);
+  attempts.push({ source: 'current', address: roleCfg.address, ok: first.ok, error: first.error });
+  if (first.ok) {
+    setLastWorking(role, roleCfg.address);
+    return { ok: true, attempts };
+  }
+
+  // Auto-fix only applies when we have a window to query OS printers from.
+  // Without one (e.g. early boot) we have no detection signal, so we surface
+  // the original error verbatim.
+  const window = pickBrowserWindow();
+  if (!window) {
+    return { ok: false, error: first.error, attempts };
+  }
+
+  let detected;
+  try {
+    detected = await usbDiscovery.listDetectedPrinters(window);
+  } catch (err) {
+    return { ok: false, error: first.error, attempts, detect_error: err?.message ?? String(err) };
+  }
+
+  const decision = resolver.planAutoFix({
+    currentConfig: roleCfg,
+    detected,
+    lastWorking: getLastWorking(role),
+  });
+
+  if (decision.action !== 'try-fallback') {
+    return {
+      ok: false,
+      error: first.error,
+      attempts,
+      plan_recommendation: decision.plan.recommendation,
+      plan_reasoning: decision.plan.reasoning,
+    };
+  }
+
+  // ─── Attempt 2: resolver primary ────────────────────────────────────────
+  const fallbackCfg = decision.fallbackConfig;
+  const second = await runPrintAttempt(fallbackCfg, render);
+  attempts.push({ source: 'fallback', address: fallbackCfg.address, ok: second.ok, error: second.error });
+
+  if (!second.ok) {
+    return {
+      ok: false,
+      // The first error is the one the operator actually configured for, so
+      // surface that. The attempts array still carries the fallback detail.
+      error: first.error,
+      attempts,
+      plan_recommendation: decision.plan.recommendation,
+      plan_reasoning: decision.plan.reasoning,
+    };
+  }
+
+  // The fallback worked. Persist only when the resolver said it's safe to do
+  // so — transient unhealthy states should let the operator recover the
+  // original printer instead of being silently overwritten.
+  let persisted = false;
+  if (decision.persistOnSuccess) {
+    try {
+      saveConfig({ [role]: fallbackCfg });
+      persisted = true;
+    } catch {
+      persisted = false;
+    }
+  }
+  setLastWorking(role, fallbackCfg.address);
+  return {
+    ok: true,
+    attempts,
+    fallback_applied: {
+      from: roleCfg.address,
+      to: fallbackCfg.address,
+      to_label: decision.plan.primary.label,
+      persisted,
+      reason: decision.plan.recommendation,
+    },
+  };
 }
 
 async function getStatus() {
@@ -442,39 +618,24 @@ function renderReceipt(printer, data, business) {
 // ─── Public IPC entry points ─────────────────────────────────────────────
 
 async function printKitchen(data) {
-  const cfg = loadConfig();
-  if (!cfg.kitchen.enabled) return { ok: false, error: 'kitchen_printer_disabled' };
-  try {
-    const printer = buildPrinter(cfg.kitchen);
-    renderKitchenComanda(printer, data);
-    await printer.execute();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err?.message ?? String(err) };
-  }
+  return tryPrintWithFallback('kitchen', (printer) => renderKitchenComanda(printer, data));
 }
 
 async function printReceipt(data) {
-  const cfg = loadConfig();
-  if (!cfg.receipt.enabled) return { ok: false, error: 'receipt_printer_disabled' };
-  try {
-    const printer = buildPrinter(cfg.receipt);
-    renderReceipt(printer, data, cfg.business);
-    await printer.execute();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err?.message ?? String(err) };
-  }
+  // The renderer is closed over the business identity at call time so the
+  // fallback path doesn't re-read the config between attempts.
+  const business = loadConfig().business;
+  return tryPrintWithFallback('receipt', (printer) => renderReceipt(printer, data, business));
 }
 
 // Test print: a small slip the cashier can use to confirm they wired the
 // right device. Kept role-independent so the same logic runs from either
-// side of the Settings modal.
+// side of the Settings modal. Goes through the same auto-fix wrapper so a
+// test against a stale address quietly recovers and reports which printer
+// it actually used.
 async function testPrint(role) {
-  const cfg = loadConfig();
-  const roleCfg = role === 'kitchen' ? cfg.kitchen : cfg.receipt;
-  try {
-    const printer = buildPrinter(roleCfg);
+  const renderTest = (printer) => {
+    const roleCfg = loadConfig()[role];
     printer.alignCenter();
     printer.bold(true);
     printer.setTextDoubleHeight();
@@ -495,11 +656,8 @@ async function testPrint(role) {
     printer.println('the printer is wired correctly.');
     printer.newLine();
     printer.cut();
-    await printer.execute();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err?.message ?? String(err) };
-  }
+  };
+  return tryPrintWithFallback(role, renderTest);
 }
 
 module.exports = {
@@ -509,4 +667,8 @@ module.exports = {
   printKitchen,
   printReceipt,
   testPrint,
+  // Exposed so main.cjs's IPC layer can keep its lastWorking map in sync —
+  // single source of truth lives here in the printer service.
+  setLastWorking,
+  getLastWorking,
 };

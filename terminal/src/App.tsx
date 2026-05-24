@@ -4,6 +4,7 @@ import { TopBar } from './components/TopBar';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { OfflineBanner } from './components/OfflineBanner';
+import { PrinterHealthBanner } from './components/PrinterHealthBanner';
 import { NoActiveShiftScreen } from './components/NoActiveShiftScreen';
 import { ProvisionalShiftBanner } from './components/ProvisionalShiftBanner';
 import { PinLogin } from './pages/PinLogin';
@@ -209,6 +210,7 @@ export function App() {
   return (
     <div style={shellStyle}>
       <OfflineBanner />
+      <PrinterHealthBanner />
       <TopBar />
       <ProvisionalShiftBanner />
       <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
