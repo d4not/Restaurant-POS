@@ -256,18 +256,41 @@ function bucketByZone(
 }
 
 function filterOrders(orders: ActiveOrder[], filter: FilterValue, search: string): ActiveOrder[] {
-  const q = search.trim().toLowerCase();
+  const tokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return orders.filter((o) => {
     if (filter !== 'ALL' && o.order_type !== filter) return false;
-    if (!q) return true;
-    const haystacks = [
+    if (tokens.length === 0) return true;
+
+    // Per-item match: every token must appear in the same line's
+    // product + variant + modifiers + notes text. This is what makes
+    // "latte mediano leche entera" actually find lattes-medium-with-whole-milk
+    // rather than any order that happens to contain those words scattered.
+    for (const item of o.items) {
+      if (item.voided_at) continue;
+      const itemText = [
+        item.product.name,
+        item.variant?.name ?? '',
+        ...item.modifiers.map((m) => m.name),
+        item.notes ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (tokens.every((tok) => itemText.includes(tok))) return true;
+    }
+
+    // Fallback: order-level fields. Lets "table 5" / waiter name / order #
+    // keep working with the same input box.
+    const orderText = [
       String(o.order_number),
-      o.user.name.toLowerCase(),
-      o.table?.zone.name.toLowerCase() ?? '',
+      o.user.name,
+      o.table?.zone.name ?? '',
       o.table ? `table ${o.table.number}` : '',
-      o.notes?.toLowerCase() ?? '',
-    ];
-    return haystacks.some((h) => h.includes(q));
+      o.customer_name ?? '',
+      o.notes ?? '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    return tokens.every((tok) => orderText.includes(tok));
   });
 }
 

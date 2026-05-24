@@ -158,7 +158,7 @@ export const es: Record<TranslationKey, string> = {
   'orders.revenue': 'ingresos',
   'orders.realtimeOverview': 'Vista en tiempo real',
   'orders.updated': 'Actualizado',
-  'orders.searchActive': 'Buscar por mesa, mesero, # de orden',
+  'orders.searchActive': 'Buscar por mesa, mesero, # de orden, producto…',
   'orders.matchFilter': 'coinciden con el filtro',
   'orders.waitersFlagged': 'Meseros pidiendo ayuda',
   'orders.loadingActive': 'Cargando órdenes activas…',

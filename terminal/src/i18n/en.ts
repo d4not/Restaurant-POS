@@ -159,7 +159,7 @@ export const en = {
   'orders.revenue': 'revenue',
   'orders.realtimeOverview': 'Real-time overview',
   'orders.updated': 'Updated',
-  'orders.searchActive': 'Search by table, waiter, order #',
+  'orders.searchActive': 'Search by table, waiter, order #, product…',
   'orders.matchFilter': 'match filter',
   'orders.waitersFlagged': 'Waiters flagged for help',
   'orders.loadingActive': 'Loading active orders…',
