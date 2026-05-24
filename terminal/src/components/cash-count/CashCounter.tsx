@@ -1,24 +1,3 @@
-/**
- * Currency-aware cash counting widget. Lists denominations of the active
- * currency, accepts a count per denomination, computes the total live, and
- * (optionally) shows the variance against an expected amount.
- *
- * Daniel's brief: a cashier should *count*, not multiply. This component is
- * the embodiment of that — every denomination is a row, every row has a
- * stepper, and the cashier only ever enters integers. The sum lives in the
- * header so they never have to scroll back up to know where they stand.
- *
- * Two modes:
- *   - Standard: `expected` is rendered alongside the running total so the
- *     cashier can self-correct as they count.
- *   - `blind` (REPORTS-SPEC blind-close): `expected` is hidden until the
- *     close is committed. The difference row reads "—" so the operator can't
- *     reverse-engineer the expected value mid-count.
- *
- * Controlled. Pair with `useCashCounter` from `hooks/useCashCounter` if the
- * parent doesn't want to manage state itself.
- */
-
 import { useMemo } from 'react';
 import {
   breakdownToCentavos,
@@ -35,17 +14,11 @@ export interface CashCounterProps {
   currency: string;
   value: CashBreakdown;
   onChange: (next: CashBreakdown) => void;
-  /** Hide `expected` and the variance until the cashier finishes (blind close). */
   blind?: boolean;
-  /** Expected amount in centavos. Ignored when `blind`. */
   expected?: number;
-  /** Default true — strip MXN $0.50 / sub-cent coins from the visible list. */
   hideSubunits?: boolean;
-  /** Override the subunit cutoff if the locale wants something other than $1. */
   subunitFloor?: number;
-  /** Append extra controls (reset, suggest, "notify manager") in the header right slot. */
   headerExtra?: React.ReactNode;
-  /** Footer slot for things like "Continue" / "Confirm" buttons. */
   footer?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
@@ -119,10 +92,13 @@ const blindBanner: React.CSSProperties = {
   borderBottom: '1px solid rgba(201,164,92,0.3)',
 };
 
+const scrollWrap: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
+};
+
 const sectionWrap: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
   padding: '14px 22px',
 };
 
@@ -132,13 +108,13 @@ const sectionLabel: React.CSSProperties = {
   textTransform: 'uppercase',
   color: 'var(--text3)',
   fontWeight: 700,
-  margin: '4px 4px 0',
+  margin: '0 4px 8px',
 };
 
-const scrollWrap: React.CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  overflowY: 'auto',
+const denomGrid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, 1fr)',
+  gap: 10,
 };
 
 const footerWrap: React.CSSProperties = {
@@ -265,35 +241,39 @@ export function CashCounter(props: CashCounterProps) {
         {bills.length > 0 && (
           <div style={sectionWrap}>
             <div style={sectionLabel}>{t('cashCount.bills')}</div>
-            {bills.map((d) => (
-              <DenominationRow
-                key={d}
-                denomCentavos={d}
-                count={Number(value[String(d)] ?? 0)}
-                currency={currency}
-                onIncrement={() => increment(d)}
-                onDecrement={() => decrement(d)}
-                onSetCount={(c) => setCount(d, c)}
-              />
-            ))}
+            <div style={denomGrid}>
+              {bills.map((d) => (
+                <DenominationRow
+                  key={d}
+                  denomCentavos={d}
+                  count={Number(value[String(d)] ?? 0)}
+                  currency={currency}
+                  onIncrement={() => increment(d)}
+                  onDecrement={() => decrement(d)}
+                  onSetCount={(c) => setCount(d, c)}
+                />
+              ))}
+            </div>
           </div>
         )}
 
         {coins.length > 0 && (
           <div style={sectionWrap}>
             <div style={sectionLabel}>{t('cashCount.coins')}</div>
-            {coins.map((d) => (
-              <DenominationRow
-                key={d}
-                denomCentavos={d}
-                count={Number(value[String(d)] ?? 0)}
-                currency={currency}
-                isCoin
-                onIncrement={() => increment(d)}
-                onDecrement={() => decrement(d)}
-                onSetCount={(c) => setCount(d, c)}
-              />
-            ))}
+            <div style={denomGrid}>
+              {coins.map((d) => (
+                <DenominationRow
+                  key={d}
+                  denomCentavos={d}
+                  count={Number(value[String(d)] ?? 0)}
+                  currency={currency}
+                  isCoin
+                  onIncrement={() => increment(d)}
+                  onDecrement={() => decrement(d)}
+                  onSetCount={(c) => setCount(d, c)}
+                />
+              ))}
+            </div>
           </div>
         )}
 

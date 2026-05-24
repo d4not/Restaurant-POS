@@ -1,14 +1,3 @@
-/**
- * One row in the CashCounter: a denomination badge, a stepper to set the
- * count, and a live subtotal. Touch targets ≥48px so a thumb on a tablet can
- * hit them confidently.
- *
- * Visual rule: the denomination chip carries the colour. Bills get a
- * `--gold`-tinted chip (rest on the warm cream surface); coins get a flatter
- * neutral chip so the eye glides past the smaller numbers when scanning the
- * total.
- */
-
 import { type ChangeEvent } from 'react';
 import { useCashCountT } from './i18n';
 import { formatCurrencyAmount } from '../../utils/cashCount';
@@ -23,98 +12,139 @@ export interface DenominationRowProps {
   onSetCount: (count: number) => void;
 }
 
-const baseRow: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '110px 1fr 110px',
-  alignItems: 'center',
-  gap: 14,
-  padding: '12px 14px',
+function formatDenomLabel(centavos: number, currency: string): string {
+  const value = centavos / 100;
+  const locale = currency === 'USD' ? 'en-US' : 'es-MX';
+  const isWhole = Number.isInteger(value);
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: currency || 'MXN',
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: isWhole ? 0 : 2,
+      maximumFractionDigits: isWhole ? 0 : 2,
+    }).format(value);
+  } catch {
+    return isWhole ? `$${value}` : `$${value.toFixed(2)}`;
+  }
+}
+
+const tile: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  padding: '14px 16px',
   background: 'var(--bg2)',
   border: '1px solid var(--border)',
+  borderLeft: '3px solid var(--border)',
   borderRadius: 12,
+  transition: 'border-color 0.2s, background 0.2s, box-shadow 0.2s',
 };
 
-const chipBase: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: 44,
-  padding: '0 14px',
+const tileActive: React.CSSProperties = {
+  ...tile,
+  borderLeftColor: 'var(--gold)',
+  background: 'rgba(201,164,92,0.05)',
+  boxShadow: '0 2px 12px rgba(201,164,92,0.08)',
+};
+
+const topRow: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+};
+
+const denomStyle: React.CSSProperties = {
   fontFamily: "'Playfair Display', serif",
-  fontWeight: 600,
-  fontSize: 18,
-  borderRadius: 10,
+  fontSize: 20,
+  fontWeight: 700,
+  color: 'var(--text1)',
   fontVariantNumeric: 'tabular-nums',
+  lineHeight: 1,
 };
 
-const chipBill: React.CSSProperties = {
-  ...chipBase,
-  color: '#2c2420',
-  background: 'rgba(201,164,92,0.18)',
-  border: '1px solid rgba(201,164,92,0.4)',
+const denomCoinStyle: React.CSSProperties = {
+  ...denomStyle,
+  fontSize: 18,
 };
 
-const chipCoin: React.CSSProperties = {
-  ...chipBase,
-  color: 'var(--text2)',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
+const subtotalMuted: React.CSSProperties = {
+  fontFamily: "'Playfair Display', serif",
+  fontSize: 15,
+  fontWeight: 600,
+  color: 'var(--text3)',
+  fontVariantNumeric: 'tabular-nums',
+  lineHeight: 1,
+  transition: 'color 0.15s',
+};
+
+const subtotalGold: React.CSSProperties = {
+  ...subtotalMuted,
+  color: '#8a6d2a',
 };
 
 const stepperWrap: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  justifyContent: 'center',
+  gap: 10,
 };
 
-const stepperBtn: React.CSSProperties = {
-  width: 48,
-  height: 48,
-  borderRadius: 12,
-  border: '1px solid var(--border)',
-  background: 'var(--bg2)',
-  color: 'var(--text1)',
-  fontSize: 22,
+const btnBase: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 10,
+  fontSize: 20,
   fontWeight: 600,
   cursor: 'pointer',
   fontFamily: 'inherit',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
+  transition: 'background 0.1s, opacity 0.1s',
+  WebkitTapHighlightColor: 'transparent',
 };
 
-const stepperBtnDisabled: React.CSSProperties = {
-  ...stepperBtn,
+const minusBtn: React.CSSProperties = {
+  ...btnBase,
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  color: 'var(--text2)',
+};
+
+const minusBtnOff: React.CSSProperties = {
+  ...minusBtn,
+  opacity: 0.3,
   cursor: 'not-allowed',
-  opacity: 0.5,
+};
+
+const plusBtn: React.CSSProperties = {
+  ...btnBase,
+  background: 'rgba(201,164,92,0.14)',
+  border: '1px solid rgba(201,164,92,0.3)',
+  color: '#6b5030',
 };
 
 const countInput: React.CSSProperties = {
-  width: 72,
-  height: 48,
+  width: 56,
+  height: 44,
   border: '1px solid var(--border)',
-  borderRadius: 12,
+  borderRadius: 10,
   background: 'var(--bg)',
   textAlign: 'center',
   fontSize: 18,
   fontFamily: "'Playfair Display', serif",
-  fontWeight: 600,
+  fontWeight: 700,
   color: 'var(--text1)',
   fontVariantNumeric: 'tabular-nums',
+  outline: 'none',
+  transition: 'border-color 0.15s, background 0.15s',
 };
 
-const subtotalCell: React.CSSProperties = {
-  textAlign: 'right',
-  fontFamily: "'Playfair Display', serif",
-  fontWeight: 600,
-  fontSize: 18,
-  color: 'var(--text1)',
-  fontVariantNumeric: 'tabular-nums',
-};
-
-const subtotalMuted: React.CSSProperties = {
-  ...subtotalCell,
-  color: 'var(--text3)',
+const countInputActive: React.CSSProperties = {
+  ...countInput,
+  borderColor: 'rgba(201,164,92,0.4)',
+  background: 'var(--bg2)',
 };
 
 export function DenominationRow(props: DenominationRowProps) {
@@ -122,6 +152,7 @@ export function DenominationRow(props: DenominationRowProps) {
     props;
   const t = useCashCountT();
   const subtotal = denomCentavos * count;
+  const active = count > 0;
 
   const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/[^\d]/g, '');
@@ -130,15 +161,23 @@ export function DenominationRow(props: DenominationRowProps) {
   };
 
   return (
-    <div style={baseRow}>
-      <div style={isCoin ? chipCoin : chipBill} aria-label={`Denomination ${formatCurrencyAmount(denomCentavos, currency)}`}>
-        {formatCurrencyAmount(denomCentavos, currency)}
+    <div style={active ? tileActive : tile}>
+      <div style={topRow}>
+        <span
+          style={isCoin ? denomCoinStyle : denomStyle}
+          aria-label={`Denomination ${formatCurrencyAmount(denomCentavos, currency)}`}
+        >
+          {formatDenomLabel(denomCentavos, currency)}
+        </span>
+        <span style={active ? subtotalGold : subtotalMuted}>
+          {formatCurrencyAmount(subtotal, currency)}
+        </span>
       </div>
 
       <div style={stepperWrap}>
         <button
           type="button"
-          style={count <= 0 ? stepperBtnDisabled : stepperBtn}
+          style={count <= 0 ? minusBtnOff : minusBtn}
           onClick={onDecrement}
           disabled={count <= 0}
           aria-label={t('common.remove') ?? 'Remove'}
@@ -151,21 +190,17 @@ export function DenominationRow(props: DenominationRowProps) {
           pattern="[0-9]*"
           value={count}
           onChange={handleInput}
-          style={countInput}
+          style={active ? countInputActive : countInput}
           aria-label={t('cashCount.count')}
         />
         <button
           type="button"
-          style={stepperBtn}
+          style={plusBtn}
           onClick={onIncrement}
           aria-label={t('common.add') ?? 'Add'}
         >
           +
         </button>
-      </div>
-
-      <div style={count > 0 ? subtotalCell : subtotalMuted}>
-        {formatCurrencyAmount(subtotal, currency)}
       </div>
     </div>
   );
