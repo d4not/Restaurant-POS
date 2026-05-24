@@ -98,23 +98,15 @@ const scrollWrap: React.CSSProperties = {
   overflowY: 'auto',
 };
 
-const sectionWrap: React.CSSProperties = {
-  padding: '14px 22px',
-};
-
 const sectionLabel: React.CSSProperties = {
+  padding: '10px 22px',
   fontSize: 10,
   letterSpacing: '0.16em',
   textTransform: 'uppercase',
   color: 'var(--text3)',
   fontWeight: 700,
-  margin: '0 4px 8px',
-};
-
-const denomGrid: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(2, 1fr)',
-  gap: 10,
+  background: '#ede8df',
+  borderBottom: '1px solid var(--border)',
 };
 
 const footerWrap: React.CSSProperties = {
@@ -239,41 +231,39 @@ export function CashCounter(props: CashCounterProps) {
 
       <div style={scrollWrap}>
         {bills.length > 0 && (
-          <div style={sectionWrap}>
+          <div>
             <div style={sectionLabel}>{t('cashCount.bills')}</div>
-            <div style={denomGrid}>
-              {bills.map((d) => (
-                <DenominationRow
-                  key={d}
-                  denomCentavos={d}
-                  count={Number(value[String(d)] ?? 0)}
-                  currency={currency}
-                  onIncrement={() => increment(d)}
-                  onDecrement={() => decrement(d)}
-                  onSetCount={(c) => setCount(d, c)}
-                />
-              ))}
-            </div>
+            {bills.map((d, i) => (
+              <DenominationRow
+                key={d}
+                denomCentavos={d}
+                count={Number(value[String(d)] ?? 0)}
+                currency={currency}
+                even={i % 2 === 0}
+                onIncrement={() => increment(d)}
+                onDecrement={() => decrement(d)}
+                onSetCount={(c) => setCount(d, c)}
+              />
+            ))}
           </div>
         )}
 
         {coins.length > 0 && (
-          <div style={sectionWrap}>
+          <div>
             <div style={sectionLabel}>{t('cashCount.coins')}</div>
-            <div style={denomGrid}>
-              {coins.map((d) => (
-                <DenominationRow
-                  key={d}
-                  denomCentavos={d}
-                  count={Number(value[String(d)] ?? 0)}
-                  currency={currency}
-                  isCoin
-                  onIncrement={() => increment(d)}
-                  onDecrement={() => decrement(d)}
-                  onSetCount={(c) => setCount(d, c)}
-                />
-              ))}
-            </div>
+            {coins.map((d, i) => (
+              <DenominationRow
+                key={d}
+                denomCentavos={d}
+                count={Number(value[String(d)] ?? 0)}
+                currency={currency}
+                isCoin
+                even={(bills.length + i) % 2 === 0}
+                onIncrement={() => increment(d)}
+                onDecrement={() => decrement(d)}
+                onSetCount={(c) => setCount(d, c)}
+              />
+            ))}
           </div>
         )}
 
