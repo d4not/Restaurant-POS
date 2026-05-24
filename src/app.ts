@@ -42,6 +42,11 @@ import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
 import { printRouter } from './modules/print/routes.js';
 import { uploadRouter, uploadRoot } from './modules/uploads/routes.js';
+// Notifications — Track A standalone module. The import itself wires the
+// dispatch listener onto `notificationBus` (singleton), so emitters elsewhere
+// in Track B will land here even if no route is hit yet.
+import { notificationsRouter } from './modules/notifications/routes.js';
+import './modules/notifications/service.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -146,6 +151,7 @@ export function createApp(): Express {
   app.use('/api/v1/suggestions', suggestionRouter);
   app.use('/api/v1/print', printRouter);
   app.use('/api/v1/uploads', uploadRouter);
+  app.use('/api/v1/notifications', notificationsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

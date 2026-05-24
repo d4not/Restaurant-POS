@@ -45,6 +45,28 @@ export const SETTING_KEYS = {
   ALERT_CASH_SURPLUS_THRESHOLD: 'alert_cash_surplus_threshold',
   ALERT_MAX_VOIDS_PER_SHIFT: 'alert_max_voids_per_shift',
   ALERT_MAX_DISCOUNT_PCT: 'alert_max_discount_pct',
+  // Cash-handling polish (Track A — shifts overhaul). Consumed by the
+  // denomination-counter close flow on the terminal and by the new
+  // notifications module to decide which manager alerts to dispatch.
+  //   notify   — manager is informed; close proceeds.
+  //   blocking — close requires manager sign-off (force-close with reason).
+  CASH_VARIANCE_NOTIFY_THRESHOLD: 'cash_variance_notify_threshold',
+  CASH_VARIANCE_BLOCKING_THRESHOLD: 'cash_variance_blocking_threshold',
+  // Hide MXN $0.50 / sub-cent coins from the counter UI by default — Daniel:
+  // "los centavos actualmente ya casi no se usan." Operators in regions that
+  // still circulate the small coins can opt out.
+  CASH_COUNT_HIDE_SUBUNITS: 'cash_count_hide_subunits',
+  // Render the close flow without the expected amount until submit — the
+  // blind-close mode in REPORTS-SPEC §5.2.
+  CASH_COUNT_DEFAULT_BLIND_MODE: 'cash_count_default_blind_mode',
+  // Master switch for the notifications module. When `false`, dispatch is a
+  // no-op; `GET /notifications` still works for reads.
+  NOTIFICATIONS_ENABLED: 'notifications_enabled',
+  // Quiet hours in 24-h "HH:mm" form. When the current local time falls
+  // inside the window, dispatch suppresses non-critical events (everything
+  // except ABOVE_BLOCKING_THRESHOLD-class).
+  NOTIFICATIONS_QUIET_HOURS_START: 'notifications_quiet_hours_start',
+  NOTIFICATIONS_QUIET_HOURS_END: 'notifications_quiet_hours_end',
   // Printable corte Z customisation — the admin "Report template" page lets
   // an ADMIN replace the bundled stylesheet, swap in a custom header/footer,
   // or hide individual sections. Empty / missing → fall back to defaults.
@@ -90,6 +112,13 @@ export const ADMIN_ONLY_SETTING_KEYS = [
   SETTING_KEYS.ALERT_CASH_SURPLUS_THRESHOLD,
   SETTING_KEYS.ALERT_MAX_VOIDS_PER_SHIFT,
   SETTING_KEYS.ALERT_MAX_DISCOUNT_PCT,
+  SETTING_KEYS.CASH_VARIANCE_NOTIFY_THRESHOLD,
+  SETTING_KEYS.CASH_VARIANCE_BLOCKING_THRESHOLD,
+  SETTING_KEYS.CASH_COUNT_HIDE_SUBUNITS,
+  SETTING_KEYS.CASH_COUNT_DEFAULT_BLIND_MODE,
+  SETTING_KEYS.NOTIFICATIONS_ENABLED,
+  SETTING_KEYS.NOTIFICATIONS_QUIET_HOURS_START,
+  SETTING_KEYS.NOTIFICATIONS_QUIET_HOURS_END,
   SETTING_KEYS.REPORT_CUSTOM_CSS,
   SETTING_KEYS.REPORT_CUSTOM_HEADER_HTML,
   SETTING_KEYS.REPORT_CUSTOM_FOOTER_HTML,
@@ -107,6 +136,25 @@ export const ALERT_THRESHOLD_DEFAULTS = {
   CASH_SURPLUS: 2000,
   MAX_VOIDS_PER_SHIFT: 3,
   MAX_DISCOUNT_PCT: 10,
+} as const;
+
+// Defaults applied when the cash-handling keys are missing (e.g. fresh
+// install or a test that truncated `settings`). Centavos for the money
+// fields; the close path falls back to these so a wiped table never breaks
+// the cashier UI.
+export const CASH_HANDLING_DEFAULTS = {
+  // $50 — at or above the diff the UI prompts "notify your manager".
+  VARIANCE_NOTIFY_THRESHOLD: 5_000,
+  // $500 — at or above, the close is blocking and needs cashier+ sign-off.
+  VARIANCE_BLOCKING_THRESHOLD: 50_000,
+  HIDE_SUBUNITS: true,
+  DEFAULT_BLIND_MODE: false,
+  NOTIFICATIONS_ENABLED: false,
+  // 22:00 → 07:00 by default — suppresses non-critical notifications outside
+  // business hours. Operators in 24-h venues should set both to the same
+  // value to disable the quiet window.
+  QUIET_HOURS_START: '22:00',
+  QUIET_HOURS_END: '07:00',
 } as const;
 
 export const PRINTER_DEFAULTS = {
