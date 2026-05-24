@@ -96,7 +96,7 @@ export function DenominationRow(props: DenominationRowProps) {
 
   const rowStyle: React.CSSProperties = {
     ...rowBase,
-    background: even ? 'var(--bg2)' : 'rgba(44,36,32,0.025)',
+    background: even ? 'var(--bg2)' : 'rgba(44,36,32,0.012)',
   };
 
   const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
