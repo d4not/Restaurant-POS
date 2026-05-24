@@ -33,6 +33,7 @@ import { useConfirmPurchase, useCreatePurchase } from '../../hooks/usePurchases'
 import { useMovements } from '../../hooks/useMovements';
 import { ApiError } from '../../api/client';
 import { formatDateTime, formatMoney, formatNumber } from '../../utils/format';
+import { uid } from '../../utils/uid';
 import {
   BASE_UNITS,
   CONTENT_UNITS,
@@ -62,7 +63,12 @@ export interface SupplyEditorPrefill {
   content_per_unit?: number | null;
   content_unit?: ContentUnit | null;
   suggestedCategories?: string[];
-  source?: 'openfoodfacts' | null;
+  source?:
+    | 'openfoodfacts'
+    | 'openbeautyfacts'
+    | 'openproductsfacts'
+    | 'upcitemdb'
+    | null;
 }
 
 interface Props {
@@ -128,10 +134,6 @@ const EMPTY_BASIC: BasicState = {
   content_unit: '',
   active: true,
 };
-
-function uid(): string {
-  return crypto.randomUUID();
-}
 
 function newRow(overrides: Partial<PackagingRow> = {}): PackagingRow {
   return {
@@ -208,6 +210,20 @@ function rowChanged(row: PackagingRow): boolean {
     b.is_primary !== row.is_primary ||
     b.active !== row.active
   );
+}
+
+// Centavos per base unit, derived from a packaging's price + units. Returns
+// null when either field is missing or non-positive — the caller decides what
+// to do (skip the seed; show "—"; etc.).
+function packagingUnitCostCents(row: PackagingRow | null): number | null {
+  if (!row) return null;
+  const priceRaw = row.price_per_package.trim();
+  if (!priceRaw) return null;
+  const priceCents = Math.round(Number(priceRaw) * 100);
+  const upp = Number(row.units_per_package);
+  if (!Number.isFinite(priceCents) || priceCents <= 0) return null;
+  if (!Number.isFinite(upp) || upp <= 0) return null;
+  return Math.round(priceCents / upp);
 }
 
 export function SupplyEditor({
@@ -459,7 +475,18 @@ export function SupplyEditor({
       if (mode === 'edit' && supplyId) {
         savedSupply = await updateSupplyM.mutateAsync({ id: supplyId, input: payload });
       } else {
-        savedSupply = await createSupplyM.mutateAsync(payload);
+        // Seed Supply.average_cost / last_cost from the primary packaging so
+        // the supplies list shows the entered price right away — without it,
+        // a brand-new supply sits at $0.00 until the first purchase confirms
+        // and operators read that as "the price didn't save". If an initial
+        // purchase IS created below, its WAC recalc lands on the same value
+        // (old_stock = 0), so the seed is harmless.
+        const seedCents = packagingUnitCostCents(initialPurchasePackaging);
+        const createPayload =
+          seedCents !== null
+            ? { ...payload, initial_unit_cost: seedCents }
+            : payload;
+        savedSupply = await createSupplyM.mutateAsync(createPayload);
       }
 
       // Apply packaging diff. Sequential to keep error handling simple and so

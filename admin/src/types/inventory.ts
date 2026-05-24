@@ -207,9 +207,20 @@ export interface CreateSupplyInput {
   content_per_unit?: number;
   content_unit?: ContentUnit;
   active?: boolean;
+  // Seeds Supply.average_cost / Supply.last_cost (centavos per base unit) so
+  // the supplies list reflects the price the operator entered even before any
+  // purchase confirms. Matches the backend `createSupplySchema` field of the
+  // same name; ignored on update (use `unit_cost` there instead).
+  initial_unit_cost?: number;
 }
 
-export type UpdateSupplyInput = Partial<CreateSupplyInput>;
+export type UpdateSupplyInput = Partial<
+  Omit<CreateSupplyInput, 'initial_unit_cost'>
+> & {
+  // Manual WAC anchor on an existing supply (centavos per base unit). Mirrors
+  // backend `updateSupplySchema.unit_cost`.
+  unit_cost?: number;
+};
 
 export interface CreateSupplierInput {
   name: string;
