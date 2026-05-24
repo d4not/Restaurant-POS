@@ -13,6 +13,7 @@ import { FloorPlan } from './pages/FloorPlan';
 import { OrderHistory } from './pages/OrderHistory';
 import { TableDetail } from './pages/TableDetail';
 import { WastePage } from './pages/WastePage';
+import { PrinterProfilesPage } from './pages/PrinterProfilesPage';
 import { AdminMode } from './components/adminMode/AdminMode';
 import { useSession } from './store/session';
 import { useUi } from './store/ui';
@@ -191,6 +192,17 @@ export function App() {
       <div style={shellStyle}>
         <OfflineBanner />
         <WastePage />
+        <SettingsModal />
+        <ConfirmDialogHost />
+      </div>
+    );
+  }
+
+  if (view === 'printers') {
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <PrinterProfilesPage />
         <SettingsModal />
         <ConfirmDialogHost />
       </div>

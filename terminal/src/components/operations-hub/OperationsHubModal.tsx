@@ -47,7 +47,7 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
   const isCashier = CASHIER_ROLES.has(role);
   const [subFlow, setSubFlow] = useState<SubFlow>(null);
   const openWaste = useUi((s) => s.openWaste);
-  const openSettings = useUi((s) => s.openSettings);
+  const setView = useUi((s) => s.setView);
 
   // Reset the open child whenever the hub closes — opening it again should
   // start at the grid view, not whichever sub-flow was last in front.
@@ -167,7 +167,7 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
               accent="neutral"
               onClick={() => {
                 onClose();
-                openSettings('printers');
+                setView('printers');
               }}
             />
           </div>

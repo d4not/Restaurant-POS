@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 
-export type TerminalView = 'floor' | 'orders' | 'history' | 'detail' | 'admin' | 'waste';
+export type TerminalView = 'floor' | 'orders' | 'history' | 'detail' | 'admin' | 'waste' | 'printers';
 
 // Views the admin mode is allowed to return to on Esc. Stored separately so a
 // stale 'admin' or 'detail' / 'waste' never becomes the back target.
-type AdminReturnView = Exclude<TerminalView, 'admin' | 'detail' | 'waste'>;
+type AdminReturnView = Exclude<TerminalView, 'admin' | 'detail' | 'waste' | 'printers'>;
 
 interface UiState {
   view: TerminalView;
