@@ -3,7 +3,7 @@ import { Badge, Button, Modal } from '../../components/ui';
 import { usePayrollPeriod, useUpdatePayroll } from '../../hooks/usePayroll';
 import type { PayrollPeriod, PayrollStatus } from '../../types/staff';
 import { attendanceStatusLabel, payrollStatusLabel } from '../../types/staff';
-import { amountToCentavos, formatDate, formatMoney } from '../../utils/format';
+import { formatDate, formatMoney } from '../../utils/format';
 
 interface Props {
   open: boolean;
@@ -56,30 +56,21 @@ export function PayrollDetailModal({ open, onClose, payrollId }: Props) {
 
 function PayrollDetailBody({ period }: { period: PayrollPeriod }) {
   const updateM = useUpdatePayroll();
-  const [bonusInput, setBonusInput] = useState(
-    (Number(period.bonuses) / 100).toFixed(2),
-  );
   const [notes, setNotes] = useState(period.notes ?? '');
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Re-sync when a different period is opened or the parent refetches.
   useEffect(() => {
-    setBonusInput((Number(period.bonuses) / 100).toFixed(2));
     setNotes(period.notes ?? '');
     setSaveError(null);
-  }, [period.id, period.bonuses, period.notes]);
+  }, [period.id, period.notes]);
 
   const saveDraft = async () => {
     setSaveError(null);
-    const bonus = amountToCentavos(bonusInput);
-    if (bonus === null) {
-      setSaveError('Bonus must be a non-negative number');
-      return;
-    }
     try {
       await updateM.mutateAsync({
         id: period.id,
-        input: { bonuses: bonus, notes: notes.trim() || null },
+        input: { notes: notes.trim() || null },
       });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save');
@@ -207,23 +198,7 @@ function PayrollDetailBody({ period }: { period: PayrollPeriod }) {
           <div className="detail-row cols-2">
             <div className="detail-cell">
               <div className="dk">Bonuses</div>
-              <div className="dv green">
-                {canEditBonuses ? (
-                  <div style={{ width: '100%' }}>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min="0"
-                      value={bonusInput}
-                      onChange={(e) => setBonusInput(e.target.value)}
-                      style={{ width: '100%', border: 'none', background: 'transparent', padding: 0, outline: 'none', color: 'var(--green)', fontWeight: 600 }}
-                    />
-                  </div>
-                ) : (
-                  `+${formatMoney(Number(period.bonuses))}`
-                )}
-              </div>
+              <div className="dv green">+{formatMoney(Number(period.bonuses))}</div>
             </div>
             <div className="detail-cell">
               <div className="dk">Net pay</div>

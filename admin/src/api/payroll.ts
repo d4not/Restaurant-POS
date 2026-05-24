@@ -7,6 +7,7 @@ import type {
   PayrollStatus,
   UpdatePayrollInput,
 } from '../types/staff';
+import type { CreateAdjustmentInput } from '../types/people';
 
 export interface ListPayrollParams {
   cursor?: string;
@@ -31,4 +32,14 @@ export function generatePayroll(input: GeneratePayrollInput) {
 
 export function updatePayroll(id: string, input: UpdatePayrollInput) {
   return api.patch<PayrollPeriod>(`/payroll/${id}`, input);
+}
+
+export function addAdjustment(periodId: string, input: CreateAdjustmentInput) {
+  return api.post<PayrollPeriod>(`/payroll/${periodId}/adjustments`, input);
+}
+
+export function removeAdjustment(periodId: string, adjustmentId: string) {
+  return api.delete<PayrollPeriod>(
+    `/payroll/${periodId}/adjustments/${adjustmentId}`,
+  );
 }

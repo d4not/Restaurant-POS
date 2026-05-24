@@ -233,8 +233,8 @@ export function DailyReportsList() {
             key={r.id}
             report={r}
             even={idx % 2 === 0}
-            onOpenReport={() => navigate(`/reports/daily/${r.id}`)}
-            onOpenShift={(s) => navigate(`/staff/cash-registers/${s.id}`)}
+            onOpenReport={() => navigate(`/cash/daily/${r.id}`)}
+            onOpenShift={(s) => navigate(`/cash/shifts/${s.id}`)}
           />
         ))}
 

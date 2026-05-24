@@ -135,7 +135,7 @@ export function CashRegistersPage() {
         columns={columns}
         rows={history}
         getRowKey={(r) => r.id}
-        onRowClick={(r) => navigate(`/staff/cash-registers/${r.id}`)}
+        onRowClick={(r) => navigate(`/cash/shifts/${r.id}`)}
         isInitialLoad={historyQ.isLoading}
         error={historyQ.error as Error | null}
         emptyMessage={t('cashRegisters.empty')}

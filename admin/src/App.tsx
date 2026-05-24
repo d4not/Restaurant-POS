@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PageLayout } from './components/layout/PageLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
@@ -23,8 +23,14 @@ import { EmployeeProductsPage } from './pages/menu/EmployeeProductsPage';
 import { OrdersPage } from './pages/orders/OrdersPage';
 import { CashRegistersPage } from './pages/staff/CashRegistersPage';
 import { ShiftDetail } from './pages/staff/ShiftDetail';
-import { EmployeesPage } from './pages/staff/EmployeesPage';
-import { EmployeeDetail } from './pages/staff/EmployeeDetail';
+import { EmployeesPage } from './pages/people/EmployeesPage';
+import { EmployeeDetail } from './pages/people/EmployeeDetail';
+import { PeopleHub } from './pages/people/PeopleHub';
+import { SchedulePage } from './pages/people/SchedulePage';
+import { AttendancePage } from './pages/people/AttendancePage';
+import { PayrollPage } from './pages/people/PayrollPage';
+import { PayrollDetail } from './pages/people/PayrollDetail';
+import { TipsPage } from './pages/people/TipsPage';
 import { SalesReport } from './pages/reports/SalesReport';
 import { ExpensesReport } from './pages/reports/ExpensesReport';
 import { ProductCostsReport } from './pages/reports/ProductCostsReport';
@@ -90,8 +96,9 @@ export default function App() {
               <Route path="products-sold"  element={<ProductsSoldReport />} />
               <Route path="product-costs"  element={<ProductCostsReport />} />
               <Route path="expenses"       element={<ExpensesReport />} />
-              <Route path="daily"          element={<DailyReportsList />} />
-              <Route path="daily/:id"      element={<DailyReportDetail />} />
+              {/* Legacy: moved to /cash/daily */}
+              <Route path="daily"          element={<Navigate to="/cash/daily" replace />} />
+              <Route path="daily/:id"      element={<DailyReportRedirect />} />
             </Route>
 
             {/* Inventory */}
@@ -122,13 +129,34 @@ export default function App() {
             {/* Orders */}
             <Route path="orders" element={<OrdersPage />} />
 
-            {/* Staff */}
+            {/* People */}
+            <Route path="people">
+              <Route index                element={<PeopleHub />} />
+              <Route path="employees"     element={<EmployeesPage />} />
+              <Route path="employees/:id" element={<EmployeeDetail />} />
+              <Route path="schedule"      element={<SchedulePage />} />
+              <Route path="attendance"    element={<AttendancePage />} />
+              <Route path="payroll"       element={<PayrollPage />} />
+              <Route path="payroll/:id"   element={<PayrollDetail />} />
+              <Route path="tips"          element={<TipsPage />} />
+            </Route>
+
+            {/* Cash */}
+            <Route path="cash">
+              <Route index               element={<Navigate to="shifts" replace />} />
+              <Route path="shifts"       element={<CashRegistersPage />} />
+              <Route path="shifts/:id"   element={<ShiftDetail />} />
+              <Route path="daily"        element={<DailyReportsList />} />
+              <Route path="daily/:id"    element={<DailyReportDetail />} />
+            </Route>
+
+            {/* Legacy URL redirects (existing bookmarks) */}
             <Route path="staff">
-              <Route index element={<Navigate to="employees" replace />} />
-              <Route path="employees"          element={<EmployeesPage />} />
-              <Route path="employees/:id"      element={<EmployeeDetail />} />
-              <Route path="cash-registers"     element={<CashRegistersPage />} />
-              <Route path="cash-registers/:id" element={<ShiftDetail />} />
+              <Route index                    element={<Navigate to="/people/employees" replace />} />
+              <Route path="employees"         element={<Navigate to="/people/employees" replace />} />
+              <Route path="employees/:id"     element={<StaffEmployeeRedirect />} />
+              <Route path="cash-registers"    element={<Navigate to="/cash/shifts" replace />} />
+              <Route path="cash-registers/:id" element={<StaffShiftRedirect />} />
             </Route>
 
             {/* System */}
@@ -147,4 +175,24 @@ export default function App() {
       </BrowserRouter>
     </QueryClientProvider>
   );
+}
+
+/* ── Legacy URL redirect helpers ──────────────────────────────────────────
+ * react-router doesn't substitute `:param` in <Navigate to="…">, so each
+ * parameterised legacy URL gets a tiny component that reads the params and
+ * builds the new path manually. */
+
+function StaffEmployeeRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/people/employees/${id ?? ''}`} replace />;
+}
+
+function StaffShiftRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/cash/shifts/${id ?? ''}`} replace />;
+}
+
+function DailyReportRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/cash/daily/${id ?? ''}`} replace />;
 }

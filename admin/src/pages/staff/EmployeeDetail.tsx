@@ -42,6 +42,7 @@ function roleLabel(role: Employee['role']): string {
     case 'MANAGER': return 'Manager';
     case 'CASHIER': return 'Cashier';
     case 'BARISTA': return 'Barista';
+    case 'WAITER':  return 'Waiter';
   }
 }
 

@@ -56,7 +56,10 @@ export type AdminSubView =
   | 'stockMovements'
   | 'employees'
   | 'attendance'
+  | 'quickAbsence'
+  | 'scheduleRead'
   | 'payroll'
+  | 'tipsAdjust'
   | 'productsList';
 
 export type TileAccent = 'gold' | 'green' | 'red' | 'neutral';
@@ -228,16 +231,57 @@ export const ADMIN_TILES: ReadonlyArray<AdminTileDef> = [
     allowedRoles: MANAGER_PLUS,
     action: { kind: 'view', view: 'attendance' },
   },
+  // Fast single-employee absence flow for the cashier mid-service — separate
+  // from the weekly grid because hunting the right cell takes too long when
+  // someone calls in sick at 7 am.
+  {
+    id: 'quickAbsence',
+    section: 'people',
+    number: 3,
+    titleKey: 'admin.tile.quickAbsence',
+    hintKey: 'admin.tile.quickAbsenceHint',
+    Icon: IconCalendarCheck,
+    accent: 'red',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'quickAbsence' },
+  },
+  // Read-only roster snapshot. Edits land in the admin web; the terminal
+  // just surfaces the week so managers can answer "who's on tonight?" without
+  // task-switching to a laptop.
+  {
+    id: 'scheduleRead',
+    section: 'people',
+    number: 4,
+    titleKey: 'admin.tile.scheduleRead',
+    hintKey: 'admin.tile.scheduleReadHint',
+    Icon: IconList,
+    accent: 'gold',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'scheduleRead' },
+  },
   {
     id: 'payroll',
     section: 'people',
-    number: 3,
+    number: 5,
     titleKey: 'admin.tile.payroll',
     hintKey: 'admin.tile.payrollHint',
     Icon: IconWallet,
     accent: 'gold',
     allowedRoles: MANAGER_PLUS,
     action: { kind: 'view', view: 'payroll' },
+  },
+  // Manager-only tip pool adjuster. Toggles inclusion, sets manual overrides,
+  // distributes as PayrollAdjustment(BONUS) rows on close.
+  {
+    id: 'tipsAdjust',
+    section: 'people',
+    number: 6,
+    titleKey: 'admin.tile.tips',
+    hintKey: 'admin.tile.tipsHint',
+    Icon: IconCoins,
+    accent: 'green',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'tipsAdjust' },
   },
 
   // ─── System ─────────────────────────────────────────────────────────

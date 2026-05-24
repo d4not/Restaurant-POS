@@ -5,7 +5,7 @@ import {
   useCreateSupplier,
   useUpdateSupplier,
 } from '../../hooks/useSuppliers';
-import type { Supplier } from '../../types/inventory';
+import { SUPPLIER_KINDS, type Supplier, type SupplierKind } from '../../types/inventory';
 
 interface Props {
   open: boolean;
@@ -22,6 +22,9 @@ interface FormState {
   credit_days: string;
   notes: string;
   active: boolean;
+  kind: SupplierKind;
+  whatsapp_phone: string;
+  message_template: string;
 }
 
 const EMPTY: FormState = {
@@ -33,6 +36,9 @@ const EMPTY: FormState = {
   credit_days: '0',
   notes: '',
   active: true,
+  kind: 'DELIVERY',
+  whatsapp_phone: '',
+  message_template: '',
 };
 
 function fromSupplier(s: Supplier): FormState {
@@ -45,6 +51,9 @@ function fromSupplier(s: Supplier): FormState {
     credit_days: String(s.credit_days),
     notes: s.notes ?? '',
     active: s.active,
+    kind: s.kind ?? 'DELIVERY',
+    whatsapp_phone: s.whatsapp_phone ?? '',
+    message_template: s.message_template ?? '',
   };
 }
 
@@ -96,6 +105,9 @@ export function SupplierFormModal({ open, onClose, supplier }: Props) {
       credit_days: Number(form.credit_days),
       notes: form.notes.trim() || undefined,
       active: form.active,
+      kind: form.kind,
+      whatsapp_phone: form.whatsapp_phone.trim() || null,
+      message_template: form.message_template.trim() || null,
     };
 
     try {
@@ -197,6 +209,53 @@ export function SupplierFormModal({ open, onClose, supplier }: Props) {
             onChange={(e) => set('notes', e.target.value)}
             maxLength={2000}
           />
+        </div>
+        <div className="section-grid-2">
+          <div className="field">
+            <label htmlFor="kind">Order channel</label>
+            <select
+              id="kind"
+              name="kind"
+              value={form.kind}
+              onChange={(e) => set('kind', e.target.value as SupplierKind)}
+            >
+              {SUPPLIER_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k === 'DELIVERY'
+                    ? 'Delivery (WhatsApp / courier)'
+                    : k === 'ERRAND'
+                      ? 'Errand (local store, runner)'
+                      : 'Both'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Input
+            label="WhatsApp number"
+            name="whatsapp_phone"
+            value={form.whatsapp_phone}
+            onChange={(e) => set('whatsapp_phone', e.target.value)}
+            placeholder="525512345678"
+            hint="E.164 without leading '+'. Used by the WhatsApp deep link."
+            maxLength={32}
+            disabled={form.kind === 'ERRAND'}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="message_template">WhatsApp message template (optional)</label>
+          <textarea
+            id="message_template"
+            name="message_template"
+            value={form.message_template}
+            onChange={(e) => set('message_template', e.target.value)}
+            placeholder="Hola {supplier_name}, mi pedido:&#10;{items}&#10;Total estimado: {total}&#10;Fecha estimada: {date}"
+            rows={4}
+            maxLength={2000}
+            disabled={form.kind === 'ERRAND'}
+          />
+          <small className="text-muted">
+            Placeholders: {'{supplier_name}'}, {'{items}'}, {'{total}'}, {'{date}'}
+          </small>
         </div>
         <div className="field">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

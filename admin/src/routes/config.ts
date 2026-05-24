@@ -44,7 +44,6 @@ export const NAV: NavEntry[] = [
       { id: 'products-sold',  labelKey: 'nav.productsSold',  path: '/reports/products-sold' },
       { id: 'product-costs',  labelKey: 'nav.productCosts',  path: '/reports/product-costs' },
       { id: 'expenses',       labelKey: 'nav.expenses',      path: '/reports/expenses' },
-      { id: 'daily-reports',  labelKey: 'nav.dailyReports',  path: '/reports/daily' },
     ],
   },
   {
@@ -80,12 +79,26 @@ export const NAV: NavEntry[] = [
   },
   {
     kind: 'group',
-    id: 'staff',
-    labelKey: 'nav.staff',
+    id: 'people',
+    labelKey: 'nav.people',
     icon: '👥',
     items: [
-      { id: 'employees', labelKey: 'nav.employees',     path: '/staff/employees' },
-      { id: 'cash',      labelKey: 'nav.cashRegisters', path: '/staff/cash-registers' },
+      { id: 'hub',        labelKey: 'nav.peopleHub',  path: '/people' },
+      { id: 'employees',  labelKey: 'nav.employees',  path: '/people/employees' },
+      { id: 'schedule',   labelKey: 'nav.schedule',   path: '/people/schedule' },
+      { id: 'attendance', labelKey: 'nav.attendance', path: '/people/attendance' },
+      { id: 'payroll',    labelKey: 'nav.payroll',    path: '/people/payroll' },
+      { id: 'tips',       labelKey: 'nav.tips',       path: '/people/tips' },
+    ],
+  },
+  {
+    kind: 'group',
+    id: 'cash',
+    labelKey: 'nav.cash',
+    icon: '💰',
+    items: [
+      { id: 'shifts',        labelKey: 'nav.cashShifts',   path: '/cash/shifts' },
+      { id: 'daily-reports', labelKey: 'nav.dailyReports', path: '/cash/daily' },
     ],
   },
   {

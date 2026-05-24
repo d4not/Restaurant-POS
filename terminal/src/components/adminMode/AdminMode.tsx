@@ -38,7 +38,10 @@ import { CashMovementsLogView } from './views/CashMovementsLogView';
 import { MultiTransferView } from './views/MultiTransferView';
 import { EmployeesView } from './views/EmployeesView';
 import { AttendanceView } from './views/AttendanceView';
+import { QuickAbsenceView } from './views/QuickAbsenceView';
+import { ScheduleReadView } from './views/ScheduleReadView';
 import { PayrollView } from './views/PayrollView';
+import { TipsAdjustView } from './views/TipsAdjustView';
 import { SuppliesListView } from './views/SuppliesListView';
 import { SupplyNewView } from './views/SupplyNewView';
 import { PurchaseOrdersView } from './views/PurchaseOrdersView';
@@ -295,8 +298,17 @@ export function AdminMode() {
       {activeView === 'attendance' && (
         <AttendanceView onBack={() => setActiveView(null)} />
       )}
+      {activeView === 'quickAbsence' && (
+        <QuickAbsenceView onBack={() => setActiveView(null)} />
+      )}
+      {activeView === 'scheduleRead' && (
+        <ScheduleReadView onBack={() => setActiveView(null)} />
+      )}
       {activeView === 'payroll' && (
         <PayrollView onBack={() => setActiveView(null)} />
+      )}
+      {activeView === 'tipsAdjust' && (
+        <TipsAdjustView onBack={() => setActiveView(null)} />
       )}
       {activeView === 'suppliesList' && (
         <SuppliesListView onBack={() => setActiveView(null)} />
@@ -412,8 +424,14 @@ function viewToTitleKey(view: AdminSubView | null) {
       return 'employees.title' as const;
     case 'attendance':
       return 'attendance.title' as const;
+    case 'quickAbsence':
+      return 'admin.quickAbsence.title' as const;
+    case 'scheduleRead':
+      return 'admin.scheduleRead.title' as const;
     case 'payroll':
       return 'payroll.title' as const;
+    case 'tipsAdjust':
+      return 'admin.tips.title' as const;
     default:
       return null;
   }
@@ -430,7 +448,10 @@ function isImplementedView(view: AdminSubView | null): boolean {
     view === 'suggestedChanges' ||
     view === 'employees' ||
     view === 'attendance' ||
+    view === 'quickAbsence' ||
+    view === 'scheduleRead' ||
     view === 'payroll' ||
+    view === 'tipsAdjust' ||
     view === 'suppliesList' ||
     view === 'supplyNew' ||
     view === 'purchaseOrders' ||

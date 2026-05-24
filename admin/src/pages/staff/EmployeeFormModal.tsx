@@ -13,7 +13,7 @@ interface Props {
   employee?: Employee;
 }
 
-const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'];
+const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA', 'WAITER'];
 
 interface FormState {
   name: string;

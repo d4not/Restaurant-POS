@@ -290,6 +290,12 @@ export interface CreatePaymentInput {
   method: PaymentMethodType;
   amount: number;
   reference?: string | null;
+  // Tip the customer hands over on top of the order total. Centavos, ≥ 0.
+  // For CASH: `amount` is gross tender (sale + tip); the cashier physically
+  // routes the tip to the jar, not the drawer. For CARD/TRANSFER: `amount`
+  // = `remaining + tip_amount`. The backend rejects any non-zero tip on
+  // PAYROLL_DEDUCT. Drawer expected_amount excludes tips entirely.
+  tip_amount?: number;
   // Required by the backend when the JWT user is WAITER/BARISTA — they must
   // include a CASHIER+/MANAGER/ADMIN PIN to settle. Cashier+ leave this off.
   pin?: string;

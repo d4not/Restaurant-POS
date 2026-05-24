@@ -65,6 +65,9 @@ export interface Supply {
   tare_weight?: TareWeight | null;
 }
 
+export type SupplierKind = 'DELIVERY' | 'ERRAND' | 'BOTH';
+export const SUPPLIER_KINDS: SupplierKind[] = ['DELIVERY', 'ERRAND', 'BOTH'];
+
 export interface Supplier {
   id: string;
   name: string;
@@ -75,6 +78,15 @@ export interface Supplier {
   credit_days: number;
   notes: string | null;
   active: boolean;
+  // How this supplier is contacted. DELIVERY = remote (WhatsApp, courier);
+  // ERRAND = local store visited with cash; BOTH = either flow.
+  kind: SupplierKind;
+  // E.164 without leading '+'. Used by the wa.me deep link on the purchase
+  // order detail view.
+  whatsapp_phone: string | null;
+  // Optional override for the auto-generated WhatsApp message. Supports
+  // {supplier_name}, {items}, {total}, {date} placeholders.
+  message_template: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -139,7 +151,25 @@ export interface CreatePackagingInput {
 
 export type UpdatePackagingInput = Partial<Omit<CreatePackagingInput, 'supply_id' | 'supplier_id'>>;
 
-export type PurchaseStatus = 'DRAFT' | 'CONFIRMED' | 'CANCELLED';
+// Extended lifecycle (Phase 2026-05 redesign). Old enum members kept so
+// historical rows that pre-date the migration still parse — new flows use
+// VERIFIED, not CONFIRMED.
+export type PurchaseStatus =
+  | 'DRAFT'
+  | 'SENT_TO_SUPPLIER'
+  | 'SUPPLIER_REPLIED'
+  | 'PAID'
+  | 'IN_TRANSIT'
+  | 'ARRIVED'
+  | 'DISPATCHED'
+  | 'RETURNED'
+  | 'VERIFIED'
+  | 'REJECTED'
+  | 'CANCELLED'
+  | 'CONFIRMED';
+
+export type PurchaseKind = 'DELIVERY' | 'ERRAND';
+export const PURCHASE_KINDS: PurchaseKind[] = ['DELIVERY', 'ERRAND'];
 
 export interface PurchaseItem {
   id: string;
@@ -150,9 +180,20 @@ export interface PurchaseItem {
   price_per_package: string;
   base_unit_quantity: string;
   unit_cost: string;
+  received_package_quantity: string | null;
+  shortfall_reason: string | null;
+  unavailable: boolean;
   created_at: string;
   supply?: { id: string; name: string; base_unit: BaseUnit };
   packaging?: PurchasePackaging | null;
+}
+
+export interface PurchaseCashMovement {
+  id: string;
+  type: 'CASH_IN' | 'CASH_OUT';
+  amount: string;
+  reason: string;
+  created_at: string;
 }
 
 export interface Purchase {
@@ -161,16 +202,43 @@ export interface Purchase {
   storage_id: string;
   date: string;
   status: PurchaseStatus;
+  kind: PurchaseKind;
   total: string;
   payment_method: string | null;
   notes: string | null;
   user_id: string;
   created_at: string;
   updated_at: string;
+  // DELIVERY lifecycle audit
+  message_sent_at: string | null;
+  supplier_replied_at: string | null;
+  supplier_subtotal: string | null;
+  shipping_cost: string | null;
+  paid_at: string | null;
+  payment_reference: string | null;
+  in_transit_at: string | null;
+  arrived_at: string | null;
+  expected_arrival: string | null;
+  // ERRAND lifecycle audit
+  runner_user_id: string | null;
+  cash_advanced: string | null;
+  cash_returned: string | null;
+  dispatched_at: string | null;
+  returned_at: string | null;
+  // Shared terminal audit
+  verified_at: string | null;
+  verified_by_user_id: string | null;
+  cancel_reason: string | null;
+  cancelled_at: string | null;
+  cancelled_by_user_id: string | null;
   items?: PurchaseItem[];
-  supplier?: { id: string; name: string };
+  supplier?: Supplier;
   storage?: { id: string; name: string };
   user?: { id: string; name: string };
+  runner?: { id: string; name: string } | null;
+  verifier?: { id: string; name: string } | null;
+  canceller?: { id: string; name: string } | null;
+  cash_movements?: PurchaseCashMovement[];
 }
 
 export interface CreatePurchaseItemInput {
@@ -184,8 +252,10 @@ export interface CreatePurchaseInput {
   supplier_id: string;
   storage_id: string;
   date: string;
+  kind?: PurchaseKind;
   payment_method?: string;
   notes?: string;
+  expected_arrival?: string | null;
   items?: CreatePurchaseItemInput[];
 }
 
@@ -195,9 +265,62 @@ export interface UpdatePurchaseInput {
   date?: string;
   payment_method?: string | null;
   notes?: string | null;
+  expected_arrival?: string | null;
 }
 
 export type UpdatePurchaseItemInput = Partial<CreatePurchaseItemInput>;
+
+// ─── Lifecycle transition inputs ────────────────────────────────────────────
+
+export interface ReplyPurchaseInput {
+  supplier_subtotal?: number | null;
+  shipping_cost?: number | null;
+  items?: Array<{ id: string; unavailable?: boolean }>;
+}
+
+export interface PayPurchaseInput {
+  payment_reference?: string | null;
+}
+
+export interface InTransitInput {
+  expected_arrival?: string | null;
+}
+
+export interface ReceivedItemInput {
+  id: string;
+  received_package_quantity: number;
+  shortfall_reason?: string | null;
+}
+
+export interface ReceiveInput {
+  items?: ReceivedItemInput[];
+}
+
+export interface VerifyInput {
+  items?: ReceivedItemInput[];
+}
+
+export interface DispatchInput {
+  runner_user_id: string;
+  cash_advanced: number;
+  reason?: string;
+}
+
+export interface ReturnInput {
+  cash_returned?: number;
+  reason?: string;
+  items?: ReceivedItemInput[];
+}
+
+export interface CancelInput {
+  cancel_reason: string;
+}
+
+export interface WhatsappLink {
+  url: string | null;
+  message: string;
+  requires_phone: boolean;
+}
 
 export interface CreateSupplyInput {
   name: string;
@@ -231,6 +354,9 @@ export interface CreateSupplierInput {
   credit_days?: number;
   notes?: string;
   active?: boolean;
+  kind?: SupplierKind;
+  whatsapp_phone?: string | null;
+  message_template?: string | null;
 }
 
 export type UpdateSupplierInput = Partial<CreateSupplierInput>;

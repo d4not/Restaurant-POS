@@ -54,7 +54,7 @@ export function ShiftDetail() {
   return (
     <>
       <div className="flex-between mb-12">
-        <Button variant="ghost" onClick={() => navigate('/staff/cash-registers')}>
+        <Button variant="ghost" onClick={() => navigate('/cash/shifts')}>
           ← Back to shifts
         </Button>
         <Badge tone={registerStatusTone(register.status)}>{register.status}</Badge>

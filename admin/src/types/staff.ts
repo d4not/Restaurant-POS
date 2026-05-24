@@ -5,6 +5,7 @@
  */
 
 import type { UserRole } from './api';
+import type { PayrollAdjustment } from './people';
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'DAY_OFF' | 'LATE';
 export const ATTENDANCE_STATUSES: AttendanceStatus[] = [
@@ -125,8 +126,16 @@ export interface PayrollPeriod {
   paid_absences: number;
   unpaid_absences: number;
   gross_pay: string;
+  /** Mirror — absence_deductions + adjustment_deductions. */
   deductions: string;
+  /** Mirror — adjustment_bonuses + tips_amount. */
   bonuses: string;
+  absence_deductions: string;
+  /** Itemized: PAYROLL_DEDUCT payments on employee orders this week. */
+  tab_deductions?: string;
+  adjustment_bonuses: string;
+  adjustment_deductions: string;
+  tips_amount: string;
   net_pay: string;
   status: PayrollStatus;
   notes: string | null;
@@ -135,7 +144,8 @@ export interface PayrollPeriod {
   updated_at: string;
   user?: { id: string; name: string; email: string; position: string | null };
   approver?: { id: string; name: string } | null;
-  // present only on the detail endpoint
+  // present on the detail endpoint
+  adjustments?: PayrollAdjustment[];
   attendance?: Array<{
     id: string;
     date: string;
@@ -152,7 +162,6 @@ export interface GeneratePayrollInput {
 }
 
 export interface UpdatePayrollInput {
-  bonuses?: number;
   notes?: string | null;
   status?: PayrollStatus;
 }

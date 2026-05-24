@@ -47,11 +47,17 @@ export interface RegisterTotals {
   other_sales: string;
   expected_cash: string;
   total_sales: string;
+  // Phase 11 (jar-aparte tips): total of payment.tip_amount across all
+  // methods for this shift. Tips never enter the drawer, so they don't
+  // affect expected_cash — surfaced separately so the admin view can show
+  // "owed to the tip jar" alongside cash totals.
+  tips_collected: string;
 }
 
 interface PaymentAccum {
   amount: Decimal;
   change: Decimal;
+  tip: Decimal;
 }
 
 // Computes totals for a batch of register ids in two queries (payments +
@@ -75,6 +81,7 @@ async function computeRegisterTotals(
       method: true,
       amount: true,
       change_amount: true,
+      tip_amount: true,
       order: { select: { register_id: true } },
     },
   });
@@ -98,9 +105,14 @@ async function computeRegisterTotals(
     const regId = p.order.register_id;
     const slot = byReg.get(regId);
     if (!slot) continue;
-    const existing = slot.get(p.method) ?? { amount: new Decimal(0), change: new Decimal(0) };
+    const existing = slot.get(p.method) ?? {
+      amount: new Decimal(0),
+      change: new Decimal(0),
+      tip: new Decimal(0),
+    };
     existing.amount = existing.amount.add(new Decimal(p.amount));
     existing.change = existing.change.add(new Decimal(p.change_amount));
+    existing.tip = existing.tip.add(new Decimal(p.tip_amount));
     slot.set(p.method, existing);
   }
 
@@ -119,47 +131,55 @@ async function computeRegisterTotals(
 
   for (const reg of registers) {
     const paymentSlot = byReg.get(reg.id) ?? new Map<Method, PaymentAccum>();
-    const cash = paymentSlot.get(PaymentMethod.CASH) ?? { amount: new Decimal(0), change: new Decimal(0) };
-    const card = paymentSlot.get(PaymentMethod.CARD) ?? { amount: new Decimal(0), change: new Decimal(0) };
-    const transfer = paymentSlot.get(PaymentMethod.TRANSFER) ?? { amount: new Decimal(0), change: new Decimal(0) };
+    const zero = { amount: new Decimal(0), change: new Decimal(0), tip: new Decimal(0) };
+    const cash = paymentSlot.get(PaymentMethod.CASH) ?? zero;
+    const card = paymentSlot.get(PaymentMethod.CARD) ?? zero;
+    const transfer = paymentSlot.get(PaymentMethod.TRANSFER) ?? zero;
 
     // "Other" buckets every method that's not cash/card/transfer (e.g.
-    // PAYROLL_DEDUCT). Sums their gross amounts so the breakdown still adds
-    // up to total_sales.
-    let otherAmount = new Decimal(0);
+    // PAYROLL_DEDUCT). Sums their order-side amounts so the breakdown still
+    // adds up to total_sales without double-counting tip dollars.
+    let otherSales = new Decimal(0);
+    let totalTips = new Decimal(0);
     for (const [method, accum] of paymentSlot.entries()) {
+      totalTips = totalTips.add(accum.tip);
       if (method === PaymentMethod.CASH) continue;
       if (method === PaymentMethod.CARD) continue;
       if (method === PaymentMethod.TRANSFER) continue;
-      otherAmount = otherAmount.add(accum.amount);
+      otherSales = otherSales.add(accum.amount.sub(accum.tip));
     }
 
-    // Net cash to the drawer = gross cash − change given back.
-    const cashSales = cash.amount.sub(cash.change);
+    // Phase 11: payment.amount is gross (sale + tip + change). The drawer
+    // only owns the sale portion; tips live in the jar. Subtract tip first,
+    // then subtract change.
+    const cashSales = cash.amount.sub(cash.tip).sub(cash.change);
+    const cardSales = card.amount.sub(card.tip);
+    const transferSales = transfer.amount.sub(transfer.tip);
     const mov = movByReg.get(reg.id) ?? { cashIn: new Decimal(0), cashOut: new Decimal(0) };
 
     // Mirrors closeRegister's expected_amount math so the live OPEN-shift
     // value the admin view shows lines up with what a close right now
-    // would compute.
+    // would compute. Tips are excluded — they never enter the drawer.
     const expectedCash = new Decimal(reg.opening_amount)
       .add(cashSales)
       .add(mov.cashIn)
       .sub(mov.cashOut);
 
-    const totalSales = cash.amount
-      .add(card.amount)
-      .add(transfer.amount)
-      .add(otherAmount);
+    const totalSales = cashSales
+      .add(cardSales)
+      .add(transferSales)
+      .add(otherSales);
 
     result.set(reg.id, {
       cash_in: mov.cashIn.toFixed(0),
       cash_out: mov.cashOut.toFixed(0),
       cash_sales: cashSales.toFixed(0),
-      card_sales: card.amount.toFixed(0),
-      transfer_sales: transfer.amount.toFixed(0),
-      other_sales: otherAmount.toFixed(0),
+      card_sales: cardSales.toFixed(0),
+      transfer_sales: transferSales.toFixed(0),
+      other_sales: otherSales.toFixed(0),
       expected_cash: expectedCash.toFixed(0),
       total_sales: totalSales.toFixed(0),
+      tips_collected: totalTips.toFixed(0),
     });
   }
 
@@ -185,6 +205,7 @@ export async function attachRegisterTotals<T extends { id: string }>(
     other_sales: '0',
     expected_cash: '0',
     total_sales: '0',
+    tips_collected: '0',
   };
   return rows.map((r) => ({ ...r, totals: totals.get(r.id) ?? fallback }));
 }
@@ -542,7 +563,7 @@ async function assertDayUnlocked(tx: Tx, registerId: string): Promise<void> {
  * against the already-counted `actual_amount` and their ShiftReport
  * snapshot's cash columns patched.
  */
-async function recomputeRegisterTotals(tx: Tx, registerId: string): Promise<void> {
+export async function recomputeRegisterTotals(tx: Tx, registerId: string): Promise<void> {
   const reg = await tx.cashRegister.findUnique({
     where: { id: registerId },
     select: {

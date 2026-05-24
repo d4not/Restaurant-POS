@@ -20,7 +20,7 @@ export interface Paginated<T> {
   nextCursor?: string | null;
 }
 
-export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'BARISTA';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'BARISTA' | 'WAITER';
 
 export interface User {
   id: string;

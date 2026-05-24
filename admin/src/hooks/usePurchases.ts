@@ -3,6 +3,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from '@tanstack/react-query';
 import {
   addPurchaseItem,
@@ -10,13 +11,33 @@ import {
   confirmPurchase,
   createPurchase,
   deletePurchase,
+  dispatchPurchase,
   getPurchase,
+  getWhatsappLink,
   listPurchases,
+  markInTransit,
+  payPurchase,
+  receivePurchase,
+  rejectPurchase,
   removePurchaseItem,
+  replyPurchase,
+  returnPurchase,
+  sendPurchase,
   updatePurchase,
   updatePurchaseItem,
+  verifyPurchase,
   type ListPurchasesParams,
 } from '../api/purchases';
+import type {
+  CancelInput,
+  DispatchInput,
+  InTransitInput,
+  PayPurchaseInput,
+  ReceiveInput,
+  ReplyPurchaseInput,
+  ReturnInput,
+  VerifyInput,
+} from '../types/inventory';
 
 const LIMIT = 30;
 
@@ -51,12 +72,38 @@ export function usePurchase(id: string | undefined) {
   });
 }
 
-function invalidatePurchaseCaches(
-  qc: ReturnType<typeof useQueryClient>,
-  purchaseId?: string,
-) {
+export function useWhatsappLink(purchaseId: string | undefined) {
+  return useQuery({
+    queryKey: ['purchase', purchaseId, 'whatsapp'],
+    queryFn: () => getWhatsappLink(purchaseId as string),
+    enabled: !!purchaseId,
+  });
+}
+
+function invalidatePurchaseCaches(qc: QueryClient, purchaseId?: string) {
   qc.invalidateQueries({ queryKey: ['purchases'] });
-  if (purchaseId) qc.invalidateQueries({ queryKey: ['purchase', purchaseId] });
+  if (purchaseId) {
+    qc.invalidateQueries({ queryKey: ['purchase', purchaseId] });
+    qc.invalidateQueries({ queryKey: ['purchase', purchaseId, 'whatsapp'] });
+  }
+}
+
+// Stock-absorbing transitions ripple into supplies, movements, alerts, and
+// the dashboard widget. Bundle the invalidations in one helper so every
+// caller flushes the same caches consistently.
+function invalidateStockSideEffects(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['supplies'] });
+  qc.invalidateQueries({ queryKey: ['supply'] });
+  qc.invalidateQueries({ queryKey: ['movements'] });
+  qc.invalidateQueries({ queryKey: ['alerts', 'low-stock'] });
+  qc.invalidateQueries({ queryKey: ['stock-availability'] });
+}
+
+// Errand transitions move cash in/out of the open shift's drawer.
+function invalidateRegisterSideEffects(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['register', 'current'] });
+  qc.invalidateQueries({ queryKey: ['registers'] });
+  qc.invalidateQueries({ queryKey: ['cash-movements'] });
 }
 
 export function useCreatePurchase() {
@@ -84,20 +131,110 @@ export function useDeletePurchase() {
   });
 }
 
-// Confirming a purchase mutates stock, WAC, and creates stock movements, so
-// we also invalidate the downstream caches that admin pages read from.
+// ─── Delivery transitions ───────────────────────────────────────────────────
+
+export function useSendPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: sendPurchase,
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+export function useReplyPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ReplyPurchaseInput }) =>
+      replyPurchase(id, input),
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+export function usePayPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: PayPurchaseInput }) =>
+      payPurchase(id, input),
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+export function useMarkInTransit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input?: InTransitInput }) =>
+      markInTransit(id, input ?? {}),
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+export function useReceivePurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ReceiveInput }) =>
+      receivePurchase(id, input),
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+// ─── Errand transitions ─────────────────────────────────────────────────────
+
+export function useDispatchPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: DispatchInput }) =>
+      dispatchPurchase(id, input),
+    onSuccess: (row) => {
+      invalidatePurchaseCaches(qc, row.id);
+      invalidateRegisterSideEffects(qc);
+    },
+  });
+}
+
+export function useReturnPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ReturnInput }) =>
+      returnPurchase(id, input),
+    onSuccess: (row) => {
+      invalidatePurchaseCaches(qc, row.id);
+      invalidateRegisterSideEffects(qc);
+    },
+  });
+}
+
+// ─── Terminal states ────────────────────────────────────────────────────────
+
+export function useVerifyPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input?: VerifyInput }) =>
+      verifyPurchase(id, input ?? {}),
+    onSuccess: (row) => {
+      invalidatePurchaseCaches(qc, row.id);
+      invalidateStockSideEffects(qc);
+    },
+  });
+}
+
+export function useRejectPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: CancelInput }) =>
+      rejectPurchase(id, input),
+    onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
+  });
+}
+
+// Legacy: DRAFT → VERIFIED in one shot. Kept so the existing terminal
+// AdminMode "Confirm" button still works while the new wizard rolls out.
 export function useConfirmPurchase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: confirmPurchase,
     onSuccess: (row) => {
       invalidatePurchaseCaches(qc, row.id);
-      qc.invalidateQueries({ queryKey: ['supplies'] });
-      qc.invalidateQueries({ queryKey: ['supply'] });
-      qc.invalidateQueries({ queryKey: ['movements'] });
-      // Purchase confirm receives stock → topbar bell + dashboard widget
-      // should drop the alert immediately.
-      qc.invalidateQueries({ queryKey: ['alerts', 'low-stock'] });
+      invalidateStockSideEffects(qc);
     },
   });
 }
@@ -105,10 +242,13 @@ export function useConfirmPurchase() {
 export function useCancelPurchase() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: cancelPurchase,
+    mutationFn: ({ id, input }: { id: string; input?: CancelInput }) =>
+      cancelPurchase(id, input),
     onSuccess: (row) => invalidatePurchaseCaches(qc, row.id),
   });
 }
+
+// ─── Items (DRAFT only) ────────────────────────────────────────────────────
 
 export function useAddPurchaseItem() {
   const qc = useQueryClient();

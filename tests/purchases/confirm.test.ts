@@ -88,7 +88,10 @@ describe('POST /api/v1/purchases/:id/confirm — WAC recalculation', () => {
       .post(`/api/v1/purchases/${p1}/confirm`)
       .set(fixtures.auth);
     expect(confirm1.status).toBe(200);
-    expect(confirm1.body.data.status).toBe('CONFIRMED');
+    // /confirm is now a legacy alias of /verify (which is the new
+    // stock-absorbed terminal state). See migration
+    // 20260524100000_purchase_orders_redesign.
+    expect(confirm1.body.data.status).toBe('VERIFIED');
 
     // After purchase 1: WAC = (0 + 12*2800)/12 = 2800
     let supply = await prisma.supply.findUniqueOrThrow({

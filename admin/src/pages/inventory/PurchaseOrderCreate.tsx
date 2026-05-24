@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, EmptyState } from '../../components/ui';
 import { Input } from '../../components/forms/Input';
 import { Select } from '../../components/forms/Select';
@@ -10,7 +10,9 @@ import { listPackagings } from '../../api/packagings';
 import { useCreatePurchase } from '../../hooks/usePurchases';
 import { formatMoney } from '../../utils/format';
 import { uid } from '../../utils/uid';
-import type { PurchasePackaging } from '../../types/inventory';
+import { useTranslation } from '../../i18n';
+import type { PurchaseKind, PurchasePackaging } from '../../types/inventory';
+import { KIND_ICON } from '../../components/purchase-orders/status';
 
 // A single draft line the user is building.
 interface DraftLine {
@@ -46,6 +48,12 @@ function lineTotalCentavos(line: DraftLine): number {
 
 export function PurchaseOrderCreate() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  // ?kind=DELIVERY|ERRAND drives the supplier dropdown filter + header copy.
+  // Default DELIVERY since that's the structured flow.
+  const kind: PurchaseKind =
+    searchParams.get('kind') === 'ERRAND' ? 'ERRAND' : 'DELIVERY';
   const [supplierId, setSupplierId] = useState('');
   const [storageId, setStorageId] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -60,10 +68,13 @@ export function PurchaseOrderCreate() {
   const suppliesQ = useSupplies({ active: true });
   const createPurchaseM = useCreatePurchase();
 
-  const suppliers = useMemo(
-    () => suppliersQ.data?.pages.flatMap((p) => p.items) ?? [],
-    [suppliersQ.data],
-  );
+  const suppliers = useMemo(() => {
+    const all = suppliersQ.data?.pages.flatMap((p) => p.items) ?? [];
+    // Filter to suppliers compatible with the selected kind. BOTH matches
+    // both flows. This prevents the operator from picking a DELIVERY-only
+    // supplier for an errand and getting a backend 400.
+    return all.filter((s) => s.kind === 'BOTH' || s.kind === kind);
+  }, [suppliersQ.data, kind]);
   const supplies = useMemo(
     () => suppliesQ.data?.pages.flatMap((p) => p.items) ?? [],
     [suppliesQ.data],
@@ -173,6 +184,7 @@ export function PurchaseOrderCreate() {
         supplier_id: supplierId,
         storage_id: storageId,
         date: new Date(`${date}T12:00:00`).toISOString(),
+        kind,
         payment_method: paymentMethod.trim() || undefined,
         notes: notes.trim() || undefined,
         items: lines
@@ -208,7 +220,8 @@ export function PurchaseOrderCreate() {
             ← Back to purchase orders
           </Link>
           <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 24 }}>
-            New purchase order
+            <span aria-hidden style={{ marginRight: 8 }}>{KIND_ICON[kind]}</span>
+            {kind === 'DELIVERY' ? t('po.newDelivery') : t('po.newErrand')}
           </h1>
         </div>
       </div>

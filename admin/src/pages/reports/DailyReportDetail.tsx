@@ -357,7 +357,7 @@ export function DailyReportDetail() {
   return (
     <>
       <div className="flex-between mb-12">
-        <Button variant="ghost" onClick={() => navigate('/reports/daily')}>
+        <Button variant="ghost" onClick={() => navigate('/cash/daily')}>
           ← Back to daily reports
         </Button>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -437,7 +437,7 @@ export function DailyReportDetail() {
           columns={shiftColumns}
           rows={report.shifts}
           getRowKey={(s) => s.id}
-          onRowClick={(s) => navigate(`/staff/cash-registers/${s.id}`)}
+          onRowClick={(s) => navigate(`/cash/shifts/${s.id}`)}
           emptyMessage="No shifts attached to this report"
         />
       </Card>

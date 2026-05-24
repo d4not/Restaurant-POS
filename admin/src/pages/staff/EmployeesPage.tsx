@@ -10,7 +10,7 @@ import { formatDate, formatMoney } from '../../utils/format';
 import { EmployeeFormModal } from './EmployeeFormModal';
 import { useTranslation } from '../../i18n';
 
-const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'];
+const ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA', 'WAITER'];
 
 function useRoleLabel() {
   const { t } = useTranslation();
@@ -20,6 +20,7 @@ function useRoleLabel() {
       case 'MANAGER': return t('role.manager');
       case 'CASHIER': return t('role.cashier');
       case 'BARISTA': return t('role.barista');
+      case 'WAITER':  return t('role.waiter');
     }
   };
 }
@@ -30,6 +31,7 @@ function roleTone(role: UserRole) {
     case 'MANAGER': return 'blue' as const;
     case 'CASHIER': return 'green' as const;
     case 'BARISTA': return 'gray' as const;
+    case 'WAITER':  return 'blue' as const;
   }
 }
 
@@ -173,7 +175,7 @@ export function EmployeesPage() {
         columns={columns}
         rows={rows}
         getRowKey={(e) => e.id}
-        onRowClick={(e) => navigate(`/staff/employees/${e.id}`)}
+        onRowClick={(e) => navigate(`/people/employees/${e.id}`)}
         isInitialLoad={q.isLoading}
         error={q.error as Error | null}
         emptyMessage={t('employees.empty')}

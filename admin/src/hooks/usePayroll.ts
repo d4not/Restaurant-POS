@@ -5,12 +5,15 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import {
+  addAdjustment,
   generatePayroll,
   getPayroll,
   listPayroll,
+  removeAdjustment,
   updatePayroll,
   type ListPayrollParams,
 } from '../api/payroll';
+import type { CreateAdjustmentInput } from '../types/people';
 
 const LIMIT = 50;
 
@@ -60,6 +63,34 @@ export function useUpdatePayroll() {
       id: string;
       input: Parameters<typeof updatePayroll>[1];
     }) => updatePayroll(id, input),
+    onSuccess: (data) => invalidatePayroll(qc, data.id),
+  });
+}
+
+export function useAddAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      periodId,
+      input,
+    }: {
+      periodId: string;
+      input: CreateAdjustmentInput;
+    }) => addAdjustment(periodId, input),
+    onSuccess: (data) => invalidatePayroll(qc, data.id),
+  });
+}
+
+export function useRemoveAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      periodId,
+      adjustmentId,
+    }: {
+      periodId: string;
+      adjustmentId: string;
+    }) => removeAdjustment(periodId, adjustmentId),
     onSuccess: (data) => invalidatePayroll(qc, data.id),
   });
 }

@@ -83,7 +83,10 @@ describe('Full-flow audit — Phase 2 scenarios', () => {
       .post(`/api/v1/purchases/${draft.body.data.id}/confirm`)
       .set(auth)
       .expect(200);
-    expect(confirm.body.data.status).toBe('CONFIRMED');
+    // /confirm is a legacy alias that transitions DRAFT → VERIFIED in one shot
+    // (the new lifecycle uses VERIFIED as the terminal stock-landed state;
+    // CONFIRMED is kept only so historical rows still parse).
+    expect(confirm.body.data.status).toBe('VERIFIED');
 
     // 6. Re-fetch the supply via the HTTP layer — what the admin UI would show.
     const detail = await request(app)

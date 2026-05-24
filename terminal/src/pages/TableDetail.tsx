@@ -944,6 +944,95 @@ const payOrderBtnStyle = (disabled: boolean): React.CSSProperties => ({
   minHeight: 44,
 });
 
+// ─── Tip sub-panel styles (in the payment modal) ────────────────────────
+// Lives right under the method buttons, above the cash/card input. Gold
+// theme so the cashier reads the row as "extra, optional".
+const tipPanel: React.CSSProperties = {
+  marginTop: 12,
+  paddingTop: 12,
+  borderTop: '1px dashed var(--border)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
+
+const tipRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  flexWrap: 'wrap',
+};
+
+const tipChip: React.CSSProperties = {
+  padding: '8px 14px',
+  borderRadius: 999,
+  border: '1px solid var(--border)',
+  background: 'var(--bg2)',
+  color: 'var(--text1)',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 36,
+  letterSpacing: '0.02em',
+  transition: 'all 120ms ease',
+};
+
+const tipChipActive: React.CSSProperties = {
+  background: 'var(--gold)',
+  color: '#2c2420',
+  borderColor: 'var(--gold)',
+  boxShadow: '0 0 0 3px rgba(201,164,92,0.18)',
+};
+
+const tipChipDisabled: React.CSSProperties = {
+  opacity: 0.4,
+  cursor: 'not-allowed',
+};
+
+const tipChipClear: React.CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 999,
+  border: '1px dashed var(--border)',
+  background: 'transparent',
+  color: 'var(--text3)',
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 36,
+  marginLeft: 'auto',
+};
+
+const tipCustomRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const tipCustomInputStyle: React.CSSProperties = {
+  flex: 1,
+  height: 40,
+  borderRadius: 8,
+  border: '1.5px solid var(--gold)',
+  background: 'var(--bg2)',
+  padding: '0 12px',
+  fontSize: 14,
+  fontFamily: "'Playfair Display', serif",
+  fontWeight: 600,
+  color: 'var(--text1)',
+  fontVariantNumeric: 'tabular-nums',
+  textAlign: 'right',
+  outline: 'none',
+};
+
+const tipHint: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--gold)',
+  fontStyle: 'italic',
+  lineHeight: 1.4,
+};
+
 const catTabStyle = (active: boolean, accent?: string | null): React.CSSProperties => ({
   padding: '7px 12px',
   borderRadius: 7,
@@ -1226,6 +1315,14 @@ export function TableDetail() {
   const [reference, setReference] = useState('');
   const [splitPayments, setSplitPayments] = useState<SplitPaymentDraft[]>([]);
   const [splitMode, setSplitMode] = useState(false);
+  // Tip lives separately from the order total. CASH: cashier physically routes
+  // it to the jar; the gross tender shown to the cashier = sale + tip.
+  // CARD/TRANSFER: amount auto-set to remaining + tip. PAYROLL_DEDUCT: tip
+  // is disabled entirely (backend rejects non-zero tips on that method).
+  // In split mode the tip applies to the FINAL tender only.
+  const [tipAmount, setTipAmount] = useState<number>(0);
+  const [tipCustomMode, setTipCustomMode] = useState(false);
+  const [tipCustomInput, setTipCustomInput] = useState<string>('');
   // Cashier PIN entered when a waiter/barista is settling. Sent on every
   // payment in the modal session (split payments reuse the same PIN). Cleared
   // when the modal is dismissed or the order changes.
@@ -1275,6 +1372,9 @@ export function TableDetail() {
     setPaidOrder(null);
     setEditingItem(null);
     setCashierPin('');
+    setTipAmount(0);
+    setTipCustomMode(false);
+    setTipCustomInput('');
   }, [orderId]);
 
   // When the cashier hits "Pay Order" from the active orders list, the UI
@@ -1407,14 +1507,29 @@ export function TableDetail() {
   const total = Number(order.total);
   const remaining = Math.max(0, total - recordedPaid - stagedPaid);
   const amountCentavos = parseAmountToCentavos(amountInput);
-  const currentTender = splitMode ? amountCentavos : amountCentavos || remaining;
+  // PAYROLL_DEDUCT can't carry a tip — the backend rejects it. Split mode
+  // disables the tip input too; the tip rides on the final tender in
+  // submitSplitPayments.
+  const tipDisabled = paymentMethod === 'PAYROLL_DEDUCT' || splitMode;
+  const effectiveTip = tipDisabled ? 0 : tipAmount;
+  // For CARD/TRANSFER, the amount is auto-set to remaining + tip and the
+  // cashier doesn't type anything. For CASH, the cashier types gross tender
+  // which already includes the tip (they collect bill + tip in one handover).
+  const currentTender = splitMode
+    ? amountCentavos
+    : paymentMethod !== 'CASH'
+      ? remaining + effectiveTip
+      : amountCentavos || remaining + effectiveTip;
+  // Compare against the gross obligation (sale + tip) for cash so the change /
+  // short hints account for the tip the cashier expects to also receive.
+  const grossDue = remaining + effectiveTip;
   const change =
-    paymentMethod === 'CASH' && currentTender > remaining
-      ? currentTender - remaining
+    paymentMethod === 'CASH' && currentTender > grossDue
+      ? currentTender - grossDue
       : 0;
   const short =
-    paymentMethod === 'CASH' && currentTender > 0 && currentTender < remaining
-      ? remaining - currentTender
+    paymentMethod === 'CASH' && currentTender > 0 && currentTender < grossDue
+      ? grossDue - currentTender
       : 0;
 
   // Card-level availability — most permissive across all variants. A product
@@ -1674,14 +1789,17 @@ export function TableDetail() {
       return;
     }
     let amount = currentTender;
-    if (paymentMethod !== 'CASH' && amount !== remaining) {
-      amount = remaining; // card/transfer must equal the remaining balance
+    // CARD/TRANSFER: amount = remaining (sale) + tip. The backend reconstructs
+    // remaining = amount - tip_amount and applies it to the order balance.
+    if (paymentMethod !== 'CASH') {
+      amount = remaining + effectiveTip;
     }
     if (amount <= 0) return;
     try {
       const result = await paymentMutation.mutateAsync({
         method: paymentMethod,
         amount,
+        ...(effectiveTip > 0 ? { tip_amount: effectiveTip } : {}),
         reference: paymentMethod === 'CASH' ? null : reference || null,
         ...(needsCashierPin ? { pin: cashierPin } : {}),
       });
@@ -1713,10 +1831,27 @@ export function TableDetail() {
     }
     try {
       let lastResult: Awaited<ReturnType<typeof addOrderPayment>> | null = null;
-      for (const draft of splitPayments) {
+      // The tip attaches to the FINAL tender — that's the one settling the
+      // order, so the receipt sums it with the sale-side amount.
+      const lastIdx = splitPayments.length - 1;
+      for (let i = 0; i < splitPayments.length; i++) {
+        const draft = splitPayments[i];
+        const isLast = i === lastIdx;
+        const tipForThis =
+          isLast && tipAmount > 0 && draft.method !== 'PAYROLL_DEDUCT'
+            ? tipAmount
+            : 0;
+        // CARD/TRANSFER tenders are sized to the outstanding balance when
+        // queued; layering a tip on the final one means we need to push the
+        // amount up by the tip so the backend can split it back out.
+        const amount =
+          isLast && tipForThis > 0 && draft.method !== 'CASH'
+            ? draft.amount + tipForThis
+            : draft.amount;
         lastResult = await addOrderPayment(orderId, {
           method: draft.method,
-          amount: draft.amount,
+          amount,
+          ...(tipForThis > 0 ? { tip_amount: tipForThis } : {}),
           reference: draft.method === 'CASH' ? null : draft.reference || null,
           ...(needsCashierPin ? { pin: cashierPin } : {}),
         });
@@ -1765,9 +1900,39 @@ export function TableDetail() {
   function handleQuickAmount(centavos: number | 'exact') {
     setAmountInput(
       centavos === 'exact'
-        ? formatMoneyPlain(remaining)
+        ? formatMoneyPlain(remaining + effectiveTip)
         : formatMoneyPlain(centavos),
     );
+  }
+
+  function applyTipPercent(pct: number) {
+    const tip = Math.round((total * pct) / 100);
+    setTipAmount(tip);
+    setTipCustomMode(false);
+    setTipCustomInput('');
+    // CASH input might have been pre-filled with the old exact amount —
+    // resetting it lets the placeholder reflect the new gross due.
+    if (paymentMethod === 'CASH' && !splitMode) {
+      setAmountInput('');
+    }
+  }
+
+  function clearTip() {
+    setTipAmount(0);
+    setTipCustomMode(false);
+    setTipCustomInput('');
+    if (paymentMethod === 'CASH' && !splitMode) {
+      setAmountInput('');
+    }
+  }
+
+  function commitCustomTip() {
+    const parsed = parseAmountToCentavos(tipCustomInput);
+    setTipAmount(parsed || 0);
+    setTipCustomMode(false);
+    if (paymentMethod === 'CASH' && !splitMode) {
+      setAmountInput('');
+    }
   }
 
   const QUICK_AMOUNTS: Array<{ label: string; value: number | 'exact' }> = [
@@ -1786,7 +1951,7 @@ export function TableDetail() {
     (splitMode
       ? splitPayments.length === 0
       : currentTender <= 0 ||
-        (paymentMethod === 'CASH' && currentTender < remaining));
+        (paymentMethod === 'CASH' && currentTender < grossDue));
 
   return (
     <div style={styles.shell}>
@@ -2373,8 +2538,17 @@ export function TableDetail() {
               <div style={styles.hStat}>
                 <span style={styles.hStatLabel}>{paidOrder ? 'Paid' : 'To pay'}</span>
                 <span style={styles.hStatVal}>
-                  {formatMoney(paidOrder ? paidOrder.total : String(remaining))}
+                  {formatMoney(
+                    paidOrder
+                      ? paidOrder.total
+                      : String(remaining + effectiveTip),
+                  )}
                 </span>
+                {!paidOrder && effectiveTip > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--gold)', marginTop: 2 }}>
+                    + {formatMoney(String(effectiveTip))} {t('pay.tip').toLowerCase()}
+                  </span>
+                )}
               </div>
             </header>
 
@@ -2416,6 +2590,14 @@ export function TableDetail() {
                   )}
                   <span style={styles.grandLabel}>Total</span>
                   <span style={styles.grandAmt}>{formatMoney(order.total)}</span>
+                  {effectiveTip > 0 && (
+                    <>
+                      <span style={{ color: 'var(--gold)' }}>{t('pay.tip')}</span>
+                      <span style={{ ...styles.totalsAmt, color: 'var(--gold)' }}>
+                        + {formatMoney(String(effectiveTip))}
+                      </span>
+                    </>
+                  )}
                   {recordedPaid > 0 && (
                     <>
                       <span>Paid</span>
@@ -2523,6 +2705,83 @@ export function TableDetail() {
                   ))}
                 </div>
 
+                {/* ─── Tip sub-panel ─────────────────────────────────────
+                    Hidden entirely for PAYROLL_DEDUCT — backend rejects any
+                    non-zero tip there. Disabled (but still visible) while
+                    splitting so the cashier knows the tip will ride on the
+                    final tender, not get attached to a partial payment. */}
+                {paymentMethod !== 'PAYROLL_DEDUCT' && (
+                  <div style={tipPanel}>
+                    <div style={tipRow}>
+                      {[10, 15, 20].map((pct) => {
+                        const matches = !splitMode && tipAmount === Math.round((total * pct) / 100) && tipAmount > 0;
+                        return (
+                          <button
+                            key={pct}
+                            type="button"
+                            disabled={tipDisabled}
+                            onClick={() => applyTipPercent(pct)}
+                            style={{
+                              ...tipChip,
+                              ...(matches ? tipChipActive : {}),
+                              ...(tipDisabled ? tipChipDisabled : {}),
+                            }}
+                          >
+                            {pct}%
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        disabled={tipDisabled}
+                        onClick={() => {
+                          setTipCustomMode((v) => !v);
+                          setTipCustomInput(
+                            tipAmount > 0 ? formatMoneyPlain(tipAmount) : '',
+                          );
+                        }}
+                        style={{
+                          ...tipChip,
+                          ...(tipCustomMode ? tipChipActive : {}),
+                          ...(tipDisabled ? tipChipDisabled : {}),
+                        }}
+                      >
+                        {t('pay.tipCustom')}
+                      </button>
+                      {tipAmount > 0 && !tipDisabled && (
+                        <button
+                          type="button"
+                          onClick={clearTip}
+                          style={tipChipClear}
+                        >
+                          {t('pay.tipClear')}
+                        </button>
+                      )}
+                    </div>
+                    {tipCustomMode && !tipDisabled && (
+                      <div style={tipCustomRow}>
+                        <input
+                          inputMode="decimal"
+                          autoFocus
+                          value={tipCustomInput}
+                          placeholder="0.00"
+                          onChange={(e) => setTipCustomInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitCustomTip();
+                          }}
+                          onBlur={commitCustomTip}
+                          style={tipCustomInputStyle}
+                        />
+                      </div>
+                    )}
+                    <div style={tipHint}>
+                      {splitMode
+                        ? t('pay.tipFinalOnly')
+                        : t('pay.tipHint')}
+                    </div>
+                  </div>
+                )}
+
                 {splitMode && splitPayments.length > 0 && (
                   <div style={styles.splitList}>
                     {splitPayments.map((p) => (
@@ -2563,7 +2822,7 @@ export function TableDetail() {
                       placeholder={
                         splitMode
                           ? 'Cash portion'
-                          : `Amount tendered · min ${formatMoney(String(remaining))}`
+                          : `Amount tendered · min ${formatMoney(String(remaining + effectiveTip))}`
                       }
                       value={amountInput}
                       onChange={(e) => setAmountInput(e.target.value)}
@@ -2640,7 +2899,11 @@ export function TableDetail() {
                       disabled={splitPayments.length === 0 || paymentMutation.isPending}
                     >
                       Complete Payment ·{' '}
-                      {formatMoney(String(splitPayments.reduce((a, p) => a + p.amount, 0)))}
+                      {formatMoney(
+                        String(
+                          splitPayments.reduce((a, p) => a + p.amount, 0) + tipAmount,
+                        ),
+                      )}
                     </button>
                   </>
                 ) : (
@@ -2653,7 +2916,7 @@ export function TableDetail() {
                     {paymentMutation.isPending ? (
                       <Spinner size={14} />
                     ) : (
-                      `Complete Payment · ${formatMoney(String(remaining))}`
+                      `Complete Payment · ${formatMoney(String(remaining + effectiveTip))}`
                     )}
                   </button>
                 )}

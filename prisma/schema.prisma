@@ -35,8 +35,33 @@ enum ContentUnit {
 
 enum PurchaseStatus {
   DRAFT
-  CONFIRMED
+  // DELIVERY lifecycle (digital supplier, order-by-message)
+  SENT_TO_SUPPLIER
+  SUPPLIER_REPLIED
+  PAID
+  IN_TRANSIT
+  ARRIVED
+  // ERRAND lifecycle (runner with cash)
+  DISPATCHED
+  RETURNED
+  // shared terminal states
+  VERIFIED
+  REJECTED
   CANCELLED
+  // legacy — kept so historical rows still parse; new code transitions to
+  // VERIFIED instead. The /confirm endpoint is a thin alias of /verify.
+  CONFIRMED
+}
+
+enum PurchaseKind {
+  DELIVERY
+  ERRAND
+}
+
+enum SupplierKind {
+  DELIVERY
+  ERRAND
+  BOTH
 }
 
 enum InventoryCheckType {
@@ -249,6 +274,9 @@ model User {
   updated_at        DateTime  @updatedAt
 
   purchases               Purchase[]
+  purchases_as_runner     Purchase[]       @relation("PurchaseRunner")
+  purchases_verified      Purchase[]       @relation("PurchaseVerifier")
+  purchases_cancelled     Purchase[]       @relation("PurchaseCancelledBy")
   transfers               Transfer[]
   inventory_checks        InventoryCheck[]
   write_offs              WriteOff[]
@@ -365,21 +393,31 @@ model Supply {
 }
 
 model Supplier {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  contact_name String?
-  phone        String?
-  email        String?
-  address      String?
-  credit_days  Int      @default(0)
-  notes        String?
-  active       Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id               String       @id @default(uuid()) @db.Uuid
+  name             String
+  contact_name     String?
+  phone            String?
+  email            String?
+  address          String?
+  credit_days      Int          @default(0)
+  notes            String?
+  active           Boolean      @default(true)
+  // How orders are placed with this supplier. DELIVERY = remote (WhatsApp,
+  // courier); ERRAND = local store where an employee walks in with cash;
+  // BOTH = either flow is allowed.
+  kind             SupplierKind @default(DELIVERY)
+  // E.164 without leading '+'. Used to build wa.me deep links.
+  whatsapp_phone   String?
+  // Optional custom template with {supplier_name}, {items}, {total}, {date}
+  // placeholders. Null falls back to the default template.
+  message_template String?
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
 
   purchase_packagings PurchasePackaging[]
   purchases           Purchase[]
 
+  @@index([kind])
   @@map("suppliers")
 }
 
@@ -462,6 +500,7 @@ model Purchase {
   storage_id     String         @db.Uuid
   date           DateTime
   status         PurchaseStatus @default(DRAFT)
+  kind           PurchaseKind   @default(DELIVERY)
   total          Decimal        @default(0) @db.Decimal(14, 0)
   payment_method String?
   notes          String?
@@ -469,15 +508,46 @@ model Purchase {
   created_at     DateTime       @default(now())
   updated_at     DateTime       @updatedAt
 
-  supplier Supplier       @relation(fields: [supplier_id], references: [id])
-  storage  Storage        @relation(fields: [storage_id], references: [id])
-  user     User           @relation(fields: [user_id], references: [id])
-  items    PurchaseItem[]
+  // DELIVERY lifecycle timestamps + supplier reply fields
+  message_sent_at     DateTime?
+  supplier_replied_at DateTime?
+  supplier_subtotal   Decimal?  @db.Decimal(14, 0)
+  shipping_cost       Decimal?  @db.Decimal(14, 0)
+  paid_at             DateTime?
+  payment_reference   String?
+  in_transit_at       DateTime?
+  arrived_at          DateTime?
+  expected_arrival    DateTime?
+
+  // ERRAND lifecycle (cash + runner)
+  runner_user_id String?   @db.Uuid
+  cash_advanced  Decimal?  @db.Decimal(14, 0)
+  cash_returned  Decimal?  @db.Decimal(14, 0)
+  dispatched_at  DateTime?
+  returned_at    DateTime?
+
+  // Shared terminal-state audit
+  verified_at          DateTime?
+  verified_by_user_id  String?   @db.Uuid
+  cancel_reason        String?
+  cancelled_at         DateTime?
+  cancelled_by_user_id String?   @db.Uuid
+
+  supplier       Supplier       @relation(fields: [supplier_id], references: [id])
+  storage        Storage        @relation(fields: [storage_id], references: [id])
+  user           User           @relation(fields: [user_id], references: [id])
+  runner         User?          @relation("PurchaseRunner", fields: [runner_user_id], references: [id])
+  verifier       User?          @relation("PurchaseVerifier", fields: [verified_by_user_id], references: [id])
+  canceller      User?          @relation("PurchaseCancelledBy", fields: [cancelled_by_user_id], references: [id])
+  items          PurchaseItem[]
+  cash_movements CashMovement[] @relation("CashMovementPurchase")
 
   @@index([supplier_id])
   @@index([storage_id])
   @@index([user_id])
   @@index([status])
+  @@index([kind])
+  @@index([runner_user_id])
   @@index([date])
   @@map("purchases")
 }
@@ -491,6 +561,14 @@ model PurchaseItem {
   price_per_package  Decimal  @db.Decimal(14, 0)
   base_unit_quantity Decimal  @db.Decimal(14, 4)
   unit_cost          Decimal  @db.Decimal(14, 4)
+  // What actually arrived. Null until verify. Can be 0 (full shortfall) or
+  // less than package_quantity (partial). Only this value drives StorageStock
+  // and the WAC recompute.
+  received_package_quantity Decimal? @db.Decimal(14, 4)
+  shortfall_reason          String?
+  // Set during supplier reply to signal "out of stock from supplier"; verify
+  // then defaults received to 0 unless the operator overrides.
+  unavailable               Boolean  @default(false)
   created_at         DateTime @default(now())
 
   purchase  Purchase           @relation(fields: [purchase_id], references: [id], onDelete: Cascade)
@@ -970,12 +1048,21 @@ model CashMovement {
   user_id     String           @db.Uuid
   created_at  DateTime         @default(now())
 
+  // Optional back-reference to the domain entity that caused this movement.
+  // Today only "Purchase" is wired (errand dispatch/return), but the field is
+  // generic so future drivers (manual adjustment, payroll advance, etc.) can
+  // attach without a schema change.
+  reference_type String?
+  reference_id   String? @db.Uuid
+
   register CashRegister @relation(fields: [register_id], references: [id], onDelete: Cascade)
   user     User         @relation(fields: [user_id], references: [id])
+  purchase Purchase?    @relation("CashMovementPurchase", fields: [reference_id], references: [id], onDelete: SetNull, map: "cash_movements_purchase_fkey")
 
   @@index([register_id])
   @@index([user_id])
   @@index([type])
+  @@index([reference_type, reference_id])
   @@map("cash_movements")
 }
 
