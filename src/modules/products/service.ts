@@ -218,3 +218,139 @@ export async function listProductModifierGroups(productId: string) {
     include: { modifier_group: { include: { modifiers: { where: { active: true } } } } },
   });
 }
+
+// ----------------------------------------------------------------------------
+// Duplicate
+// ----------------------------------------------------------------------------
+
+export async function duplicateProduct(id: string) {
+  const src = await prisma.product.findUnique({
+    where: { id },
+    include: {
+      variants: true,
+      modifier_groups: true,
+      recipe: { include: { items: true } },
+    },
+  });
+  if (!src || src.deleted_at) throw new NotFoundError('Product');
+
+  return prisma.$transaction(async (tx) => {
+    const product = await tx.product.create({
+      data: {
+        name: `${src.name} (copy)`,
+        type: src.type,
+        category_id: src.category_id,
+        station_id: src.station_id,
+        sell_price: src.sell_price,
+        image_url: src.image_url,
+        icon_color: src.icon_color,
+        display_order: src.display_order,
+        active: false,
+        allow_discount: src.allow_discount,
+        sold_by_weight: src.sold_by_weight,
+        barcode: null,
+        tax_id: src.tax_id,
+        supply_id: src.supply_id,
+      },
+    });
+
+    const variantMap = new Map<string, string>();
+    for (const v of src.variants) {
+      const nv = await tx.productVariant.create({
+        data: {
+          product_id: product.id,
+          name: v.name,
+          sell_price: v.sell_price,
+          barcode: null,
+          recipe_cost: v.recipe_cost,
+          food_cost_pct: v.food_cost_pct,
+          display_order: v.display_order,
+          active: v.active,
+        },
+      });
+      variantMap.set(v.id, nv.id);
+    }
+
+    for (const mg of src.modifier_groups) {
+      await tx.productModifierGroup.create({
+        data: {
+          product_id: product.id,
+          modifier_group_id: mg.modifier_group_id,
+        },
+      });
+    }
+
+    if (src.recipe) {
+      const recipe = await tx.recipe.create({
+        data: {
+          product_id: product.id,
+          yield_quantity: src.recipe.yield_quantity,
+          yield_unit: src.recipe.yield_unit,
+        },
+      });
+      for (const item of src.recipe.items) {
+        await tx.recipeItem.create({
+          data: {
+            recipe_id: recipe.id,
+            supply_id: item.supply_id,
+            preparation_id: item.preparation_id,
+            modifier_group_id: item.modifier_group_id,
+            quantity: item.quantity,
+            unit: item.unit,
+            waste_pct: item.waste_pct,
+          },
+        });
+      }
+    }
+
+    for (const [oldVId, newVId] of variantMap) {
+      const vRecipe = await tx.recipe.findUnique({
+        where: { variant_id: oldVId },
+        include: { items: true },
+      });
+      if (!vRecipe) continue;
+      const nr = await tx.recipe.create({
+        data: {
+          variant_id: newVId,
+          yield_quantity: vRecipe.yield_quantity,
+          yield_unit: vRecipe.yield_unit,
+        },
+      });
+      for (const item of vRecipe.items) {
+        await tx.recipeItem.create({
+          data: {
+            recipe_id: nr.id,
+            supply_id: item.supply_id,
+            preparation_id: item.preparation_id,
+            modifier_group_id: item.modifier_group_id,
+            quantity: item.quantity,
+            unit: item.unit,
+            waste_pct: item.waste_pct,
+          },
+        });
+      }
+    }
+
+    return tx.product.findUniqueOrThrow({
+      where: { id: product.id },
+      include: productInclude,
+    });
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Bulk update
+// ----------------------------------------------------------------------------
+
+export async function bulkUpdateProducts(
+  ids: string[],
+  update: { active?: boolean },
+) {
+  if (ids.length === 0) throw new BadRequestError('ids must not be empty');
+  if (ids.length > 100) throw new BadRequestError('Maximum 100 products per batch');
+  await prisma.product.updateMany({
+    where: { id: { in: ids }, deleted_at: null },
+    data: update,
+  });
+  return { updated: ids.length };
+}

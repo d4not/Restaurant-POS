@@ -91,9 +91,17 @@ export const attachModifierGroupSchema = z.object({
   modifier_group_id: z.string().uuid(),
 });
 
+export const bulkUpdateSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100),
+  update: z.object({
+    active: z.boolean().optional(),
+  }),
+});
+
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 export type ListProductQuery = z.infer<typeof listProductQuerySchema>;
 export type CreateVariantInput = z.infer<typeof createVariantSchema>;
 export type UpdateVariantInput = z.infer<typeof updateVariantSchema>;
 export type AttachModifierGroupInput = z.infer<typeof attachModifierGroupSchema>;
+export type BulkUpdateInput = z.infer<typeof bulkUpdateSchema>;

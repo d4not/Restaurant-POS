@@ -390,3 +390,18 @@ export function detachModifierGroup(
 ): Promise<void> {
   return api.delete<void>(`/products/${productId}/modifier-groups/${groupId}`);
 }
+
+/* ── Duplicate ────────────────────────────────────────────── */
+
+export function duplicateProduct(id: string): Promise<PosProduct> {
+  return api.post<PosProduct>(`/products/${id}/duplicate`, {});
+}
+
+/* ── Bulk update ──────────────────────────────────────────── */
+
+export function bulkUpdateProducts(
+  ids: string[],
+  update: { active?: boolean },
+): Promise<{ updated: number }> {
+  return api.post<{ updated: number }>('/products/bulk-update', { ids, update });
+}

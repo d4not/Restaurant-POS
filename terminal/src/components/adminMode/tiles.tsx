@@ -35,6 +35,9 @@ import {
   IconDrop,
   IconList,
   IconTag,
+  IconSliders,
+  IconFolder,
+  IconBadge,
 } from './icons';
 import type { TranslationKey } from '../../i18n/en';
 
@@ -60,7 +63,10 @@ export type AdminSubView =
   | 'scheduleRead'
   | 'payroll'
   | 'tipsAdjust'
-  | 'productsList';
+  | 'productsList'
+  | 'modifierGroupsList'
+  | 'categoriesList'
+  | 'employeeProductsList';
 
 export type TileAccent = 'gold' | 'green' | 'red' | 'neutral';
 
@@ -311,6 +317,39 @@ export const ADMIN_TILES: ReadonlyArray<AdminTileDef> = [
     accent: 'gold',
     allowedRoles: MANAGER_PLUS,
     action: { kind: 'view', view: 'productsList' },
+  },
+  {
+    id: 'modifierGroupsList',
+    section: 'catalog',
+    number: 2,
+    titleKey: 'admin.tile.modifierGroups',
+    hintKey: 'admin.tile.modifierGroupsHint',
+    Icon: IconSliders,
+    accent: 'gold',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'modifierGroupsList' },
+  },
+  {
+    id: 'categoriesList',
+    section: 'catalog',
+    number: 3,
+    titleKey: 'admin.tile.categories',
+    hintKey: 'admin.tile.categoriesHint',
+    Icon: IconFolder,
+    accent: 'neutral',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'categoriesList' },
+  },
+  {
+    id: 'employeeProductsList',
+    section: 'catalog',
+    number: 4,
+    titleKey: 'admin.tile.employeeProducts',
+    hintKey: 'admin.tile.employeeProductsHint',
+    Icon: IconBadge,
+    accent: 'green',
+    allowedRoles: MANAGER_PLUS,
+    action: { kind: 'view', view: 'employeeProductsList' },
   },
 
   // ─── Inventory ──────────────────────────────────────────────────────

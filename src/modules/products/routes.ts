@@ -12,6 +12,7 @@ import {
   createVariantSchema,
   updateVariantSchema,
   attachModifierGroupSchema,
+  bulkUpdateSchema,
 } from './schema.js';
 import { productModificationRouter } from '../product-modifications/routes.js';
 import { modifierOverrideRouter } from '../modifier-overrides/routes.js';
@@ -30,6 +31,7 @@ export const productRouter = Router();
 
 productRouter.use(requireAuth);
 
+productRouter.post('/bulk-update', validate(bulkUpdateSchema), asyncHandler(controller.bulkUpdate));
 productRouter.post('/', validate(createProductSchema), asyncHandler(controller.create));
 productRouter.get('/', validate(listProductQuerySchema, 'query'), asyncHandler(controller.list));
 productRouter.get('/:id', validate(uuidParamSchema, 'params'), asyncHandler(controller.getById));
@@ -90,6 +92,13 @@ productRouter.delete(
   '/:id/modifier-groups/:groupId',
   validate(modifierGroupParamSchema, 'params'),
   asyncHandler(controller.detachModifierGroup),
+);
+
+// Duplicate
+productRouter.post(
+  '/:id/duplicate',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.duplicate),
 );
 
 // Nested: /api/v1/products/:id/modifications

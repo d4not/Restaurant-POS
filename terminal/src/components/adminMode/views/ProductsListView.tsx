@@ -10,7 +10,7 @@
 //   GET    /api/v1/product-categories          — filter dropdown
 //   (CRUD lives in ProductDetailView / ProductNewView)
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AdminViewShell } from './AdminViewShell';
 import { Spinner } from '../../Spinner';
@@ -30,6 +30,7 @@ import {
   productTypeBadgeStyle,
   productTypeLabel,
 } from '../../../utils/product-meta';
+import { useBulkUpdateProducts } from '../../../hooks/useProducts';
 import { ProductDetailView } from './ProductDetailView';
 import { ProductNewView } from './ProductNewView';
 
@@ -99,6 +100,7 @@ export function ProductsListView({ onBack }: Props) {
           onBack={() => setSubView({ kind: 'list' })}
           onSaved={(text) => setToast({ kind: 'ok', text })}
           onError={(text) => setToast({ kind: 'err', text })}
+          onDuplicated={(newId) => setSubView({ kind: 'detail', productId: newId })}
         />
         {toast && <Toast kind={toast.kind} text={toast.text} />}
       </>
@@ -148,6 +150,27 @@ function ProductsList({ onBack, onOpen, onNew }: ListProps) {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('ALL');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const bulkMut = useBulkUpdateProducts();
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  const onBulkAction = async (active: boolean) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    try {
+      await bulkMut.mutateAsync({ ids, update: { active } });
+      clearSelection();
+    } catch { /* toast handled by query refetch */ }
+  };
 
   const productsQuery = useQuery({
     queryKey: ['admin', 'products', { includeInactive: status !== 'ACTIVE' }],
@@ -315,7 +338,18 @@ function ProductsList({ onBack, onOpen, onNew }: ListProps) {
 
       {/* Table */}
       <div style={tableShell}>
-        <div style={{ ...tableHead, gridTemplateColumns: COLS }}>
+        <div style={{ ...tableHead, gridTemplateColumns: COLS_BULK }}>
+          <span style={checkCol}>
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && selected.size === filtered.length}
+              onChange={() => {
+                if (selected.size === filtered.length) clearSelection();
+                else setSelected(new Set(filtered.map((p) => p.id)));
+              }}
+              style={checkbox}
+            />
+          </span>
           <span>{t('admin.productsList.col.name')}</span>
           <span>{t('admin.productsList.col.category')}</span>
           <span>{t('admin.productsList.col.type')}</span>
@@ -346,24 +380,37 @@ function ProductsList({ onBack, onOpen, onNew }: ListProps) {
                 ? categoryNameById.get(row.category_id) ?? '—'
                 : '—';
             const variantCount = row.variants.filter((v) => v.active).length;
+            const isChecked = selected.has(row.id);
 
             return (
-              <button
+              <div
                 key={row.id}
-                type="button"
-                onClick={() => onOpen(row.id)}
-                style={{ ...tableRow, gridTemplateColumns: COLS }}
+                style={{ ...tableRow, gridTemplateColumns: COLS_BULK }}
               >
-                <span style={nameCell}>
-                  <span style={nameMain}>{row.name}</span>
-                  {row.barcode ? (
-                    <span style={nameSub}>{row.barcode}</span>
-                  ) : (
-                    <span style={nameSubMuted}>
-                      {t('admin.productsList.drawer.noBarcode')}
-                    </span>
-                  )}
+                <span style={checkCol} onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleSelect(row.id)}
+                    style={checkbox}
+                  />
                 </span>
+                <button
+                  type="button"
+                  onClick={() => onOpen(row.id)}
+                  style={rowClickable}
+                >
+                  <span style={nameCell}>
+                    <span style={nameMain}>{row.name}</span>
+                    {row.barcode ? (
+                      <span style={nameSub}>{row.barcode}</span>
+                    ) : (
+                      <span style={nameSubMuted}>
+                        {t('admin.productsList.drawer.noBarcode')}
+                      </span>
+                    )}
+                  </span>
+                </button>
                 <span style={cellMuted}>{categoryName}</span>
                 <span style={typeCell}>
                   <span style={{ ...typeBadge, ...productTypeBadgeStyle(row.type) }}>
@@ -386,10 +433,40 @@ function ProductsList({ onBack, onOpen, onNew }: ListProps) {
                       : t('admin.productsList.status.inactive')}
                   </span>
                 </span>
-              </button>
+              </div>
             );
           })}
       </div>
+
+      {/* Floating bulk action bar */}
+      {selected.size > 0 && (
+        <div style={bulkBar}>
+          <span style={bulkCount}>
+            {selected.size === 1
+              ? t('admin.productsList.bulk.one')
+              : t('admin.productsList.bulk.count').replace('{count}', String(selected.size))}
+          </span>
+          <button
+            type="button"
+            style={bulkBtnGreen}
+            onClick={() => onBulkAction(true)}
+            disabled={bulkMut.isPending}
+          >
+            {t('admin.productsList.bulk.activate')}
+          </button>
+          <button
+            type="button"
+            style={bulkBtnGray}
+            onClick={() => onBulkAction(false)}
+            disabled={bulkMut.isPending}
+          >
+            {t('admin.productsList.bulk.deactivate')}
+          </button>
+          <button type="button" style={bulkBtnClear} onClick={clearSelection}>
+            {t('admin.productsList.bulk.clear')}
+          </button>
+        </div>
+      )}
     </AdminViewShell>
   );
 }
@@ -440,8 +517,8 @@ function KpiCell({ label, value, hint, valueColor, muted }: KpiCellProps) {
 
 /* ── Styles ─────────────────────────────────────────────────────────────── */
 
-const COLS =
-  'minmax(220px, 2.1fr) minmax(120px, 1fr) minmax(110px, 0.9fr) 120px 100px 90px';
+const COLS_BULK =
+  '36px minmax(220px, 2.1fr) minmax(120px, 1fr) minmax(110px, 0.9fr) 120px 100px 90px';
 
 const headerActions: CSSProperties = {
   display: 'inline-flex',
@@ -738,4 +815,87 @@ const toastStyle: CSSProperties = {
   fontWeight: 600,
   zIndex: 300,
   boxShadow: '0 12px 32px rgba(0,0,0,0.24)',
+};
+
+const checkCol: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const checkbox: CSSProperties = {
+  width: 18,
+  height: 18,
+  cursor: 'pointer',
+  accentColor: 'var(--gold)',
+};
+
+const rowClickable: CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  textAlign: 'left',
+  fontFamily: 'inherit',
+  fontSize: 'inherit',
+  color: 'inherit',
+  padding: 0,
+  minWidth: 0,
+};
+
+const bulkBar: CSSProperties = {
+  position: 'fixed',
+  bottom: 20,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '10px 20px',
+  borderRadius: 14,
+  background: 'var(--bg2)',
+  border: '1px solid var(--border)',
+  boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+  zIndex: 200,
+};
+
+const bulkCount: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--text1)',
+  marginRight: 6,
+};
+
+const bulkBtnGreen: CSSProperties = {
+  padding: '8px 16px',
+  borderRadius: 8,
+  border: '1px solid var(--green)',
+  background: 'var(--green)',
+  color: '#fff',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const bulkBtnGray: CSSProperties = {
+  padding: '8px 16px',
+  borderRadius: 8,
+  border: '1px solid var(--border)',
+  background: 'var(--bg)',
+  color: 'var(--text1)',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const bulkBtnClear: CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--text3)',
+  fontSize: 12,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
 };

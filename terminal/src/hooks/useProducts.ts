@@ -13,11 +13,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   attachModifierGroup,
+  bulkUpdateProducts,
   createProduct,
   createVariant,
   deleteProduct,
   deleteVariant,
   detachModifierGroup,
+  duplicateProduct,
   getProduct,
   type CreateProductInput,
   type CreateVariantInput,
@@ -144,6 +146,30 @@ export function useDetachModifierGroup(productId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'products'] });
       qc.invalidateQueries({ queryKey: ['admin', 'product', productId] });
+    },
+  });
+}
+
+/* ── Duplicate + bulk ────────────────────────────────────── */
+
+export function useDuplicateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => duplicateProduct(id),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'products'] });
+      qc.setQueryData<PosProduct>(['admin', 'product', data.id], data);
+    },
+  });
+}
+
+export function useBulkUpdateProducts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, update }: { ids: string[]; update: { active?: boolean } }) =>
+      bulkUpdateProducts(ids, update),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'products'] });
     },
   });
 }

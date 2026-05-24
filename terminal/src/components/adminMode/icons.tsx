@@ -173,3 +173,30 @@ export const IconTag: Icon = (props) => (
     <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none" />
   </svg>
 );
+
+export const IconSliders: Icon = (props) => (
+  <svg {...base} {...props}>
+    <line x1="4" y1="6" x2="20" y2="6" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+    <line x1="4" y1="18" x2="20" y2="18" />
+    <circle cx="9" cy="6" r="2" fill="var(--bg2)" />
+    <circle cx="15" cy="12" r="2" fill="var(--bg2)" />
+    <circle cx="9" cy="18" r="2" fill="var(--bg2)" />
+  </svg>
+);
+
+export const IconFolder: Icon = (props) => (
+  <svg {...base} {...props}>
+    <path d="M3 6a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6Z" />
+  </svg>
+);
+
+export const IconBadge: Icon = (props) => (
+  <svg {...base} {...props}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M9 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+    <path d="M5 17c0-2 1.8-3 4-3s4 1 4 3" />
+    <line x1="15" y1="8" x2="19" y2="8" />
+    <line x1="15" y1="12" x2="19" y2="12" />
+  </svg>
+);

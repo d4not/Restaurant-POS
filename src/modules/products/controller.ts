@@ -93,3 +93,16 @@ export async function listModifierGroups(req: Request, res: Response): Promise<v
   const links = await service.listProductModifierGroups(req.params.id as string);
   res.json({ success: true, data: links });
 }
+
+export async function duplicate(req: Request, res: Response): Promise<void> {
+  const product = await service.duplicateProduct(req.params.id as string);
+  res.status(201).json({ success: true, data: product });
+}
+
+export async function bulkUpdate(req: Request, res: Response): Promise<void> {
+  const result = await service.bulkUpdateProducts(
+    req.body.ids as string[],
+    req.body.update as { active?: boolean },
+  );
+  res.json({ success: true, data: result });
+}

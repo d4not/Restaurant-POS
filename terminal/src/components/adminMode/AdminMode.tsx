@@ -50,6 +50,9 @@ import { InventoryCountView } from './views/InventoryCountView';
 import { WriteOffsView } from './views/WriteOffsView';
 import { StockMovementsView } from './views/StockMovementsView';
 import { ProductsListView } from './views/ProductsListView';
+import { ModifierGroupsListView } from './views/ModifierGroupsListView';
+import { CategoriesListView } from './views/CategoriesListView';
+import { EmployeeProductsListView } from './views/EmployeeProductsListView';
 import { SuggestedChangesView } from './views/SuggestedChangesView';
 import { DailyReportModal } from '../operations-hub/DailyReportModal';
 import { adminStyles } from './styles';
@@ -334,6 +337,15 @@ export function AdminMode() {
       {activeView === 'productsList' && (
         <ProductsListView onBack={() => setActiveView(null)} />
       )}
+      {activeView === 'modifierGroupsList' && (
+        <ModifierGroupsListView onBack={() => setActiveView(null)} />
+      )}
+      {activeView === 'categoriesList' && (
+        <CategoriesListView onBack={() => setActiveView(null)} />
+      )}
+      {activeView === 'employeeProductsList' && (
+        <EmployeeProductsListView onBack={() => setActiveView(null)} />
+      )}
       {activeView !== null &&
         viewTitleKey &&
         !isImplementedView(activeView) && (
@@ -432,6 +444,12 @@ function viewToTitleKey(view: AdminSubView | null) {
       return 'payroll.title' as const;
     case 'tipsAdjust':
       return 'admin.tips.title' as const;
+    case 'modifierGroupsList':
+      return 'admin.modifierGroups.title' as const;
+    case 'categoriesList':
+      return 'admin.categories.title' as const;
+    case 'employeeProductsList':
+      return 'admin.employeeProducts.title' as const;
     default:
       return null;
   }
@@ -459,6 +477,9 @@ function isImplementedView(view: AdminSubView | null): boolean {
     view === 'inventoryCount' ||
     view === 'writeOffs' ||
     view === 'stockMovements' ||
-    view === 'productsList'
+    view === 'productsList' ||
+    view === 'modifierGroupsList' ||
+    view === 'categoriesList' ||
+    view === 'employeeProductsList'
   );
 }

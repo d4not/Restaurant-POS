@@ -31,3 +31,33 @@ export async function listProductCategories(): Promise<ProductCategory[]> {
   } while (cursor);
   return out;
 }
+
+// ── Admin CRUD ──────────────────────────────────────────────────────────────
+
+export interface CreateCategoryInput {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  image_url?: string | null;
+  display_order?: number;
+  visible_in_pos?: boolean;
+  parent_id?: string | null;
+}
+
+export type UpdateCategoryInput = Partial<CreateCategoryInput>;
+
+export function getProductCategory(id: string): Promise<ProductCategory> {
+  return api.get<ProductCategory>(`/product-categories/${id}`);
+}
+
+export function createProductCategory(input: CreateCategoryInput): Promise<ProductCategory> {
+  return api.post<ProductCategory>('/product-categories', input);
+}
+
+export function updateProductCategory(id: string, input: UpdateCategoryInput): Promise<ProductCategory> {
+  return api.patch<ProductCategory>(`/product-categories/${id}`, input);
+}
+
+export function deleteProductCategory(id: string): Promise<void> {
+  return api.delete<void>(`/product-categories/${id}`);
+}

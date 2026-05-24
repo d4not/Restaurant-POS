@@ -24,6 +24,7 @@ import {
   useDeleteProduct,
   useDeleteVariant,
   useDetachModifierGroup,
+  useDuplicateProduct,
   useProduct,
   useProductCategories,
   useTaxes,
@@ -70,6 +71,7 @@ interface Props {
   onBack: () => void;
   onSaved: (msg: string) => void;
   onError: (msg: string) => void;
+  onDuplicated?: (newId: string) => void;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -113,7 +115,7 @@ function highestVariantPrice(variants: ProductVariant[]): number | null {
 
 /* ── Component ──────────────────────────────────────────────────────────── */
 
-export function ProductDetailView({ productId, onBack, onSaved, onError }: Props) {
+export function ProductDetailView({ productId, onBack, onSaved, onError, onDuplicated }: Props) {
   const { t } = useTranslation();
   const productQ = useProduct(productId);
   const categoriesQ = useProductCategories();
@@ -172,6 +174,7 @@ export function ProductDetailView({ productId, onBack, onSaved, onError }: Props
 
   const updateMut = useUpdateProduct();
   const deleteMut = useDeleteProduct();
+  const duplicateMut = useDuplicateProduct();
   const deleteVariantMut = useDeleteVariant(productId);
   const detachGroupMut = useDetachModifierGroup(productId);
   const deleteOverrideMut = useDeleteOverride(productId);
@@ -284,6 +287,24 @@ export function ProductDetailView({ productId, onBack, onSaved, onError }: Props
       await deleteMut.mutateAsync(product.id);
       onSaved(t('admin.productDetail.deleteSuccess'));
       onBack();
+    } catch (err) {
+      onError(
+        err instanceof ApiError && err.message
+          ? err.message
+          : t('admin.productDetail.saveError'),
+      );
+    }
+  };
+
+  const onDuplicateProduct = async () => {
+    if (!product) return;
+    if (!confirm(t('admin.productDetail.duplicateConfirm').replace('{name}', product.name))) {
+      return;
+    }
+    try {
+      const copy = await duplicateMut.mutateAsync(product.id);
+      onSaved(t('admin.productDetail.duplicateSuccess'));
+      onDuplicated?.(copy.id);
     } catch (err) {
       onError(
         err instanceof ApiError && err.message
@@ -466,9 +487,17 @@ export function ProductDetailView({ productId, onBack, onSaved, onError }: Props
         <SaveBar saving={updateMut.isPending} onDiscard={onDiscard} onSave={onSave} />
       )}
 
-      {/* Header card (inline edit) + Delete button row */}
+      {/* Header card (inline edit) + action button row */}
       <div style={topRow}>
         <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          style={btnGhost}
+          onClick={onDuplicateProduct}
+          disabled={duplicateMut.isPending || updateMut.isPending}
+        >
+          {t('admin.productDetail.duplicate')}
+        </button>
         <button
           type="button"
           style={btnDanger}
@@ -1048,6 +1077,19 @@ const topRow: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   marginBottom: 10,
+};
+
+const btnGhost: CSSProperties = {
+  padding: '0 16px',
+  height: 38,
+  borderRadius: 8,
+  border: '1px solid var(--border)',
+  background: 'var(--bg2)',
+  color: 'var(--text1)',
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
 };
 
 const btnDanger: CSSProperties = {
