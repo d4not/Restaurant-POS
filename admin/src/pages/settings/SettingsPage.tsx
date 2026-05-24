@@ -19,6 +19,7 @@ import {
 import type { Tax } from '../../types/menu';
 import { formatDate, formatMoney } from '../../utils/format';
 import { useTranslation, type Language } from '../../i18n';
+import { CashHandlingCard } from './CashHandlingCard';
 
 const CURRENCY_OPTIONS = [
   { value: 'MXN', label: 'Mexican Peso (MXN)' },
@@ -37,6 +38,7 @@ export function SettingsPage() {
       <DefaultTaxCard />
       <TakeoutChannelsCard />
       <PrinterSettingsCard />
+      <CashHandlingCard />
       <TaxConfigurationCard />
     </div>
   );
