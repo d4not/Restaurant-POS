@@ -31,6 +31,7 @@ export const en = {
   'common.none': 'None',
   'common.retry': 'Retry',
   'common.refresh': 'Refresh',
+  'common.unknownError': 'Unknown error',
 
   // ─── Status
   'status.offline': 'Offline',
@@ -83,9 +84,21 @@ export const en = {
   'login.serverPromptHint': 'Include the protocol and port — for example, http://192.168.1.100:3000/api/v1',
   'login.backspace': 'Backspace',
 
+  // ─── Mode picker (manager/admin only)
+  'modePicker.greeting': 'Signed in',
+  'modePicker.title': 'Choose your mode',
+  'modePicker.sub': 'You can manage orders on this device or open the back-office panel.',
+  'modePicker.posMode': 'POS Mode',
+  'modePicker.posDesc': 'Take orders, send to kitchen, and run the register on this terminal.',
+  'modePicker.adminMode': 'Admin Mode',
+  'modePicker.adminDesc': 'Open the admin panel to manage menu, inventory, reports, and staff.',
+  'modePicker.opening': 'Opening admin…',
+  'modePicker.roleLabel': 'Role',
+
   // ─── Floor plan
   'floor.tapToOpen': 'Tap to open',
   'floor.seats': 'seats',
+  'floor.seatsCount': '{n} seats',
   'floor.editLayout': 'Edit Layout',
   'floor.exitEdit': 'Done editing',
   'floor.available': 'Available',
@@ -363,6 +376,16 @@ export const en = {
   'register.movements': 'Movements',
   'register.notes': 'Notes',
   'register.notesPlaceholder': 'Optional notes',
+  'register.endChoiceLabel': 'After counting:',
+  'register.endChoiceShiftOnly': 'Close shift only',
+  'register.endChoiceShiftOnlyHint': 'Day stays open — another cashier can take over.',
+  'register.endChoiceEndDay': 'Close shift & end the day',
+  'register.endChoiceEndDayHint': 'Locks the day and prints the Z-report.',
+  'register.endChoiceManagerOnly': 'Only managers and admins can end the day.',
+  'register.submitCountAndEndDay': 'Submit count & end day',
+  'register.resultsSubDayClosed': 'Day closed — Z-report folio {folio}.',
+  'register.dayClosedBadge': 'Day closed — Z-report folio {folio}.',
+  'register.dayCloseFailed': 'Shift closed, but the day could not be closed: {error}',
 
   // ─── Order History
   'history.title': "Today's Orders",
@@ -403,6 +426,42 @@ export const en = {
   'history.orderCancelled': 'Order cancelled.',
   'history.noPayments': 'No payments yet.',
   'history.split': 'Split',
+  // Today-only header + per-shift sections
+  'history.todaySubtitle': "Today's tickets · {date}",
+  'history.shiftBy': 'Shift by',
+  'history.shiftOther': 'Other shift',
+  'history.shiftOpen': 'Open',
+  'history.shiftClosed': 'Closed',
+  'history.shiftOpened': 'Opened',
+  'history.ordersWord': 'orders',
+  'history.emptyShift': 'No orders in this shift yet.',
+  // Filter bar
+  'history.status': 'Status',
+  'history.payment': 'Payment',
+  'history.tableLabel': 'Table',
+  'history.productLabel': 'Product',
+  // Manager actions
+  'history.actionReopen': 'Send back to floor',
+  'history.actionDelete': 'Delete from history',
+  'history.changeMethodShort': 'Change',
+  'history.managerPinLabel': 'Manager PIN',
+  // Reopen modal (uses PinConfirmModal)
+  'history.reopenTitle': 'Send order back to the floor?',
+  'history.reopenMessage': 'Reopen order #{n}. Payments will be removed, inventory restored, and the table reassigned. Enter a manager PIN to authorise.',
+  'history.reopenConfirm': 'Reopen ticket',
+  // Soft-delete modal
+  'history.deleteOrderTitle': 'Delete from history?',
+  'history.deleteOrderSub': 'Order #{n} will be hidden from the history listing. Reports still see it.',
+  'history.deleteReasonLabel': 'Reason (5+ characters)',
+  'history.deleteReasonPlaceholder': 'Why is this order being deleted?',
+  'history.deleteConfirm': 'Delete',
+  // Change-payment-method modal
+  'history.changeMethodTitle': 'Change payment method',
+  'history.changeMethodSub': 'Currently {from} · {amount}. No money will move.',
+  'history.changeMethodPickLabel': 'New method',
+  'history.changeMethodReferenceLabel': 'Reference / authorisation code',
+  'history.changeMethodReferencePlaceholder': 'Optional',
+  'history.changeMethodConfirm': 'Save change',
 
   // ─── Settings
   'settings.title': 'Settings',
@@ -548,6 +607,8 @@ export const en = {
   'settings.suggestionTypeProductUpdate': 'Edit product',
   'settings.suggestionTypeProductDelete': 'Delete product',
   'settings.optionalAuditNote': 'Optional note for the audit log…',
+  'settings.timedOut': 'Timed out — server did not respond.',
+  'settings.unexpectedHealth': 'Unexpected response from /health.',
 
   // ─── Cancel order modal
   'cancel.title': 'Cancel order',
@@ -611,6 +672,18 @@ export const en = {
   'takeout.channelDeliveryApp': 'Delivery app',
   'takeout.channelDeliveryAppHint': 'Uber Eats / DiDi Food / Rappi',
   'takeout.noShift': 'No open shift — tap the shift pill to open one.',
+  'takeout.label': 'Takeout',
+  'takeout.opening': 'Opening…',
+  'takeout.detailsHeader': 'Customer details',
+  'takeout.noChannelSet': 'No channel selected for this order yet.',
+  'takeout.saving': 'Saving…',
+  'takeout.saved': 'Saved',
+  'takeout.saveFailed': 'Could not save',
+  'takeout.couldNotSave': 'Could not save customer details.',
+  'takeout.couldNotStart': 'Could not open the takeout order.',
+  'takeout.zoneEmpty': 'No takeout orders open right now.',
+  'takeout.zoneActiveOne': '{n} active order',
+  'takeout.zoneActiveMany': '{n} active orders',
 
   // ─── Topbar additions
   'topbar.operations': 'Operations',
@@ -632,6 +705,8 @@ export const en = {
   'hub.action.transferHint': 'Move stock between storages',
   'hub.action.printerCheck': 'Printer Check',
   'hub.action.printerCheckHint': 'Verify kitchen and receipt',
+  'hub.action.waste': 'Log Waste',
+  'hub.action.wasteHint': 'Spillage, breakage, or expired stock',
   'hub.disabled.noShift': 'Open the cash register first to use this action.',
 
   // ─── Cash movement (income / expense child modal — shared component)
@@ -672,6 +747,15 @@ export const en = {
   'dailyReport.movementsHeader': 'Cash movements',
   'dailyReport.failed': 'Could not load report',
 
+  // ─── Supply scan picker (shared by Transfer / Waste)
+  'supplyPicker.placeholder': 'Scan a barcode or type to search…',
+  'supplyPicker.hint': 'Focus this field and trigger your scanner. Press Enter to add manually.',
+  'supplyPicker.searching': 'Searching…',
+  'supplyPicker.noResults': 'No supplies match.',
+  'supplyPicker.disabled': 'Supply scanning is disabled right now.',
+  'supplyPicker.unknownBarcode': 'Unknown barcode — register the supply in admin first.',
+  'supplyPicker.notFoundCta': 'Found in catalog only — register the supply in admin to use here.',
+  'supplyPicker.lookupFailed': 'Lookup failed — check the connection and try again.',
 
   // ─── Waste / Write-off (operations hub)
   'waste.title': 'Log waste',
@@ -735,6 +819,28 @@ export const en = {
   'waste.batchOk': 'Recorded {n} waste lines.',
   'waste.recipeLoadFailed': 'Could not load recipe ingredients.',
   'waste.recipeEmpty': '{name} has no recipe to expand.',
+  // ─── Variant / modifier picker (ProductPicker modal)
+  'picker.pickSize': 'Pick a size and any modifiers.',
+  'picker.confirmMods': 'Confirm modifiers and add to ticket.',
+  'picker.size': 'Size',
+  'picker.note': 'Note',
+  'picker.notePlaceholder': 'Special request, allergy, prep instructions…',
+  'picker.adding': 'Adding…',
+  'picker.saving': 'Saving…',
+  'picker.addToTicket': 'Add to ticket',
+  'picker.saveChanges': 'Save changes',
+
+  // ─── Provisional shift banner (waiter opened a shift; cashier must verify)
+  'provisional.banner': 'Provisional shift in progress',
+  'provisional.bannerSub': 'A cashier must verify the drawer to record a partial cut.',
+  'provisional.openedBy': 'Opened by {name}',
+  'provisional.verifyBtn': 'Verify shift',
+  'provisional.verifyTitle': 'Verify provisional shift',
+  'provisional.verifySub': 'Count the cash in the drawer. The expected amount and difference will be recorded as a partial cut — the same shift keeps running.',
+  'provisional.verifyResultsTitle': 'Drawer verified',
+  'provisional.verifyResultsSub': 'Partial cut recorded. The shift continues as a normal shift.',
+  'provisional.closeBlocked': 'Provisional shifts must be verified from the banner — they cannot be closed directly.',
+  'provisional.couldNotVerify': 'Could not verify shift.',
 
   // ─── Transfer (supplies between storages, barcode-driven)
   'transfer.title': 'Transfer supplies',
@@ -805,6 +911,8 @@ export const en = {
   'admin.greeting.afternoon': 'Good afternoon, {name}',
   'admin.greeting.evening': 'Good evening, {name}',
   'admin.greeting.night': 'Working late, {name}',
+  // ─── Admin mode (Launchpad)
+  'admin.subtitle': 'Daily operations, reports, and dashboards',
   'admin.section.operations': 'Operations',
   'admin.section.operationsHint': 'Shift, cash and supplies',
   'admin.section.reports': 'Reports',
@@ -1442,6 +1550,16 @@ export const en = {
   'admin.cashLog.subtitle':
     'Browse, add, edit, or remove cash movements — grouped by day and shift. Edits on a closed shift recompute its totals.',
   'admin.cashLog.empty': 'No cash movements in this period.',
+  'admin.shiftAudit.kpi.openShifts': 'Open right now',
+  'admin.shiftAudit.col.opened': 'Opened',
+  'admin.shiftAudit.col.closed': 'Closed',
+  'admin.shiftAudit.col.opener': 'Opener',
+  'admin.shiftAudit.col.status': 'Status',
+  'admin.shiftAudit.row.notCounted': 'not counted',
+  'admin.shiftAudit.detail.title': 'Shift detail',
+  'admin.shiftAudit.detail.noMovements': 'No cash movements were recorded.',
+  'admin.shiftAudit.action.forceClose': 'Force close',
+  'admin.shiftAudit.action.editActual': 'Adjust counted',
   'admin.cashLog.filter.type': 'Type',
   'admin.cashLog.filter.typeAll': 'All',
   'admin.cashLog.filter.in': 'Income',
@@ -1605,10 +1723,8 @@ export const en = {
 
   // ─── Common (additions)
   'common.error': 'Something went wrong.',
-  'common.unknownError': 'Unexpected error.',
 
   // ─── Floor plan (additions)
-  'floor.seatsCount': '{n} seats',
 
   // ─── Order History (additions)
   'history.statOrders': 'orders',
@@ -1620,37 +1736,9 @@ export const en = {
   'history.filtersButton': 'Filters',
   'history.appliedFilters': 'Applied filters',
   'history.removeFilter': 'Remove {label} filter',
-  'history.status': 'Status',
-  'history.payment': 'Payment',
-  'history.tableLabel': 'Table',
-  'history.productLabel': 'Product',
-  'history.ordersWord': 'orders',
-  'history.shiftBy': 'Shift by',
-  'history.shiftOther': 'Other orders',
-  'history.shiftOpened': 'Opened at',
-  'history.shiftOpen': 'Open',
-  'history.shiftClosed': 'Closed',
-  'history.emptyShift': 'No orders in this shift.',
   'history.emptyShiftLine': '1 empty shift: {name}',
   'history.emptyShiftsLine': '{count} empty shifts: {names}',
-  'history.actionReopen': 'Reopen',
   'history.actionChangeMethod': 'Change pay method',
-  'history.actionDelete': 'Delete',
-  'history.reopenTitle': 'Reopen order',
-  'history.reopenMessage': 'Reopen order #{n}? It will return to the active list.',
-  'history.reopenConfirm': 'Reopen order',
-  'history.deleteOrderTitle': 'Delete order',
-  'history.deleteOrderSub': 'Delete order #{n}? This cannot be undone.',
-  'history.deleteReasonLabel': 'Reason',
-  'history.deleteReasonPlaceholder': 'Why is this order being deleted?',
-  'history.deleteConfirm': 'Delete order',
-  'history.managerPinLabel': 'Manager PIN',
-  'history.changeMethodTitle': 'Change payment method',
-  'history.changeMethodSub': 'Currently {from} for {amount}. Pick a new method.',
-  'history.changeMethodPickLabel': 'New method',
-  'history.changeMethodReferenceLabel': 'Reference',
-  'history.changeMethodReferencePlaceholder': 'Transaction ID',
-  'history.changeMethodConfirm': 'Save method',
 
   // ─── Suggestion / approval flow on history actions
   // Cashier-side: when a cashier presses Reopen / Delete / Change-method,
@@ -1682,18 +1770,6 @@ export const en = {
   'history.suggestSubmit': 'Send suggestion',
 
   // ─── Takeout (additions)
-  'takeout.label': 'Takeout',
-  'takeout.detailsHeader': 'Customer details',
-  'takeout.noChannelSet': 'No channel selected.',
-  'takeout.opening': 'Opening…',
-  'takeout.couldNotStart': 'Could not start order.',
-  'takeout.couldNotSave': 'Could not save details.',
-  'takeout.saving': 'Saving…',
-  'takeout.saved': 'Saved.',
-  'takeout.saveFailed': 'Save failed.',
-  'takeout.zoneEmpty': 'No active takeout orders.',
-  'takeout.zoneActiveOne': '{n} active order',
-  'takeout.zoneActiveMany': '{n} active orders',
 
   // ─── Employee Order (employee tab)
   'employeeOrder.label': 'Employee tab',
@@ -1711,14 +1787,6 @@ export const en = {
   'employeeOrder.startTab': 'Start tab',
 
   // ─── Mode Picker (POS vs Admin)
-  'modePicker.greeting': 'Hello',
-  'modePicker.title': 'Choose a workspace',
-  'modePicker.sub': 'You can switch any time.',
-  'modePicker.posMode': 'POS',
-  'modePicker.posDesc': 'Take orders and process payments.',
-  'modePicker.adminMode': 'Admin Mode',
-  'modePicker.adminDesc': 'Reports, shift audits, supplies.',
-  'modePicker.roleLabel': 'Role',
 
   // ─── No Active Shift Screen (admin CTA)
   'noShift.adminTitle': 'Admin Mode',
@@ -1726,60 +1794,21 @@ export const en = {
   'noShift.adminCta': 'Open Admin Mode',
 
   // ─── Product picker / modifier picker
-  'picker.pickSize': 'Pick a size',
-  'picker.confirmMods': 'Confirm options',
-  'picker.size': 'Size',
-  'picker.note': 'Note',
-  'picker.notePlaceholder': 'Add a note for the kitchen…',
-  'picker.adding': 'Adding…',
-  'picker.saving': 'Saving…',
-  'picker.addToTicket': 'Add to ticket',
-  'picker.saveChanges': 'Save changes',
 
   // ─── Supply picker / barcode scan
-  'supplyPicker.placeholder': 'Scan or search by name…',
-  'supplyPicker.hint': 'Scan a barcode or type to search.',
-  'supplyPicker.searching': 'Searching…',
-  'supplyPicker.noResults': 'No matches.',
-  'supplyPicker.disabled': 'Picker disabled.',
-  'supplyPicker.unknownBarcode': 'Unknown barcode.',
-  'supplyPicker.notFoundCta': 'Not found — search by name?',
-  'supplyPicker.lookupFailed': 'Lookup failed.',
 
   // ─── Provisional shift
-  'provisional.banner': 'Provisional shift',
-  'provisional.bannerSub': 'awaiting cashier verification',
-  'provisional.openedBy': 'Opened by {name}',
-  'provisional.closeBlocked': 'Verify the partial cut before closing.',
-  'provisional.verifyBtn': 'Verify cut',
-  'provisional.verifyTitle': 'Verify provisional cut',
-  'provisional.verifySub':
-    'Count the drawer and record the difference. The shift stays open.',
-  'provisional.verifyResultsTitle': 'Cut verified',
-  'provisional.verifyResultsSub': 'The shift will continue under the same register.',
-  'provisional.couldNotVerify': 'Could not verify the cut.',
 
   // ─── Register / shift (additions)
-  'register.endChoiceEndDay': 'End the day',
-  'register.endChoiceEndDayHint': 'Close this shift and finalize the daily report.',
-  'register.endChoiceManagerOnly': 'Only managers can end the day.',
   'register.endChoiceDayClosed': 'Today is already closed.',
   'register.endDayInAdmin': 'Day-end is available in Admin Mode.',
-  'register.dayClosedBadge': 'Day closed at {time}',
-  'register.dayCloseFailed': 'Day close failed: {error}',
-  'register.resultsSubDayClosed': 'Shift closed and day finalized at {time}.',
-  'register.submitCountAndEndDay': 'Submit count & end day',
 
   // ─── Settings (additions)
-  'settings.timedOut': 'Request timed out.',
-  'settings.unexpectedHealth': 'Unexpected health response.',
 
   // ─── Payment method (additions)
   'pay.method.payrollDeduct': 'Payroll deduction',
 
   // ─── Operations Hub (additions)
-  'hub.action.waste': 'Waste',
-  'hub.action.wasteHint': 'Log spoilage or damaged stock.',
 
   // ─── Admin Mode: Launcher chrome (additions)
   'admin.subgreet.shiftOpen': 'Shift open · keep the day running smoothly.',
@@ -2444,6 +2473,19 @@ export const en = {
   'pay.tipCustom': 'Custom',
   'pay.tipClear': 'Clear',
   'pay.tipFinalOnly': 'Tip will be attached to the final payment.',
+  'admin.cashLog.col.when': 'When',
+  'admin.cashLog.col.type': 'Type',
+  'admin.cashLog.col.amount': 'Amount',
+  'admin.cashLog.col.reason': 'Reason',
+  'admin.cashLog.col.shift': 'Shift',
+  'admin.cashLog.add': '+ New movement',
+  'admin.cashLog.blockedNoShift': 'A shift must be open to add a movement.',
+  'admin.transferAdv.col.remove': '',
+  'admin.palette.section': 'Section',
+  'admin.palette.locked': 'Locked',
+  'admin.hint.open': 'Open',
+  'admin.hint.exit': 'Exit',
+  'admin.comingSoon.openWeb': 'Use the admin web for now',
 } as const;
 
 export type TranslationKey = keyof typeof en;

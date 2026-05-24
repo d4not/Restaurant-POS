@@ -30,6 +30,7 @@ export const es: Record<TranslationKey, string> = {
   'common.none': 'Ninguno',
   'common.retry': 'Reintentar',
   'common.refresh': 'Actualizar',
+  'common.unknownError': 'Error desconocido',
 
   // ─── Status
   'status.offline': 'Sin conexión',
@@ -82,9 +83,21 @@ export const es: Record<TranslationKey, string> = {
   'login.serverPromptHint': 'Incluye protocolo y puerto — por ejemplo, http://192.168.1.100:3000/api/v1',
   'login.backspace': 'Borrar',
 
+  // ─── Mode picker (manager/admin only)
+  'modePicker.greeting': 'Sesión iniciada',
+  'modePicker.title': 'Elige tu modo',
+  'modePicker.sub': 'Puedes administrar órdenes en este dispositivo o abrir el panel de administración.',
+  'modePicker.posMode': 'Modo POS',
+  'modePicker.posDesc': 'Toma órdenes, envía a cocina y maneja la caja en esta terminal.',
+  'modePicker.adminMode': 'Modo Admin',
+  'modePicker.adminDesc': 'Abre el panel de administración para gestionar menú, inventario, reportes y personal.',
+  'modePicker.opening': 'Abriendo admin…',
+  'modePicker.roleLabel': 'Rol',
+
   // ─── Floor plan
   'floor.tapToOpen': 'Toca para abrir',
   'floor.seats': 'lugares',
+  'floor.seatsCount': '{n} lugares',
   'floor.editLayout': 'Editar plano',
   'floor.exitEdit': 'Terminar edición',
   'floor.available': 'Disponible',
@@ -362,6 +375,16 @@ export const es: Record<TranslationKey, string> = {
   'register.movements': 'Movimientos',
   'register.notes': 'Notas',
   'register.notesPlaceholder': 'Notas opcionales',
+  'register.endChoiceLabel': 'Después de contar:',
+  'register.endChoiceShiftOnly': 'Solo cerrar turno',
+  'register.endChoiceShiftOnlyHint': 'El día sigue abierto — otro cajero puede continuar.',
+  'register.endChoiceEndDay': 'Cerrar turno y terminar el día',
+  'register.endChoiceEndDayHint': 'Cierra el día e imprime el reporte Z.',
+  'register.endChoiceManagerOnly': 'Solo gerentes y administradores pueden terminar el día.',
+  'register.submitCountAndEndDay': 'Confirmar conteo y terminar día',
+  'register.resultsSubDayClosed': 'Día cerrado — folio Z {folio}.',
+  'register.dayClosedBadge': 'Día cerrado — folio Z {folio}.',
+  'register.dayCloseFailed': 'Turno cerrado, pero no se pudo cerrar el día: {error}',
 
   // ─── Order History
   'history.title': 'Órdenes de hoy',
@@ -402,6 +425,42 @@ export const es: Record<TranslationKey, string> = {
   'history.orderCancelled': 'Orden cancelada.',
   'history.noPayments': 'Sin pagos aún.',
   'history.split': 'Dividido',
+  // Encabezado solo de hoy + secciones por turno
+  'history.todaySubtitle': 'Cuentas del día · {date}',
+  'history.shiftBy': 'Turno de',
+  'history.shiftOther': 'Otro turno',
+  'history.shiftOpen': 'Abierto',
+  'history.shiftClosed': 'Cerrado',
+  'history.shiftOpened': 'Abrió',
+  'history.ordersWord': 'órdenes',
+  'history.emptyShift': 'Sin órdenes en este turno aún.',
+  // Filtros
+  'history.status': 'Estado',
+  'history.payment': 'Pago',
+  'history.tableLabel': 'Mesa',
+  'history.productLabel': 'Producto',
+  // Acciones de gerente
+  'history.actionReopen': 'Regresar al floor plan',
+  'history.actionDelete': 'Eliminar del historial',
+  'history.changeMethodShort': 'Cambiar',
+  'history.managerPinLabel': 'PIN de gerente',
+  // Modal de reabrir
+  'history.reopenTitle': '¿Regresar la cuenta al floor plan?',
+  'history.reopenMessage': 'Reabrir la orden #{n}. Los pagos se eliminan, el inventario se restaura y la mesa vuelve a quedar asignada. Ingresa el PIN de gerente para autorizar.',
+  'history.reopenConfirm': 'Reabrir cuenta',
+  // Modal de borrado suave
+  'history.deleteOrderTitle': '¿Eliminar del historial?',
+  'history.deleteOrderSub': 'La orden #{n} dejará de aparecer en el listado. Los reportes la siguen viendo.',
+  'history.deleteReasonLabel': 'Motivo (5+ caracteres)',
+  'history.deleteReasonPlaceholder': '¿Por qué se elimina esta orden?',
+  'history.deleteConfirm': 'Eliminar',
+  // Modal de cambiar método de pago
+  'history.changeMethodTitle': 'Cambiar método de pago',
+  'history.changeMethodSub': 'Actualmente {from} · {amount}. No se mueve dinero.',
+  'history.changeMethodPickLabel': 'Nuevo método',
+  'history.changeMethodReferenceLabel': 'Referencia / código de autorización',
+  'history.changeMethodReferencePlaceholder': 'Opcional',
+  'history.changeMethodConfirm': 'Guardar cambio',
 
   // ─── Settings
   'settings.title': 'Configuración',
@@ -547,6 +606,8 @@ export const es: Record<TranslationKey, string> = {
   'settings.suggestionTypeProductUpdate': 'Editar producto',
   'settings.suggestionTypeProductDelete': 'Eliminar producto',
   'settings.optionalAuditNote': 'Nota opcional para la auditoría…',
+  'settings.timedOut': 'Tiempo agotado — el servidor no respondió.',
+  'settings.unexpectedHealth': 'Respuesta inesperada de /health.',
 
   // ─── Cancel order
   'cancel.title': 'Cancelar orden',
@@ -610,6 +671,18 @@ export const es: Record<TranslationKey, string> = {
   'takeout.channelDeliveryApp': 'App de entrega',
   'takeout.channelDeliveryAppHint': 'Uber Eats / DiDi Food / Rappi',
   'takeout.noShift': 'No hay turno abierto — toca la insignia de turno para abrir uno.',
+  'takeout.label': 'Para llevar',
+  'takeout.opening': 'Abriendo…',
+  'takeout.detailsHeader': 'Datos del cliente',
+  'takeout.noChannelSet': 'Esta orden aún no tiene canal asignado.',
+  'takeout.saving': 'Guardando…',
+  'takeout.saved': 'Guardado',
+  'takeout.saveFailed': 'No se pudo guardar',
+  'takeout.couldNotSave': 'No se pudieron guardar los datos del cliente.',
+  'takeout.couldNotStart': 'No se pudo abrir la orden para llevar.',
+  'takeout.zoneEmpty': 'No hay órdenes para llevar abiertas.',
+  'takeout.zoneActiveOne': '{n} orden activa',
+  'takeout.zoneActiveMany': '{n} órdenes activas',
 
   // ─── Topbar additions
   'topbar.operations': 'Operaciones',
@@ -631,6 +704,8 @@ export const es: Record<TranslationKey, string> = {
   'hub.action.transferHint': 'Mover stock entre almacenes',
   'hub.action.printerCheck': 'Estado de impresoras',
   'hub.action.printerCheckHint': 'Verifica cocina y recibo',
+  'hub.action.waste': 'Registrar merma',
+  'hub.action.wasteHint': 'Derrames, roturas o caducados',
   'hub.disabled.noShift': 'Abre la caja primero para usar esta acción.',
 
   // ─── Cash movement
@@ -673,6 +748,17 @@ export const es: Record<TranslationKey, string> = {
 
 
   // ─── Merma / Salida de stock (hub de operaciones)
+  // ─── Selector de insumos por escaneo (compartido por Transferir / Merma)
+  'supplyPicker.placeholder': 'Escanea un código o escribe para buscar…',
+  'supplyPicker.hint': 'Enfoca este campo y dispara el escáner. Presiona Enter para añadir manualmente.',
+  'supplyPicker.searching': 'Buscando…',
+  'supplyPicker.noResults': 'Ningún insumo coincide.',
+  'supplyPicker.disabled': 'El escaneo de insumos está deshabilitado.',
+  'supplyPicker.unknownBarcode': 'Código desconocido — registra primero el insumo en admin.',
+  'supplyPicker.notFoundCta': 'Solo está en el catálogo — regístralo en admin para usarlo aquí.',
+  'supplyPicker.lookupFailed': 'Falló la búsqueda — revisa la conexión y vuelve a intentar.',
+
+  // ─── Merma / Write-off
   'waste.title': 'Registrar merma',
   'waste.subtitle': 'Registra insumos que salen del stock: derrames, roturas, caducados, robos u otra pérdida.',
   'waste.storage': 'Almacén',
@@ -734,6 +820,28 @@ export const es: Record<TranslationKey, string> = {
   'waste.batchOk': 'Se registraron {n} líneas de merma.',
   'waste.recipeLoadFailed': 'No se pudo cargar la receta.',
   'waste.recipeEmpty': '{name} no tiene receta para expandir.',
+  // ─── Selector de variantes / modificadores (modal de ProductPicker)
+  'picker.pickSize': 'Elige un tamaño y los modificadores.',
+  'picker.confirmMods': 'Confirma los modificadores y agrega a la cuenta.',
+  'picker.size': 'Tamaño',
+  'picker.note': 'Nota',
+  'picker.notePlaceholder': 'Petición especial, alergia, instrucciones de preparación…',
+  'picker.adding': 'Agregando…',
+  'picker.saving': 'Guardando…',
+  'picker.addToTicket': 'Agregar a la cuenta',
+  'picker.saveChanges': 'Guardar cambios',
+
+  // ─── Banner de turno provisional (mesero abrió turno; cajero debe verificar)
+  'provisional.banner': 'Turno provisional en curso',
+  'provisional.bannerSub': 'Un cajero debe verificar la caja para registrar un corte parcial.',
+  'provisional.openedBy': 'Abierto por {name}',
+  'provisional.verifyBtn': 'Verificar turno',
+  'provisional.verifyTitle': 'Verificar turno provisional',
+  'provisional.verifySub': 'Cuenta el efectivo en la caja. Lo esperado y la diferencia se registrarán como un corte parcial — el mismo turno continúa.',
+  'provisional.verifyResultsTitle': 'Caja verificada',
+  'provisional.verifyResultsSub': 'Corte parcial registrado. El turno continúa como turno normal.',
+  'provisional.closeBlocked': 'Los turnos provisionales se verifican desde el banner — no pueden cerrarse directamente.',
+  'provisional.couldNotVerify': 'No se pudo verificar el turno.',
 
   // ─── Transfer
   'transfer.title': 'Transferir insumos',
@@ -804,6 +912,8 @@ export const es: Record<TranslationKey, string> = {
   'admin.greeting.afternoon': 'Buenas tardes, {name}',
   'admin.greeting.evening': 'Buenas noches, {name}',
   'admin.greeting.night': 'Trabajando tarde, {name}',
+  // ─── Admin mode (Launchpad)
+  'admin.subtitle': 'Operaciones diarias, reportes y dashboards',
   'admin.section.operations': 'Operaciones',
   'admin.section.operationsHint': 'Turno, caja e insumos',
   'admin.section.reports': 'Reportes',
@@ -1441,6 +1551,16 @@ export const es: Record<TranslationKey, string> = {
   'admin.cashLog.subtitle':
     'Consulta, agrega, edita o quita movimientos — agrupados por día y turno. Editar un turno cerrado recalcula sus totales.',
   'admin.cashLog.empty': 'Sin movimientos en este período.',
+  'admin.shiftAudit.kpi.openShifts': 'Abiertos ahora',
+  'admin.shiftAudit.col.opened': 'Apertura',
+  'admin.shiftAudit.col.closed': 'Cierre',
+  'admin.shiftAudit.col.opener': 'Quién',
+  'admin.shiftAudit.col.status': 'Estado',
+  'admin.shiftAudit.row.notCounted': 'sin contar',
+  'admin.shiftAudit.detail.title': 'Detalle de turno',
+  'admin.shiftAudit.detail.noMovements': 'No se registraron movimientos.',
+  'admin.shiftAudit.action.forceClose': 'Forzar cierre',
+  'admin.shiftAudit.action.editActual': 'Ajustar conteo',
   'admin.cashLog.filter.type': 'Tipo',
   'admin.cashLog.filter.typeAll': 'Todos',
   'admin.cashLog.filter.in': 'Ingreso',
@@ -1604,10 +1724,8 @@ export const es: Record<TranslationKey, string> = {
 
   // ─── Common (additions)
   'common.error': 'Algo salió mal.',
-  'common.unknownError': 'Error inesperado.',
 
   // ─── Floor plan (additions)
-  'floor.seatsCount': '{n} lugares',
 
   // ─── Order History (additions)
   'history.statOrders': 'órdenes',
@@ -1619,37 +1737,9 @@ export const es: Record<TranslationKey, string> = {
   'history.filtersButton': 'Filtros',
   'history.appliedFilters': 'Filtros aplicados',
   'history.removeFilter': 'Quitar filtro {label}',
-  'history.status': 'Estado',
-  'history.payment': 'Pago',
-  'history.tableLabel': 'Mesa',
-  'history.productLabel': 'Producto',
-  'history.ordersWord': 'órdenes',
-  'history.shiftBy': 'Turno de',
-  'history.shiftOther': 'Otras órdenes',
-  'history.shiftOpened': 'Abierto a las',
-  'history.shiftOpen': 'Abierto',
-  'history.shiftClosed': 'Cerrado',
-  'history.emptyShift': 'No hay órdenes en este turno.',
   'history.emptyShiftLine': '1 turno vacío: {name}',
   'history.emptyShiftsLine': '{count} turnos vacíos: {names}',
-  'history.actionReopen': 'Reabrir',
   'history.actionChangeMethod': 'Cambiar método de pago',
-  'history.actionDelete': 'Eliminar',
-  'history.reopenTitle': 'Reabrir orden',
-  'history.reopenMessage': '¿Reabrir la orden #{n}? Vuelve a la lista de activas.',
-  'history.reopenConfirm': 'Reabrir orden',
-  'history.deleteOrderTitle': 'Eliminar orden',
-  'history.deleteOrderSub': '¿Eliminar la orden #{n}? No se puede deshacer.',
-  'history.deleteReasonLabel': 'Motivo',
-  'history.deleteReasonPlaceholder': '¿Por qué se elimina esta orden?',
-  'history.deleteConfirm': 'Eliminar orden',
-  'history.managerPinLabel': 'PIN del encargado',
-  'history.changeMethodTitle': 'Cambiar método de pago',
-  'history.changeMethodSub': 'Actualmente {from} por {amount}. Elige un nuevo método.',
-  'history.changeMethodPickLabel': 'Nuevo método',
-  'history.changeMethodReferenceLabel': 'Referencia',
-  'history.changeMethodReferencePlaceholder': 'ID de transacción',
-  'history.changeMethodConfirm': 'Guardar método',
 
   // ─── Flujo de sugerencias / aprobación en acciones del historial
   'history.cashierPinLabel': 'Tu PIN',
@@ -1678,18 +1768,6 @@ export const es: Record<TranslationKey, string> = {
   'history.suggestSubmit': 'Enviar sugerencia',
 
   // ─── Takeout (additions)
-  'takeout.label': 'Para llevar',
-  'takeout.detailsHeader': 'Datos del cliente',
-  'takeout.noChannelSet': 'Sin canal seleccionado.',
-  'takeout.opening': 'Abriendo…',
-  'takeout.couldNotStart': 'No se pudo abrir la orden.',
-  'takeout.couldNotSave': 'No se pudieron guardar los datos.',
-  'takeout.saving': 'Guardando…',
-  'takeout.saved': 'Guardado.',
-  'takeout.saveFailed': 'No se pudo guardar.',
-  'takeout.zoneEmpty': 'No hay órdenes para llevar activas.',
-  'takeout.zoneActiveOne': '{n} orden activa',
-  'takeout.zoneActiveMany': '{n} órdenes activas',
 
   // ─── Employee Order (cuenta de empleado)
   'employeeOrder.label': 'Cuenta de empleado',
@@ -1707,14 +1785,6 @@ export const es: Record<TranslationKey, string> = {
   'employeeOrder.startTab': 'Abrir cuenta',
 
   // ─── Mode Picker (POS vs Admin)
-  'modePicker.greeting': 'Hola',
-  'modePicker.title': 'Elige un espacio',
-  'modePicker.sub': 'Puedes cambiar en cualquier momento.',
-  'modePicker.posMode': 'POS',
-  'modePicker.posDesc': 'Toma órdenes y procesa pagos.',
-  'modePicker.adminMode': 'Modo Admin',
-  'modePicker.adminDesc': 'Reportes, auditoría de turnos, insumos.',
-  'modePicker.roleLabel': 'Rol',
 
   // ─── No Active Shift Screen (admin CTA)
   'noShift.adminTitle': 'Modo Admin',
@@ -1722,60 +1792,21 @@ export const es: Record<TranslationKey, string> = {
   'noShift.adminCta': 'Entrar al Modo Admin',
 
   // ─── Product picker / modifier picker
-  'picker.pickSize': 'Elige un tamaño',
-  'picker.confirmMods': 'Confirmar opciones',
-  'picker.size': 'Tamaño',
-  'picker.note': 'Nota',
-  'picker.notePlaceholder': 'Agrega una nota para la cocina…',
-  'picker.adding': 'Agregando…',
-  'picker.saving': 'Guardando…',
-  'picker.addToTicket': 'Agregar al ticket',
-  'picker.saveChanges': 'Guardar cambios',
 
   // ─── Supply picker / barcode scan
-  'supplyPicker.placeholder': 'Escanea o busca por nombre…',
-  'supplyPicker.hint': 'Escanea un código de barras o escribe para buscar.',
-  'supplyPicker.searching': 'Buscando…',
-  'supplyPicker.noResults': 'Sin coincidencias.',
-  'supplyPicker.disabled': 'Buscador deshabilitado.',
-  'supplyPicker.unknownBarcode': 'Código de barras desconocido.',
-  'supplyPicker.notFoundCta': 'Sin resultado — ¿buscar por nombre?',
-  'supplyPicker.lookupFailed': 'La búsqueda falló.',
 
   // ─── Provisional shift
-  'provisional.banner': 'Turno provisional',
-  'provisional.bannerSub': 'esperando verificación del cajero',
-  'provisional.openedBy': 'Abierto por {name}',
-  'provisional.closeBlocked': 'Verifica el corte parcial antes de cerrar.',
-  'provisional.verifyBtn': 'Verificar corte',
-  'provisional.verifyTitle': 'Verificar corte provisional',
-  'provisional.verifySub':
-    'Cuenta la caja y registra la diferencia. El turno sigue abierto.',
-  'provisional.verifyResultsTitle': 'Corte verificado',
-  'provisional.verifyResultsSub': 'El turno continúa con la misma caja.',
-  'provisional.couldNotVerify': 'No se pudo verificar el corte.',
 
   // ─── Register / shift (additions)
-  'register.endChoiceEndDay': 'Cerrar el día',
-  'register.endChoiceEndDayHint': 'Cierra este turno y finaliza el reporte diario.',
-  'register.endChoiceManagerOnly': 'Solo encargados pueden cerrar el día.',
   'register.endChoiceDayClosed': 'El día ya está cerrado.',
   'register.endDayInAdmin': 'El cierre de día está disponible en Modo Admin.',
-  'register.dayClosedBadge': 'Día cerrado a las {time}',
-  'register.dayCloseFailed': 'Falló el cierre de día: {error}',
-  'register.resultsSubDayClosed': 'Turno cerrado y día finalizado a las {time}.',
-  'register.submitCountAndEndDay': 'Enviar conteo y cerrar día',
 
   // ─── Settings (additions)
-  'settings.timedOut': 'La solicitud expiró.',
-  'settings.unexpectedHealth': 'Respuesta de estado inesperada.',
 
   // ─── Payment method (additions)
   'pay.method.payrollDeduct': 'Descuento de nómina',
 
   // ─── Operations Hub (additions)
-  'hub.action.waste': 'Merma',
-  'hub.action.wasteHint': 'Registra merma o daños en stock.',
 
   // ─── Admin Mode: Launcher chrome (additions)
   'admin.subgreet.shiftOpen': 'Turno abierto · que el día siga fluyendo.',
@@ -2280,6 +2311,19 @@ export const es: Record<TranslationKey, string> = {
   'pay.tipCustom': 'Otra',
   'pay.tipClear': 'Quitar',
   'pay.tipFinalOnly': 'La propina se aplicará al pago final.',
+  'admin.cashLog.col.when': 'Cuándo',
+  'admin.cashLog.col.type': 'Tipo',
+  'admin.cashLog.col.amount': 'Monto',
+  'admin.cashLog.col.reason': 'Motivo',
+  'admin.cashLog.col.shift': 'Turno',
+  'admin.cashLog.add': '+ Nuevo movimiento',
+  'admin.cashLog.blockedNoShift': 'Hace falta un turno abierto para agregar movimientos.',
+  'admin.transferAdv.col.remove': '',
+  'admin.palette.section': 'Sección',
+  'admin.palette.locked': 'Bloqueado',
+  'admin.hint.open': 'Abrir',
+  'admin.hint.exit': 'Salir',
+  'admin.comingSoon.openWeb': 'Usá el admin web por ahora',
 };
 
 // Type-only re-export so this file is self-contained.
