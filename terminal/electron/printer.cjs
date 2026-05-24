@@ -47,29 +47,6 @@ function loadSpoolDriver() {
   return cachedSpoolDriver;
 }
 
-// Lazy native printer driver. Used only when the printer's interface URI is
-// "printer:NAME" (OS spooler). Most terminals talk to ESC/POS hardware over
-// TCP and never load this; the require is deferred so a missing/broken native
-// binary doesn't stop the app from booting — buildPrinter surfaces a clean
-// error instead. Cached after the first successful load so repeated prints
-// don't pay the require cost.
-let cachedSpoolDriver = null;
-let spoolDriverChecked = false;
-function loadSpoolDriver() {
-  if (spoolDriverChecked) return cachedSpoolDriver;
-  spoolDriverChecked = true;
-  try {
-    // eslint-disable-next-line global-require
-    cachedSpoolDriver = require('@thiagoelg/node-printer');
-  } catch (err) {
-    // Logged once. The renderer turns the error message into a friendly
-    // "install the OS print driver" hint when Test print fails.
-    console.warn('[printer] spool driver unavailable:', err?.message ?? err);
-    cachedSpoolDriver = null;
-  }
-  return cachedSpoolDriver;
-}
-
 const CONFIG_FILE = 'printers.json';
 
 // Default config covers a typical 80mm Epson-compatible setup over network.

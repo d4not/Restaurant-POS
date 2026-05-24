@@ -1016,6 +1016,11 @@ model CashRegister {
   // tip jar / pool, never in the drawer.
   tips_collected Decimal @default(0) @db.Decimal(14, 0)
 
+  // Per-denomination bill/coin counts from the cash counter UI.
+  // Shape: { "<centavos>": <count> }, e.g. { "50000": 3, "20000": 1 }.
+  // null for legacy closes that used a single-amount input.
+  denomination_breakdown Json?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -1321,6 +1326,9 @@ model ShiftReport {
   provisional_expected_amount  Int?
   provisional_actual_amount    Int?
   provisional_difference       Int?
+
+  // Snapshot of the denomination breakdown from CashRegister at close time.
+  denomination_breakdown Json?
 
   sales_by_category Json @default("[]")
   top_products      Json @default("[]")

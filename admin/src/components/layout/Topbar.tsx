@@ -3,6 +3,7 @@ import { findBreadcrumb } from '../../routes/config';
 import { formatTopbarDate } from '../../utils/format';
 import { useTranslation } from '../../i18n';
 import { StockBellButton } from './StockBellButton';
+import { NotificationBell } from '../notifications';
 
 export function Topbar() {
   const { t } = useTranslation();
@@ -17,6 +18,7 @@ export function Topbar() {
       </div>
       <div className="topbar-actions">
         <StockBellButton />
+        <NotificationBell />
         <div className="date-badge">{formatTopbarDate()}</div>
       </div>
     </div>

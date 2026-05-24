@@ -90,6 +90,7 @@ export async function fetchCurrentRegister(): Promise<CashRegisterRow | null> {
 
 export interface OpenRegisterInput {
   opening_amount: number;
+  denomination_breakdown?: Record<string, number>;
   notes?: string;
 }
 
@@ -113,6 +114,7 @@ export function openProvisionalRegister(
 
 export interface CloseRegisterInput {
   actual_amount: number;
+  denomination_breakdown?: Record<string, number>;
   notes?: string;
 }
 
@@ -170,6 +172,7 @@ export async function fetchAllRegisters(
 
 export interface VerifyProvisionalInput {
   actual_amount: number;
+  denomination_breakdown?: Record<string, number>;
   notes?: string;
 }
 

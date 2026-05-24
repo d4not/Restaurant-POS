@@ -190,6 +190,7 @@ export async function generateShiftReport(
       opening_amount: true,
       opened_at: true,
       closed_at: true,
+      denomination_breakdown: true,
       user: { select: { id: true, name: true, role: true } },
       // Provisional snapshot — denormalised onto the ShiftReport so the admin
       // panel can render the partial-cut data even after the verifier user
@@ -382,6 +383,7 @@ export async function generateShiftReport(
       was_provisional: wasProvisional,
       ...provisionalSnapshot,
 
+      denomination_breakdown: register.denomination_breakdown ?? undefined,
       sales_by_category: sales_by_category as unknown as Prisma.InputJsonValue,
       top_products: top_products as unknown as Prisma.InputJsonValue,
     },

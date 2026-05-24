@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, KPICard, Modal } from '../../components/ui';
+import { Badge, Button, Card, CSVExportButton, KPICard, Modal } from '../../components/ui';
 import { TipAllocationTable } from '../../components/people/TipAllocationTable';
 import {
   useCloseTipPool,
@@ -138,6 +138,37 @@ export function TipsPage() {
                 </div>
                 {canManage && (
                   <div style={{ display: 'flex', gap: 8 }}>
+                    <CSVExportButton
+                      filename={`tip-pool-${focused.week_start.slice(0, 10)}.csv`}
+                      disabled={focused.allocations.length === 0}
+                      buildRows={() => {
+                        const header = [
+                          'employee',
+                          'role',
+                          'position',
+                          'attended_days',
+                          'included',
+                          'base_amount',
+                          'override_amount',
+                          'final_amount',
+                          'note',
+                        ];
+                        return [
+                          header,
+                          ...focused.allocations.map((a) => [
+                            a.user?.name ?? '',
+                            a.user?.role ?? '',
+                            a.user?.position ?? '',
+                            a.attended_days,
+                            a.included ? 'true' : 'false',
+                            a.base_amount,
+                            a.override_amount ?? '',
+                            a.final_amount,
+                            a.note ?? '',
+                          ]),
+                        ];
+                      }}
+                    />
                     {focused.status === 'OPEN' && (
                       <>
                         <Button

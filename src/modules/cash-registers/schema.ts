@@ -1,26 +1,59 @@
 import { z } from 'zod';
 import { CashMovementType, CashRegisterStatus } from '@prisma/client';
 
+const denominationBreakdownSchema = z
+  .record(z.string().regex(/^\d+$/), z.number().int().nonnegative())
+  .optional();
+
+function sumBreakdown(bd: Record<string, number> | undefined): number {
+  if (!bd) return 0;
+  return Object.entries(bd).reduce(
+    (sum, [denom, count]) => sum + Number(denom) * count,
+    0,
+  );
+}
+
 export const openRegisterSchema = z
   .object({
     opening_amount: z.number().int().nonnegative(),
+    denomination_breakdown: denominationBreakdownSchema,
     notes: z.string().max(2000).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      !v.denomination_breakdown ||
+      sumBreakdown(v.denomination_breakdown) === v.opening_amount,
+    { message: 'denomination_breakdown sum must equal opening_amount' },
+  );
 
 export const closeRegisterSchema = z
   .object({
     actual_amount: z.number().int().nonnegative(),
+    denomination_breakdown: denominationBreakdownSchema,
     notes: z.string().max(2000).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      !v.denomination_breakdown ||
+      sumBreakdown(v.denomination_breakdown) === v.actual_amount,
+    { message: 'denomination_breakdown sum must equal actual_amount' },
+  );
 
 export const verifyProvisionalSchema = z
   .object({
     actual_amount: z.number().int().nonnegative(),
+    denomination_breakdown: denominationBreakdownSchema,
     notes: z.string().max(2000).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      !v.denomination_breakdown ||
+      sumBreakdown(v.denomination_breakdown) === v.actual_amount,
+    { message: 'denomination_breakdown sum must equal actual_amount' },
+  );
 
 export const listRegisterQuerySchema = z.object({
   cursor: z.string().uuid().optional(),

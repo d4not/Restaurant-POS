@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Card, Table } from '../../components/ui';
+import { Badge, Button, Card, CSVExportButton, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import { useGeneratePayroll, usePayroll } from '../../hooks/usePayroll';
 import type { PayrollPeriod, PayrollStatus } from '../../types/staff';
@@ -135,15 +135,60 @@ export function PayrollPage() {
             <h1 style={{ fontSize: 24, marginBottom: 4 }}>{t('people.payroll.title')}</h1>
             <div className="fs-13 text-muted">{t('people.payroll.subtitle')}</div>
           </div>
-          {canGenerate && (
-            <Button
-              variant="primary"
-              onClick={onGenerate}
-              loading={generateM.isPending}
-            >
-              {t('people.payroll.generate')}
-            </Button>
-          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <CSVExportButton
+              filename={`payroll-${weekKey}.csv`}
+              disabled={rows.length === 0}
+              buildRows={() => {
+                const header = [
+                  'employee',
+                  'position',
+                  'week_start',
+                  'week_end',
+                  'days_worked',
+                  'days_expected',
+                  'unpaid_absences',
+                  'gross',
+                  'absence_deductions',
+                  'tab_deductions',
+                  'adjustment_deductions',
+                  'adjustment_bonuses',
+                  'tips_amount',
+                  'net',
+                  'status',
+                ];
+                return [
+                  header,
+                  ...rows.map((p) => [
+                    p.user?.name ?? '',
+                    p.user?.position ?? '',
+                    p.week_start.slice(0, 10),
+                    p.week_end.slice(0, 10),
+                    p.days_worked,
+                    p.days_expected,
+                    p.unpaid_absences,
+                    p.gross_pay,
+                    p.absence_deductions ?? '',
+                    p.tab_deductions ?? '0',
+                    p.adjustment_deductions ?? '',
+                    p.adjustment_bonuses ?? '',
+                    p.tips_amount ?? '',
+                    p.net_pay,
+                    p.status,
+                  ]),
+                ];
+              }}
+            />
+            {canGenerate && (
+              <Button
+                variant="primary"
+                onClick={onGenerate}
+                loading={generateM.isPending}
+              >
+                {t('people.payroll.generate')}
+              </Button>
+            )}
+          </div>
         </div>
       </Card>
 

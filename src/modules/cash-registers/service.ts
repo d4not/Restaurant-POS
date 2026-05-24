@@ -13,6 +13,9 @@ import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import { Decimal } from '../../lib/decimal.js';
 import { logger } from '../../lib/logger.js';
 import { generateShiftReport } from '../shift-reports/service.js';
+import { notificationBus } from '../notifications/event-bus.js';
+import { getSetting } from '../settings/service.js';
+import { SETTING_KEYS, CASH_HANDLING_DEFAULTS } from '../settings/schema.js';
 import type {
   CloseRegisterInput,
   CreateCashMovementInput,
@@ -284,6 +287,7 @@ export async function openRegister(
         user_id: userId,
         opening_amount: new Decimal(input.opening_amount),
         expected_amount: new Decimal(input.opening_amount),
+        denomination_breakdown: input.denomination_breakdown ?? Prisma.JsonNull,
         notes: input.notes,
         is_provisional: isProvisional,
       },
@@ -306,7 +310,7 @@ export async function closeRegister(
   if (!CASHIER_ROLES.has(context.closingUserRole)) {
     throw new ForbiddenError('Only a cashier, manager, or admin can close a shift');
   }
-  return prisma.$transaction(async (tx) => {
+  const closed = await prisma.$transaction(async (tx) => {
     // Provisional shifts must be verified before they can close. The
     // verification flow (verifyProvisional) records the partial-cut numbers
     // and flips is_provisional=false; the close that follows is then a
@@ -395,6 +399,7 @@ export async function closeRegister(
         actual_amount: actual,
         difference,
         tips_collected: tipsCollected,
+        denomination_breakdown: input.denomination_breakdown ?? Prisma.JsonNull,
         closed_at: new Date(),
         closed_by_user_id: context.closingUserId,
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
@@ -419,6 +424,58 @@ export async function closeRegister(
 
     return tx.cashRegister.findUniqueOrThrow({ where: { id }, include: registerInclude });
   });
+
+  emitCloseNotifications(closed, context.closingUserId).catch((err) =>
+    logger.error({ err }, 'failed to emit close notifications'),
+  );
+
+  return closed;
+}
+
+async function emitCloseNotifications(
+  closed: { id: string; difference: Prisma.Decimal | null; user: { name: string } },
+  closingUserId: string,
+) {
+  const diffNum = Number(closed.difference ?? 0);
+  const userName = closed.user.name;
+
+  notificationBus.emitEvent({
+    type: 'SHIFT_CLOSED',
+    severity: 'INFO',
+    recipient_roles: [UserRole.MANAGER, UserRole.ADMIN],
+    title: `Shift closed by ${userName}`,
+    body:
+      diffNum === 0
+        ? 'Drawer balanced'
+        : `Variance: $${(Math.abs(diffNum) / 100).toFixed(2)} ${diffNum > 0 ? 'surplus' : 'shortage'}`,
+    source_user_id: closingUserId,
+    related_resource: { type: 'CashRegister', id: closed.id },
+    payload: { difference: diffNum, register_id: closed.id },
+  });
+
+  if (diffNum === 0) return;
+
+  const rawNotify = await getSetting(SETTING_KEYS.CASH_VARIANCE_NOTIFY_THRESHOLD);
+  const notifyThreshold = rawNotify
+    ? Number(rawNotify)
+    : CASH_HANDLING_DEFAULTS.VARIANCE_NOTIFY_THRESHOLD;
+  const rawBlock = await getSetting(SETTING_KEYS.CASH_VARIANCE_BLOCKING_THRESHOLD);
+  const blockingThreshold = rawBlock
+    ? Number(rawBlock)
+    : CASH_HANDLING_DEFAULTS.VARIANCE_BLOCKING_THRESHOLD;
+
+  if (Math.abs(diffNum) >= notifyThreshold) {
+    notificationBus.emitEvent({
+      type: 'CASH_SHORTAGE_DETECTED',
+      severity: Math.abs(diffNum) >= blockingThreshold ? 'ERROR' : 'WARNING',
+      recipient_roles: [UserRole.MANAGER, UserRole.ADMIN],
+      title: 'Cash variance detected',
+      body: `${userName}'s shift: $${(Math.abs(diffNum) / 100).toFixed(2)} ${diffNum > 0 ? 'surplus' : 'shortage'}`,
+      source_user_id: closingUserId,
+      related_resource: { type: 'CashRegister', id: closed.id },
+      payload: { difference: diffNum, register_id: closed.id },
+    });
+  }
 }
 
 export interface VerifyProvisionalContext {
@@ -492,6 +549,7 @@ export async function verifyProvisional(
         provisional_expected_amount: expected,
         provisional_actual_amount: actual,
         provisional_difference: difference,
+        denomination_breakdown: input.denomination_breakdown ?? Prisma.JsonNull,
         // Keep expected_amount in sync — close-flow recomputes from sources
         // anyway, but having it match the verification diff so far is the
         // honest in-flight value.

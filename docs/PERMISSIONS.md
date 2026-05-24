@@ -228,8 +228,93 @@ Backend route gates live in `src/modules/purchases/routes.ts` (`requireRole(CASH
 
 ---
 
+## People module (employees, schedule, attendance, payroll, tips)
+
+The People domain centralises everything related to staff: profiles + roles, recurring weekly schedules, day-by-day attendance, weekly payroll with itemized bonuses/deductions, and a weekly tip pool. UI lives at `/people/*` in the admin web; the terminal exposes manager-quick-access tiles (Quick Absence, Schedule view, Tips adjust).
+
+### Backend route gates
+
+Reads are open to any authenticated user — the terminal needs to pre-fill pickers and render read-only schedule/employee data. Writes are MANAGER+ across the board because they touch money or audit fields. The cashier still routes through reads + the order/payment flow for tip capture.
+
+| Endpoint                                                  | Required role             |
+| --------------------------------------------------------- | ------------------------- |
+| `GET    /api/v1/employees[/:id]`                          | any authenticated         |
+| `POST   /api/v1/employees`                                | MANAGER, ADMIN            |
+| `PATCH  /api/v1/employees/:id`                            | MANAGER, ADMIN            |
+| `DELETE /api/v1/employees/:id` (soft / active=false)      | MANAGER, ADMIN            |
+| `GET    /api/v1/attendance`                               | any authenticated         |
+| `POST   /api/v1/attendance` (upsert per user+date)        | MANAGER, ADMIN            |
+| `PATCH  /api/v1/attendance/:id`                           | MANAGER, ADMIN            |
+| `DELETE /api/v1/attendance/:id`                           | MANAGER, ADMIN            |
+| `GET    /api/v1/schedule` (roster)                        | any authenticated         |
+| `GET    /api/v1/schedule/users/:userId`                   | any authenticated         |
+| `PUT    /api/v1/schedule/users/:userId` (replace week)    | MANAGER, ADMIN            |
+| `PATCH  /api/v1/schedule/users/:userId/days/:dow`         | MANAGER, ADMIN            |
+| `DELETE /api/v1/schedule/users/:userId/days/:dow`         | MANAGER, ADMIN            |
+| `GET    /api/v1/payroll[/:id]`                            | any authenticated         |
+| `POST   /api/v1/payroll/generate`                         | MANAGER, ADMIN            |
+| `PATCH  /api/v1/payroll/:id` (status / notes)             | MANAGER, ADMIN            |
+| `POST   /api/v1/payroll/:id/adjustments`                  | MANAGER, ADMIN            |
+| `DELETE /api/v1/payroll/:id/adjustments/:adjId`           | MANAGER, ADMIN            |
+| `GET    /api/v1/tips/pools[?status=&from=&to=]`           | MANAGER, ADMIN            |
+| `GET    /api/v1/tips/pools/current[?date=]` (lazy create) | MANAGER, ADMIN            |
+| `GET    /api/v1/tips/pools/:id`                           | MANAGER, ADMIN            |
+| `POST   /api/v1/tips/pools/:id/refresh`                   | MANAGER, ADMIN            |
+| `PATCH  /api/v1/tips/pools/:id/allocations/:userId`       | MANAGER, ADMIN            |
+| `POST   /api/v1/tips/pools/:id/close`                     | MANAGER, ADMIN            |
+| `POST   /api/v1/tips/pools/:id/reopen`                    | MANAGER, ADMIN            |
+
+### Payroll lifecycle
+
+- `DRAFT → APPROVED → PAID`. No reverts, no skips (would 409).
+- Adjustments (BONUS/DEDUCTION) can only be added/removed while DRAFT. The TIPS-sourced adjustment row created by `POST /tips/pools/:id/close` is pinned read-only — to undo it, reopen the pool (which also refuses if any downstream payroll is no longer DRAFT).
+- `days_expected` is derived from the count of active schedule slots; falls back to the input value (default 6) only when the employee has no schedule yet.
+- Legacy `bonuses` / `deductions` columns on `payroll_periods` are mirrors maintained server-side (`deductions = absence_deductions + adjustment_deductions`, `bonuses = adjustment_bonuses + tips_amount`) so existing API consumers still see the same shape.
+
+### Tip flow — frasco-aparte model
+
+- `POST /api/v1/orders/:id/payments` accepts optional `tip_amount` (centavos). For CASH the `amount` is the gross customer tender (sale + tip); the cashier physically separates the tip cash into the tip jar — it never enters the drawer. For CARD/TRANSFER the bank charges the full `amount`; tip is owed to the jar. PAYROLL_DEDUCT rejects any non-zero tip.
+- `CashRegister.expected_amount` excludes tip; `CashRegister.tips_collected` is informational (recomputed authoritatively at close).
+- `ShiftReport.tips_collected` snapshotted at close. `cash_sales` is order-side only (no tip double-counting).
+- Tip pool aggregates `payment.tip_amount` across all methods in the `[week_start, week_end+1day)` window. Manager toggles per-user inclusion + override amount; close distributes `final_amount` as a TIPS-sourced PayrollAdjustment(BONUS) on each included user's DRAFT PayrollPeriod.
+
+### Terminal Admin Mode — People section tiles
+
+| Tile             | Section / Slot | Roles allowed     | What it opens                                                   |
+| ---------------- | -------------- | ----------------- | --------------------------------------------------------------- |
+| Employees        | people / 1     | MANAGER, ADMIN    | List view (existing)                                            |
+| Attendance       | people / 2     | MANAGER, ADMIN    | Weekly cycle-click grid (existing)                              |
+| Quick Absence    | people / 3     | MANAGER, ADMIN    | Single-employee form: pick + date + status + reason + paid      |
+| Schedule (read)  | people / 4     | MANAGER, ADMIN    | Read-only roster grid — edits live on admin web                 |
+| Payroll          | people / 5     | MANAGER, ADMIN    | Full payroll view (existing — renumbered from 3)                |
+| Tips             | people / 6     | MANAGER, ADMIN    | Current pool + allocation table + Close & distribute / Reopen   |
+
+### Cashier payment UI (terminal)
+
+The `/cobro` modal (TableDetail) now has a tip sub-panel between the method selector and the amount input. Quick chips `10% · 15% · 20% · Custom · Clear`. Hidden for `PAYROLL_DEDUCT`; disabled in split mode with helper "Tip will be attached to the final payment". The submit payload sends `tip_amount` alongside `amount`; the cashier types the gross tender for CASH while CARD/TRANSFER amount = remaining + tip auto-bumped.
+
+### Audit fields (People module)
+
+| Field                                  | Set when                                              |
+| -------------------------------------- | ----------------------------------------------------- |
+| `Attendance.recorded_by`               | Anyone logs an attendance record (the JWT user)       |
+| `PayrollPeriod.approved_by`            | DRAFT → APPROVED transition                           |
+| `PayrollAdjustment.created_by_user_id` | Manager adds an adjustment OR pool close creates TIPS |
+| `PayrollAdjustment.source_kind`        | `'MANUAL'` for hand-entered; `'TIPS'` for pool-close  |
+| `PayrollAdjustment.source_id`          | TipAllocation id when `source_kind='TIPS'`            |
+| `TipPool.closed_by_user_id`            | Pool close                                            |
+| `TipAllocation.override_amount`        | Manager sets an explicit per-user amount              |
+| `TipAllocation.note`                   | Manager attaches an explanatory note                  |
+| `Payment.tip_amount`                   | Cashier records a tip on the payment                  |
+| `CashRegister.tips_collected`          | Maintained incrementally on payment, snapshot at close|
+| `ShiftReport.tips_collected`           | Snapshot from CashRegister at register close          |
+
+---
+
 ## Known gaps / not implemented yet
 
 - **No UI for `TABLE_UPDATE` / `TABLE_DELETE` suggestions** — cashier can only suggest a *new* table today; edit/delete go through directly when permitted, otherwise are blocked.
 - **No UI for product suggestions** — the terminal doesn't expose product CRUD. Live in the admin web.
 - **MANAGER ≠ admin** — managers do not currently approve suggestions, create tables, or delete tables. If this is wrong, change `LAYOUT_ADMINS` in `tables/routes.ts` and `SUGGEST_REVIEWERS` in `suggestions/routes.ts`, and `ROLES_LAYOUT_CREATE` / `isAdmin` checks on the frontend.
+- **`days_expected` fallback to 6** still in place for employees without a schedule. Phase 6 polish step: remove the fallback once every active employee has a schedule, then surface a "Configure schedule" CTA on the payroll generate path.
+- **Legacy `payroll_periods.bonuses` / `deductions` columns** are still readable as mirrors. Deprecation candidate once all clients have switched to the decomposed columns (`absence_deductions`, `adjustment_bonuses`, `adjustment_deductions`, `tips_amount`).

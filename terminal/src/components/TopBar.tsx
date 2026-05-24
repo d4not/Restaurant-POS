@@ -14,6 +14,7 @@ import {
   IconSignOut,
 } from './Icons';
 import { OperationsPill } from './RegisterPanel';
+import { NotificationBell } from './notifications';
 import { OperationsHubModal } from './operations-hub/OperationsHubModal';
 import { PinConfirmModal } from './PinConfirmModal';
 import { verifyPin } from '../api/auth';
@@ -549,6 +550,7 @@ export function TopBar() {
 
       <div className="topbar-right" style={styles.right}>
         <OperationsPill onClick={() => setHubOpen(true)} />
+        <NotificationBell />
         <div className="topbar-clock" style={styles.clockGroup}>
           <span style={styles.clockTime}>{formatTime(now)}</span>
           <span className="topbar-clock-date" style={styles.clockDate}>{formatDate(now)}</span>
