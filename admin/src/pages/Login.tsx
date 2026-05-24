@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui';
-import { login } from '../api/auth';
+import { fetchMeWithToken, login } from '../api/auth';
 import { ApiError } from '../api/client';
 import { useAuthStore } from '../store/auth';
 import type { User } from '../types/api';
@@ -27,6 +27,7 @@ export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const token = useAuthStore((s) => s.token);
   const setSession = useAuthStore((s) => s.setSession);
 
@@ -34,6 +35,47 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // True while we're verifying a handoff token from the POS terminal so the
+  // operator sees a spinner instead of the login form during the round-trip.
+  const [handoffPending, setHandoffPending] = useState(() => Boolean(searchParams.get('token')));
+  // Prevents StrictMode's double-invoke from firing /auth/me twice on mount.
+  const handoffStartedRef = useRef(false);
+
+  // POS terminal → admin handoff. The terminal pops this app with
+  // ?token=<jwt>&uid=<id> after a MANAGER/ADMIN picks "Admin Mode" from the
+  // post-PIN mode picker. We resolve the user record from /auth/me and store
+  // the session, then scrub the query params so a refresh doesn't replay the
+  // dance (the persisted store already has us authed).
+  useEffect(() => {
+    const handoffToken = searchParams.get('token');
+    if (!handoffToken) return;
+    if (token) return;
+    if (handoffStartedRef.current) return;
+    handoffStartedRef.current = true;
+
+    setHandoffPending(true);
+    setError(null);
+    fetchMeWithToken(handoffToken)
+      .then((user) => {
+        setSession(handoffToken, user);
+        setSearchParams({}, { replace: true });
+        const from = (location.state as { from?: string } | null)?.from ?? '/';
+        navigate(from, { replace: true });
+      })
+      .catch((err) => {
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : t('auth.invalidCredentials');
+        setError(message);
+        setSearchParams({}, { replace: true });
+      })
+      .finally(() => {
+        setHandoffPending(false);
+      });
+  }, [searchParams, setSearchParams, token, setSession, navigate, location.state, t]);
 
   // Already signed in? Kick back to the previous (or home) route.
   if (token) {
@@ -62,6 +104,23 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Show a minimal "signing in…" card during the handoff round-trip so the
+  // operator doesn't see the email/password form flash before the redirect.
+  if (handoffPending) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card" style={{ textAlign: 'center' }}>
+          <div className="auth-brand">
+            <div className="brand-mark">R</div>
+            <h1>{t('nav.brand')}</h1>
+            <div className="tag">{t('auth.adminPanel')}</div>
+          </div>
+          <p className="fs-13 text-muted" style={{ marginTop: 16 }}>{t('auth.signingIn')}…</p>
+        </div>
+      </div>
+    );
   }
 
   return (

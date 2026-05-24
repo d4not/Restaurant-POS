@@ -1,25 +1,29 @@
 import { z } from 'zod';
-import { PayrollStatus } from '@prisma/client';
+import { PayrollAdjustmentType, PayrollStatus } from '@prisma/client';
 
 const dateField = z.coerce.date();
 
 export const generatePayrollSchema = z
   .object({
     week_start: dateField,
+    // Fallback days_expected used only when an employee has no active
+    // schedule slots. Employees with a schedule derive days_expected from
+    // count(active slots). Kept for back-compat with callers that still
+    // pass it; new admin UIs will omit it once every employee has a schedule.
     days_expected: z.number().int().min(1).max(7).default(6),
   })
   .strict();
 
-// Drives status transitions DRAFT→APPROVED→PAID via PATCH. Only the bonuses /
-// notes fields are mutable directly; status goes through its own rail.
+// PATCH /:id mutates notes + status only. Bonuses and deductions are now
+// itemized via the adjustments sub-resource; trying to set them directly
+// here is rejected by the .strict() schema below.
 export const updatePayrollSchema = z
   .object({
-    bonuses: z.number().int().nonnegative().optional(),
     notes: z.string().max(2000).nullable().optional(),
     status: z.nativeEnum(PayrollStatus).optional(),
   })
   .strict()
-  .refine((v) => v.bonuses !== undefined || v.notes !== undefined || v.status !== undefined, {
+  .refine((v) => v.notes !== undefined || v.status !== undefined, {
     message: 'at least one field must be provided',
   });
 
@@ -32,6 +36,23 @@ export const listPayrollQuerySchema = z.object({
   to: z.coerce.date().optional(),
 });
 
+// POST /:id/adjustments — manager adds one BONUS or DEDUCTION row to the
+// period. label is required so the audit trail explains why; amount is
+// always positive (the type flips its sign in the formula).
+export const createAdjustmentSchema = z
+  .object({
+    type: z.nativeEnum(PayrollAdjustmentType),
+    label: z.string().min(1).max(160),
+    amount: z.number().int().positive(),
+  })
+  .strict();
+
+export const adjustmentParamSchema = z.object({
+  id: z.string().uuid(),
+  adjustmentId: z.string().uuid(),
+});
+
 export type GeneratePayrollInput = z.infer<typeof generatePayrollSchema>;
 export type UpdatePayrollInput = z.infer<typeof updatePayrollSchema>;
 export type ListPayrollQuery = z.infer<typeof listPayrollQuerySchema>;
+export type CreateAdjustmentInput = z.infer<typeof createAdjustmentSchema>;

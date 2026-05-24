@@ -1,7 +1,17 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Badge, Button, Card, KPICard, Table } from '../../components/ui';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { Badge, Button, Card, EmptyState, KPICard, Table } from '../../components/ui';
 import type { BadgeTone, TableColumn } from '../../components/ui';
 import { useDailyReport } from '../../hooks/useDailyReports';
 import {
@@ -62,6 +72,8 @@ export function DailyReportDetail() {
 
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
+  const [hourlyView, setHourlyView] = useState<'chart' | 'table'>('chart');
+  const [categoriesView, setCategoriesView] = useState<'chart' | 'table'>('chart');
 
   const handlePrint = async () => {
     if (!id) return;
@@ -146,17 +158,26 @@ export function DailyReportDetail() {
       key: 'user',
       header: 'User',
       width: '1.4fr',
-      render: (s) => (
-        <span>
-          <span className="fw-600 fs-13">{s.user?.name ?? '—'}</span>
-          {s.type === 'PROVISIONAL' && (
-            <Badge tone="gold" style={{ marginLeft: 8 }}>PROVISIONAL</Badge>
-          )}
-          {s.type === 'PROVISIONAL' && s.verified_at == null && (
-            <Badge tone="red" style={{ marginLeft: 8 }}>UNVERIFIED</Badge>
-          )}
-        </span>
-      ),
+      render: (s) => {
+        const sr = s.shift_report;
+        const wasProvisional = sr?.was_provisional;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="fw-600 fs-13">{s.user?.name ?? '—'}</span>
+              {wasProvisional && <Badge tone="gold">Provisional</Badge>}
+            </span>
+            {wasProvisional && sr?.provisional_verified_by_name && (
+              <span className="fs-11 text-muted">
+                Verified by {sr.provisional_verified_by_name}
+                {sr.provisional_verified_at
+                  ? ` · ${formatDateTime(sr.provisional_verified_at)}`
+                  : ''}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'opened',
@@ -380,7 +401,7 @@ export function DailyReportDetail() {
               : `${variance > 0 ? '+' : ''}${formatMoney(variance)}`
           }
           valueColor={varianceColor === 'default' ? 'default' : varianceColor}
-          sub={`${report.total_shifts} shifts · ${report.unverified_provisionals} unverified`}
+          sub={`${report.total_shifts} shifts`}
         />
       </div>
 
@@ -421,13 +442,165 @@ export function DailyReportDetail() {
         />
       </Card>
 
-      <Card title="Sales by category" className="mt-16">
-        <Table
-          columns={categoryColumns}
-          rows={categories}
-          getRowKey={(c) => c.category_id ?? '__none__'}
-          emptyMessage="No category data"
-        />
+      {report.shifts.some((s) => s.shift_report?.was_provisional) && (
+        <Card
+          title={
+            <>
+              Provisional shift cuts
+              <div className="fs-12 text-muted" style={{ fontWeight: 400, marginTop: 2 }}>
+                Mid-shift counts done by the cashier when the shift was opened by floor staff
+              </div>
+            </>
+          }
+          className="mt-16"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {report.shifts
+              .filter((s) => s.shift_report?.was_provisional)
+              .map((s) => {
+                const sr = s.shift_report!;
+                const diff = sr.provisional_difference ?? 0;
+                const diffClass =
+                  diff === 0 ? 'text-muted' : diff > 0 ? 'text-green' : 'text-red';
+                const diffSign = diff > 0 ? '+' : '';
+                return (
+                  <div
+                    key={s.id}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(201,164,92,0.4)',
+                      background: 'rgba(201,164,92,0.06)',
+                    }}
+                  >
+                    <div className="flex-between" style={{ marginBottom: 8 }}>
+                      <div>
+                        <span className="fw-600 fs-13">
+                          {s.user?.name ?? sr.user_name}
+                        </span>
+                        <span className="fs-11 text-muted" style={{ marginLeft: 8 }}>
+                          {sr.provisional_opened_by_role ?? sr.user_role}
+                        </span>
+                      </div>
+                      <Badge tone="gold">Provisional</Badge>
+                    </div>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: 16,
+                        fontSize: 13,
+                      }}
+                    >
+                      <div>
+                        <div className="fs-11 text-muted" style={{ marginBottom: 2 }}>
+                          Expected
+                        </div>
+                        <div className="fw-600">
+                          {formatMoney(sr.provisional_expected_amount ?? 0)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="fs-11 text-muted" style={{ marginBottom: 2 }}>
+                          Counted
+                        </div>
+                        <div className="fw-600">
+                          {formatMoney(sr.provisional_actual_amount ?? 0)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="fs-11 text-muted" style={{ marginBottom: 2 }}>
+                          Difference
+                        </div>
+                        <div className={`fw-600 ${diffClass}`}>
+                          {diff === 0
+                            ? formatMoney(0)
+                            : diffSign + formatMoney(diff)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="fs-11 text-muted" style={{ marginBottom: 2 }}>
+                          Verified by
+                        </div>
+                        <div className="fs-12">
+                          {sr.provisional_verified_by_name ?? '—'}
+                          {sr.provisional_verified_at && (
+                            <div className="fs-11 text-muted">
+                              {formatDateTime(sr.provisional_verified_at)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </Card>
+      )}
+
+      <Card
+        title="Sales by category"
+        className="mt-16"
+        actions={
+          <ViewToggle value={categoriesView} onChange={setCategoriesView} />
+        }
+      >
+        {categories.length === 0 ? (
+          <EmptyState message="No category data" />
+        ) : categoriesView === 'chart' ? (
+          <ResponsiveContainer
+            width="100%"
+            height={Math.max(180, categories.length * 32)}
+          >
+            <BarChart
+              data={[...categories].sort((a, b) => b.total - a.total)}
+              layout="vertical"
+              margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis
+                type="number"
+                stroke="var(--text3)"
+                tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                tickFormatter={(v) => formatMoney(Number(v))}
+              />
+              <YAxis
+                type="category"
+                dataKey="category_name"
+                stroke="var(--text3)"
+                tick={{ fontSize: 12, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                width={150}
+              />
+              <Tooltip
+                cursor={{ fill: 'var(--gold-bg)' }}
+                contentStyle={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border2)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: 'var(--text)',
+                }}
+                formatter={(v, _n, item) => {
+                  const items = (item?.payload as CategoryRow | undefined)?.item_count ?? 0;
+                  return [`${formatMoney(Number(v))} · ${items} items`, ''];
+                }}
+              />
+              <Bar dataKey="total" fill="var(--gold)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <Table
+            columns={categoryColumns}
+            rows={categories}
+            getRowKey={(c) => c.category_id ?? '__none__'}
+            emptyMessage="No category data"
+          />
+        )}
       </Card>
 
       <div className="section-grid-2 mt-16">
@@ -449,13 +622,70 @@ export function DailyReportDetail() {
         </Card>
       </div>
 
-      <Card title="Hourly breakdown" className="mt-16">
-        <Table
-          columns={hourColumns}
-          rows={hourly}
-          getRowKey={(h) => `h-${h.hour}`}
-          emptyMessage="No hourly data"
-        />
+      <Card
+        title="Hourly breakdown"
+        className="mt-16"
+        actions={<ViewToggle value={hourlyView} onChange={setHourlyView} />}
+      >
+        {hourly.length === 0 ? (
+          <EmptyState message="No hourly data" />
+        ) : hourlyView === 'chart' ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={hourly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis
+                dataKey="hour"
+                stroke="var(--text3)"
+                tick={{ fontSize: 10, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                tickFormatter={(h) => `${String(h).padStart(2, '0')}h`}
+                interval={1}
+              />
+              <YAxis
+                stroke="var(--text3)"
+                tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                tickFormatter={(v) => formatMoney(Number(v))}
+                width={80}
+              />
+              <Tooltip
+                cursor={{ fill: 'var(--gold-bg)' }}
+                contentStyle={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border2)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: 'var(--text)',
+                }}
+                formatter={(v, _n, item) => {
+                  const tickets = (item?.payload as HourRow | undefined)?.tickets ?? 0;
+                  return [`${formatMoney(Number(v))} · ${tickets} tickets`, ''];
+                }}
+                labelFormatter={(h) => `${String(h).padStart(2, '0')}:00`}
+              />
+              <Bar dataKey="total" radius={[3, 3, 0, 0]}>
+                {hourly.map((h) => {
+                  const fill =
+                    h.hour === report.peak_hour
+                      ? 'var(--green)'
+                      : h.hour === report.slowest_hour
+                        ? 'var(--red)'
+                        : 'var(--border2)';
+                  return <Cell key={h.hour} fill={fill} />;
+                })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <Table
+            columns={hourColumns}
+            rows={hourly}
+            getRowKey={(h) => `h-${h.hour}`}
+            emptyMessage="No hourly data"
+          />
+        )}
       </Card>
 
       <Card title={`Alerts (${allAlerts.length})`} className="mt-16">
@@ -505,5 +735,31 @@ function KvRow({ label, value }: KvRowProps) {
         {value}
       </td>
     </tr>
+  );
+}
+
+interface ViewToggleProps {
+  value: 'chart' | 'table';
+  onChange: (next: 'chart' | 'table') => void;
+}
+
+function ViewToggle({ value, onChange }: ViewToggleProps) {
+  return (
+    <div style={{ display: 'inline-flex', gap: 4 }}>
+      <button
+        type="button"
+        className={`filter-pill${value === 'chart' ? ' active' : ''}`}
+        onClick={() => onChange('chart')}
+      >
+        Chart
+      </button>
+      <button
+        type="button"
+        className={`filter-pill${value === 'table' ? ' active' : ''}`}
+        onClick={() => onChange('table')}
+      >
+        Table
+      </button>
+    </div>
   );
 }

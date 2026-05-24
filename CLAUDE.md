@@ -1,5 +1,56 @@
 # Restaurant POS System
 
+## Workflow Orchestration
+
+### Plan Mode Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately — don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### Subagent Strategy
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+- This project has 4 sub-projects — use worktrees for parallel work:
+  - `claude --worktree fix-backend` for API/DB changes
+  - `claude --worktree fix-admin` for admin panel work
+  - `claude --worktree fix-terminal` for desktop terminal
+  - `claude --worktree fix-mobile` for Android tablet
+
+### Self-Improvement Loop
+- After ANY correction from the user: update `tasks/lessons.md` with the pattern
+- Write rules for yourself that prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review lessons at session start
+
+### Verification Before Done
+- Never mark a task complete without proving it works
+- After ANY backend change: run `npm run test` and verify passing
+- After ANY frontend change: verify the UI renders correctly, no console errors
+- After ANY database change: run `npx prisma migrate dev` and `npx prisma generate`
+- After ANY inventory change: verify stock AND movement log update in a single transaction
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+
+### Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests — then resolve them
+- Zero context switching required from the user
+
+---
+
+## Task Management
+1. Plan First: Write plan to `tasks/todo.md` with checkable items
+2. Verify Plan: Check in before starting implementation
+3. Track Progress: Mark items complete as you go
+4. Explain Changes: High-level summary at each step
+5. Document Results: Add review section to `tasks/todo.md`
+6. Capture Lessons: Update `tasks/lessons.md` after corrections
+
+---
+
 ## Project Structure
 - `/src` — Backend (Express API)
 - `/admin` — Frontend admin panel (React + Vite)
@@ -94,6 +145,10 @@
 - Two printers: receipt + kitchen
 - Renderer calls: window.electron.printKitchen(data), window.electron.printReceipt(data)
 
+## i18n
+Translation files: src/locales/{es,en}.json
+When i18n keys show raw in the UI, find and add the missing translations in all locales.
+
 ---
 
 ## POS Terminal Mobile (/terminal-mobile)
@@ -120,6 +175,17 @@
 
 ---
 
+## Known Bugs
+- [Add bugs here as they are discovered]
+
+When fixing a bug, always:
+1. Identify the root cause (don't patch symptoms)
+2. Verify the fix with a test or manual verification
+3. Check if the same pattern exists elsewhere in the codebase
+4. Update this section to remove fixed bugs
+
+---
+
 ## IMPORTANT
 - Read @docs/SPEC.md for ALL backend business logic
 - Read @docs/FRONTEND-SPEC.md for admin panel pages
@@ -136,3 +202,10 @@
 - Modifier groups: SWAP replaces recipe ingredients, ADD stacks on top
 - Recipe modifier lines link to a modifier_group_id, not a specific supply
 - ALL UI text in English
+
+---
+
+## Core Principles
+- **Simplicity First**: Make every change as simple as possible. Minimal code.
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.

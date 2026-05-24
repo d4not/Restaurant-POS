@@ -67,6 +67,11 @@ export const createSuggestionSchema = z
 
 export const reviewSuggestionSchema = z
   .object({
+    // Admin step-up PIN. The route gate already requires an ADMIN JWT, but
+    // we re-authenticate against an active admin's PIN so a logged-in
+    // terminal can't be hijacked into approving / rejecting without a fresh
+    // physical confirmation. Matches the gate on order-suggestion review.
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
     review_note: z.string().trim().max(500).optional(),
   })
   .strict();

@@ -61,7 +61,6 @@ const alertInclude = {
   shift_report: {
     select: {
       id: true,
-      shift_type: true,
       user_id: true,
       user_name: true,
       cash_variance: true,

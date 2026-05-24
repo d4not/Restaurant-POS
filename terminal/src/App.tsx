@@ -11,6 +11,8 @@ import { ActiveOrders } from './pages/ActiveOrders';
 import { FloorPlan } from './pages/FloorPlan';
 import { OrderHistory } from './pages/OrderHistory';
 import { TableDetail } from './pages/TableDetail';
+import { WastePage } from './pages/WastePage';
+import { AdminMode } from './components/adminMode/AdminMode';
 import { useSession } from './store/session';
 import { useUi } from './store/ui';
 import { usePreferences } from './store/preferences';
@@ -20,6 +22,11 @@ import { useAutoLock } from './hooks/useAutoLock';
 import { useNetworkSync } from './hooks/useNetworkSync';
 import { syncLanguageFromServer } from './i18n';
 import { Spinner } from './components/Spinner';
+
+// Roles that can enter Admin Mode. Mirrored on the AdminMode component's own
+// gate so a stale role downgrade doesn't trap a waiter on the launcher.
+// Cashier stays on the Operations Hub; Admin Mode is manager+ territory.
+const ADMIN_MODE_ROLES = new Set(['MANAGER', 'ADMIN']);
 
 // Use 100% (not 100vw/100vh) so the shell tracks #root's size — important on
 // terminal-mobile, where mobile.css transforms #root and counter-sizes its
@@ -68,11 +75,39 @@ export function App() {
   const role = user?.role ?? 'WAITER';
   const historyUnlocked = useUi((s) => s.historyUnlocked);
   const setView = useUi((s) => s.setView);
+  const openAdmin = useUi((s) => s.openAdmin);
   useEffect(() => {
     if (view === 'history' && (role === 'WAITER' || !historyUnlocked)) {
       setView('orders');
     }
   }, [view, role, historyUnlocked, setView]);
+
+  // Global accelerator: ⌘⇧A (mac) / Ctrl+Shift+A opens Admin Mode from any
+  // POS view. Manager+ only — waiters and cashiers get a no-op. Lives anywhere
+  // a non-input element has focus so the operator doesn't have to leave their
+  // current workflow to access it.
+  useEffect(() => {
+    if (!authed || !ADMIN_MODE_ROLES.has(role)) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.shiftKey) return;
+      if (e.key !== 'a' && e.key !== 'A') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (view === 'admin') return;
+      e.preventDefault();
+      openAdmin();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authed, role, view, openAdmin]);
 
   // Idle auto-lock: only counts down while the user is fully authed and the
   // screen isn't already locked. The hook itself no-ops when `active` is false
@@ -100,11 +135,7 @@ export function App() {
   }, [token, user]);
 
   // Singleton-shift gate: every authed view depends on a shift being open.
-  // Polled every 30s so a barista who opened a provisional shift sees the
-  // banner clear automatically when a cashier closes it (and conversely, a
-  // cashier still on the floor plan re-enters the gate when their shift
-  // ends). Refetches on window focus so a sister tablet's open-shift propagates
-  // quickly.
+  // Polled every 30s so a sister tablet's open/close propagates quickly.
   const currentRegisterQuery = useQuery({
     queryKey: ['register', 'current'],
     queryFn: fetchCurrentRegister,
@@ -137,6 +168,34 @@ export function App() {
 
   const currentRegister = currentRegisterQuery.data ?? null;
 
+  // Admin Mode is a full-screen takeover — no TopBar, no provisional banner.
+  // Rendered BEFORE the no-shift gate so cashier+ can view reports and run
+  // shift management outside business hours. Sub-views that genuinely need
+  // an open register (cash movement create) handle the null state.
+  if (view === 'admin') {
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <AdminMode />
+        <SettingsModal />
+        <ConfirmDialogHost />
+      </div>
+    );
+  }
+
+  // Log Waste is its own full-screen workspace — it has its own header bar
+  // with storage/reason pills, so the global TopBar would only fight it.
+  if (view === 'waste') {
+    return (
+      <div style={shellStyle}>
+        <OfflineBanner />
+        <WastePage />
+        <SettingsModal />
+        <ConfirmDialogHost />
+      </div>
+    );
+  }
+
   if (!currentRegister) {
     return (
       <div style={shellStyle}>
@@ -150,10 +209,8 @@ export function App() {
   return (
     <div style={shellStyle}>
       <OfflineBanner />
-      {currentRegister.kind === 'PROVISIONAL' && (
-        <ProvisionalShiftBanner register={currentRegister} />
-      )}
       <TopBar />
+      <ProvisionalShiftBanner />
       <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {view === 'orders' && <ActiveOrders />}
         {view === 'floor' && <FloorPlan />}

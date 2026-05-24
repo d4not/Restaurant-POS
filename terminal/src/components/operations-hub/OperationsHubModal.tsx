@@ -8,17 +8,20 @@ import { OperationsHubCard } from './OperationsHubCard';
 import {
   IconArrowDown,
   IconArrowUp,
-  IconChart,
   IconRegister,
   IconTransfer,
+  IconWaste,
 } from './HubIcons';
 import { IconPrinter } from '../Icons';
 import { ShiftActionPanel } from './ShiftActionPanel';
 import { CashMovementModal } from './CashMovementModal';
-import { DailyReportModal } from './DailyReportModal';
+// Daily Report intentionally not surfaced in the POS operations hub — it
+// lives only in Admin Mode (Reports section) so cashiers focus on shift /
+// cash / supply actions here.
 import { TransferModal } from './TransferModal';
 import { PrinterCheckPanel } from './PrinterCheckPanel';
 import { formatTime } from '../../utils/clock';
+import { useUi } from '../../store/ui';
 
 interface OperationsHubModalProps {
   open: boolean;
@@ -30,7 +33,6 @@ type SubFlow =
   | 'shift'
   | 'expense'
   | 'income'
-  | 'dailyReport'
   | 'transfer'
   | 'printerCheck';
 
@@ -44,6 +46,7 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
   const role = useSession((s) => s.user?.role ?? 'WAITER');
   const isCashier = CASHIER_ROLES.has(role);
   const [subFlow, setSubFlow] = useState<SubFlow>(null);
+  const openWaste = useUi((s) => s.openWaste);
 
   // Reset the open child whenever the hub closes — opening it again should
   // start at the grid view, not whichever sub-flow was last in front.
@@ -126,21 +129,24 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
                 onClick={() => setSubFlow('income')}
               />
             )}
-            {isCashier && (
-              <OperationsHubCard
-                Icon={IconChart}
-                title={t('hub.action.dailyReport')}
-                hint={t('hub.action.dailyReportHint')}
-                accent="gold"
-                onClick={() => setSubFlow('dailyReport')}
-              />
-            )}
             <OperationsHubCard
               Icon={IconTransfer}
               title={t('hub.action.transfer')}
               hint={t('hub.action.transferHint')}
               accent="gold"
               onClick={() => setSubFlow('transfer')}
+            />
+            <OperationsHubCard
+              Icon={IconWaste}
+              title={t('hub.action.waste')}
+              hint={t('hub.action.wasteHint')}
+              accent="red"
+              onClick={() => {
+                // Full-screen waste workspace — close the hub on the way out so
+                // the user lands on a clean surface.
+                onClose();
+                openWaste();
+              }}
             />
             <OperationsHubCard
               Icon={IconPrinter}
@@ -158,11 +164,6 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
         open={subFlow === 'expense' || subFlow === 'income'}
         kind={subFlow === 'expense' ? 'CASH_OUT' : 'CASH_IN'}
         registerId={reg?.id ?? null}
-        onClose={() => setSubFlow(null)}
-      />
-      <DailyReportModal
-        open={subFlow === 'dailyReport'}
-        currentRegisterId={reg?.id ?? null}
         onClose={() => setSubFlow(null)}
       />
       <TransferModal open={subFlow === 'transfer'} onClose={() => setSubFlow(null)} />

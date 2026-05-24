@@ -4,7 +4,6 @@ import {
   closeRegister,
   fetchCurrentRegister,
   openRegister,
-  type CashRegisterRow,
 } from '../../api/registers';
 import { ApiError } from '../../api/client';
 import { useSession } from '../../store/session';
@@ -18,6 +17,10 @@ interface ShiftActionPanelProps {
   onClose: () => void;
 }
 
+// Closing a normal shift is allowed in the POS for mid-day cashier swaps.
+// "End the day" (DailyReport close) is intentionally NOT exposed here — it
+// lives only in Admin Mode → Shifts so the night cut happens off the
+// counter, where the operator can audit the full day's payment breakdown.
 const ROLES_WITH_REGISTER: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
 
 const localStyles: Record<string, React.CSSProperties> = {
@@ -57,14 +60,16 @@ const localStyles: Record<string, React.CSSProperties> = {
   diffZero: { color: 'var(--green)' },
   diffPos: { color: 'var(--gold)' },
   diffNeg: { color: 'var(--red)' },
-  followUpBanner: {
-    marginTop: 14,
+  // Footer note pointing the operator to Admin Mode for the day cut. Quiet
+  // visual weight — the cashier is closing their shift, not closing the day.
+  endDayNote: {
+    marginTop: 18,
     padding: '10px 12px',
     borderRadius: 8,
     fontSize: 12,
-    fontWeight: 500,
-    background: 'rgba(74,140,92,0.10)',
-    color: 'var(--green)',
+    color: 'var(--text2)',
+    background: 'var(--bg)',
+    border: '1px dashed var(--border)',
     lineHeight: 1.4,
   },
 };
@@ -79,9 +84,9 @@ function parseAmount(input: string): number | null {
 }
 
 interface CloseResult {
-  closed: CashRegisterRow;
   submittedAmount: number;
-  followUp: CashRegisterRow | null;
+  expectedAmount: string;
+  difference: string;
 }
 
 // Sub-modal for opening/closing the cash register. Mounted as a child of the
@@ -100,8 +105,7 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const queryClient = useQueryClient();
 
   // Singleton shift lookup — the hub manages whichever shift is currently
-  // open, even if it belongs to a different user (provisional → cashier
-  // closeout flow).
+  // open, even if it belongs to a different user.
   const registerQuery = useQuery({
     queryKey: ['register', 'current'],
     queryFn: fetchCurrentRegister,
@@ -135,44 +139,50 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotOpen')),
   });
 
-  // Closing a PROVISIONAL shift is followed automatically by opening a NORMAL
-  // shift — the cashier's counted amount becomes the new opening_amount, so
-  // cash carries over without a gap.
+  // Blind close: the cashier counts the drawer without seeing the expected
+  // value, the backend computes it, and we reveal both numbers on the
+  // results screen. The day cut (closing the DailyReport) deliberately does
+  // NOT live here — that action moved to Admin Mode → Shifts.
   //
   // We do NOT call onClose() on success: the response is the first time the
-  // cashier sees expected_amount/difference (blind close), so we hold the
-  // panel open and render the results screen until they dismiss it.
+  // cashier sees expected_amount/difference, so we hold the panel open and
+  // render the results screen until they dismiss it.
+  //
+  // The cache invalidation is also deferred to dismiss time: if we cleared
+  // ['register','current'] here, App.tsx's singleton-shift gate would flip to
+  // null mid-flight and unmount the whole TopBar → Operations Hub → this
+  // panel, dropping the cashier on NoActiveShiftScreen before they ever see
+  // whether the drawer balanced. See handleDismiss() below.
   const closeMutation = useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       id,
       amountCentavos,
-      followUpNormal,
     }: {
       id: string;
       amountCentavos: number;
-      followUpNormal: boolean;
-    }) => {
-      const closed = await closeRegister(id, { actual_amount: amountCentavos });
-      if (followUpNormal) {
-        const next = await openRegister({ opening_amount: amountCentavos });
-        return { closed, next };
-      }
-      return { closed, next: null };
-    },
-    onSuccess: ({ closed, next }, variables) => {
-      // Reflect the new state in the singleton register cache so the hub /
-      // topbar update immediately, even though the panel is still showing the
-      // results screen.
-      queryClient.setQueryData(['register', 'current'], next);
-      invalidateRegisterQueries();
+    }) => closeRegister(id, { actual_amount: amountCentavos }),
+    onSuccess: (closed, variables) => {
       setCloseResult({
-        closed,
         submittedAmount: variables.amountCentavos,
-        followUp: next,
+        expectedAmount: closed.expected_amount,
+        difference: closed.difference ?? '0',
       });
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotClose')),
   });
+
+  // Wraps the parent onClose so dismissing the results screen is the moment
+  // we tell the rest of the app the shift is gone. Before that, the singleton
+  // register cache still points at the (now-closed-on-the-server) shift, but
+  // that's fine — the panel is the only interactive surface while results
+  // are up, and the next refetch / invalidation pass will reconcile.
+  function handleDismiss() {
+    if (closeResult) {
+      queryClient.setQueryData(['register', 'current'], null);
+      invalidateRegisterQueries();
+    }
+    onClose();
+  }
 
   // Esc/Enter only fires when this panel is the topmost modal (zIndex 80) —
   // listener removed on close so the hub's own listener doesn't get
@@ -185,13 +195,13 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        handleDismiss();
         return;
       }
       if (e.key === 'Enter') {
         e.preventDefault();
         if (closeResult) {
-          onClose();
+          handleDismiss();
         } else {
           submit();
         }
@@ -229,17 +239,21 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     if (registerQuery.isLoading) return;
     if (closeResult) return;
     if (reg) {
+      // Provisional shifts must be verified via the banner — closing them
+      // here would lose the partial-cut audit trail. The backend also
+      // refuses, but catching it client-side gives a clearer message.
+      if (reg.is_provisional) {
+        setError(t('provisional.closeBlocked'));
+        return;
+      }
       const amt = parseAmount(actualInput);
       if (amt == null) {
         setError(t('register.enterCounted'));
         return;
       }
-      // Provisional shifts roll straight into a normal shift on close, using
-      // the counted amount as the new opening cash. Normal shifts just close.
       closeMutation.mutate({
         id: reg.id,
         amountCentavos: amt,
-        followUpNormal: reg.kind === 'PROVISIONAL',
       });
     } else {
       const amt = parseAmount(openingInput);
@@ -252,20 +266,15 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   }
 
   const isResults = closeResult != null;
-  const isClosingProvisional = reg?.kind === 'PROVISIONAL';
 
   let title: string;
   let subtitle: string;
   if (isResults) {
     title = t('register.resultsTitle');
-    subtitle = closeResult!.followUp
-      ? t('register.resultsSubProvisional')
-      : t('register.resultsSubNormal');
+    subtitle = t('register.resultsSubNormal');
   } else if (reg) {
-    title = isClosingProvisional ? t('register.closeAndStartNormal') : t('register.closeShift');
-    subtitle = isClosingProvisional
-      ? t('register.normalShiftAfterProvisional')
-      : t('register.closeShiftSub');
+    title = t('register.closeShift');
+    subtitle = t('register.closeShiftSub');
   } else {
     title = t('register.openShift');
     subtitle = t('register.openShiftSub');
@@ -275,14 +284,12 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   if (isResults) {
     primaryLabel = t('common.done');
   } else if (reg) {
-    primaryLabel = isClosingProvisional
-      ? t('register.submitCountAndStartNormal')
-      : t('register.submitCount');
+    primaryLabel = t('register.submitCount');
   } else {
     primaryLabel = t('register.openShift');
   }
 
-  const primaryAction = isResults ? onClose : submit;
+  const primaryAction = isResults ? handleDismiss : submit;
   const primaryDisabled =
     !isResults &&
     (openMutation.isPending || closeMutation.isPending || registerQuery.isLoading);
@@ -290,7 +297,7 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const showSpinner = !isResults && (openMutation.isPending || closeMutation.isPending);
 
   return (
-    <div style={hubStyles.childScrim} onClick={onClose}>
+    <div style={hubStyles.childScrim} onClick={handleDismiss}>
       <div style={hubStyles.childModal} onClick={(e) => e.stopPropagation()} role="dialog">
         <div style={hubStyles.head}>
           <h2 style={hubStyles.title}>{title}</h2>
@@ -305,7 +312,10 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
           ) : isResults ? (
             <CloseResultsBody result={closeResult!} />
           ) : reg ? (
-            <BlindCountBody actualInput={actualInput} setActualInput={setActualInput} />
+            <BlindCountBody
+              actualInput={actualInput}
+              setActualInput={setActualInput}
+            />
           ) : (
             <OpenShiftBody openingInput={openingInput} setOpeningInput={setOpeningInput} />
           )}
@@ -314,7 +324,7 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
 
         <div style={hubStyles.actions}>
           {showCancel && (
-            <button type="button" style={hubStyles.cancelBtn} onClick={onClose}>
+            <button type="button" style={hubStyles.cancelBtn} onClick={handleDismiss}>
               {t('common.cancel')}
             </button>
           )}
@@ -361,25 +371,31 @@ interface BlindCountBodyProps {
   setActualInput: (value: string) => void;
 }
 
-// The pre-submission close screen. Intentionally shows ZERO information
-// derived from expected_amount — no opening cash, no expected total, no live
-// difference. The cashier counts blind, then the backend response reveals
-// expected and difference together in CloseResultsBody.
-function BlindCountBody({ actualInput, setActualInput }: BlindCountBodyProps) {
+// Blind count: no opening cash, no expected total, no live diff. The
+// cashier counts the drawer, the backend response then reveals expected and
+// difference together in CloseResultsBody. Ending the day is intentionally
+// not surfaced here — it lives in Admin Mode → Shifts (the night cut).
+function BlindCountBody({
+  actualInput,
+  setActualInput,
+}: BlindCountBodyProps) {
   const { t } = useTranslation();
   return (
-    <div style={hubStyles.field}>
-      <label style={hubStyles.label}>{t('register.blindCountPrompt')} (MXN)</label>
-      <input
-        autoFocus
-        inputMode="decimal"
-        style={hubStyles.input}
-        placeholder="0.00"
-        value={actualInput}
-        onChange={(e) => setActualInput(e.target.value)}
-      />
-      <span style={hubStyles.hint}>{t('register.blindCountHint')}</span>
-    </div>
+    <>
+      <div style={hubStyles.field}>
+        <label style={hubStyles.label}>{t('register.blindCountPrompt')} (MXN)</label>
+        <input
+          autoFocus
+          inputMode="decimal"
+          style={hubStyles.input}
+          placeholder="0.00"
+          value={actualInput}
+          onChange={(e) => setActualInput(e.target.value)}
+        />
+        <span style={hubStyles.hint}>{t('register.blindCountHint')}</span>
+      </div>
+      <div style={localStyles.endDayNote}>{t('register.endDayInAdmin')}</div>
+    </>
   );
 }
 
@@ -389,9 +405,7 @@ interface CloseResultsBodyProps {
 
 function CloseResultsBody({ result }: CloseResultsBodyProps) {
   const { t } = useTranslation();
-  const expectedRaw = result.closed.expected_amount;
-  const diffRaw = result.closed.difference ?? '0';
-  const diffNum = Number(diffRaw);
+  const diffNum = Number(result.difference);
   const diffSign: 'pos' | 'neg' | 'zero' =
     diffNum > 0 ? 'pos' : diffNum < 0 ? 'neg' : 'zero';
   const diffStyle =
@@ -406,7 +420,7 @@ function CloseResultsBody({ result }: CloseResultsBodyProps) {
     <>
       <div style={localStyles.resultsGrid}>
         <span>{t('register.expected')}</span>
-        <span style={localStyles.resultsAmt}>{formatMoney(expectedRaw)}</span>
+        <span style={localStyles.resultsAmt}>{formatMoney(result.expectedAmount)}</span>
         <span>{t('register.counted')}</span>
         <span style={localStyles.resultsAmt}>{formatMoney(result.submittedAmount)}</span>
       </div>
@@ -419,14 +433,9 @@ function CloseResultsBody({ result }: CloseResultsBodyProps) {
       >
         <span>{t('register.difference')}</span>
         <span style={{ ...localStyles.diffAmt, color: 'inherit' }}>
-          {diffNum === 0 ? formatMoney(0) : diffPrefix + formatMoney(diffRaw)}
+          {diffNum === 0 ? formatMoney(0) : diffPrefix + formatMoney(result.difference)}
         </span>
       </div>
-      {result.followUp && (
-        <div style={localStyles.followUpBanner}>
-          {t('register.normalShiftAfterProvisional')}
-        </div>
-      )}
     </>
   );
 }

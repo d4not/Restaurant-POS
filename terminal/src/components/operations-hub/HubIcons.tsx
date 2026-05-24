@@ -83,3 +83,25 @@ export const IconRefresh: Icon = (props) => (
     <path d="M20 10A8 8 0 1 0 17.5 17.5" />
   </svg>
 );
+
+// "Merma" card icon — discarded box silhouette with a warning slash.
+export const IconWaste: Icon = (props) => (
+  <svg {...base} {...props}>
+    <path d="M5 7l1 13h12l1-13" />
+    <line x1="3" y1="7" x2="21" y2="7" />
+    <line x1="9" y1="4" x2="15" y2="4" />
+    <line x1="9" y1="11" x2="15" y2="17" />
+    <line x1="15" y1="11" x2="9" y2="17" />
+  </svg>
+);
+
+// Person with a tag — the "employee perk" card. Same line weight as the
+// other hub icons so the grid stays visually balanced.
+export const IconEmployee: Icon = (props) => (
+  <svg {...base} {...props}>
+    <circle cx="10" cy="8" r="3.5" />
+    <path d="M3 20c0-3.5 3.1-6 7-6s7 2.5 7 6" />
+    <path d="M16 4l4 0 0 4-4 4-4-4 4-4z" />
+    <circle cx="18" cy="6" r="0.8" fill="currentColor" stroke="none" />
+  </svg>
+);

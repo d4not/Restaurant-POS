@@ -9,6 +9,7 @@ import { useSupplies } from '../../hooks/useSupplies';
 import { listPackagings } from '../../api/packagings';
 import { useCreatePurchase } from '../../hooks/usePurchases';
 import { formatMoney } from '../../utils/format';
+import { uid } from '../../utils/uid';
 import type { PurchasePackaging } from '../../types/inventory';
 
 // A single draft line the user is building.
@@ -26,7 +27,7 @@ interface DraftLine {
 
 function newLine(): DraftLine {
   return {
-    uid: crypto.randomUUID(),
+    uid: uid(),
     supply_id: '',
     packaging_id: null,
     package_quantity: '1',

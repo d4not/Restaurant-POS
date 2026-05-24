@@ -110,14 +110,25 @@ export function listSuggestions(
   return api.get<PageResult<Suggestion>>(`/suggestions?${params.toString()}`);
 }
 
-export function approveSuggestion(id: string, reviewNote?: string): Promise<Suggestion> {
-  return api.post<Suggestion>(`/suggestions/${id}/approve`, {
-    review_note: reviewNote,
-  });
+// Admin step-up PIN is required server-side on both approve and reject. The
+// reviewNote stays optional; an empty string is stripped so the strict Zod
+// schema doesn't reject it.
+export function approveSuggestion(
+  id: string,
+  pin: string,
+  reviewNote?: string,
+): Promise<Suggestion> {
+  const body: Record<string, unknown> = { pin };
+  if (reviewNote && reviewNote.trim()) body.review_note = reviewNote.trim();
+  return api.post<Suggestion>(`/suggestions/${id}/approve`, body);
 }
 
-export function rejectSuggestion(id: string, reviewNote?: string): Promise<Suggestion> {
-  return api.post<Suggestion>(`/suggestions/${id}/reject`, {
-    review_note: reviewNote,
-  });
+export function rejectSuggestion(
+  id: string,
+  pin: string,
+  reviewNote?: string,
+): Promise<Suggestion> {
+  const body: Record<string, unknown> = { pin };
+  if (reviewNote && reviewNote.trim()) body.review_note = reviewNote.trim();
+  return api.post<Suggestion>(`/suggestions/${id}/reject`, body);
 }

@@ -12,7 +12,6 @@
 import type {
   AlertSeverity,
   AlertType,
-  ShiftType,
 } from '@prisma/client';
 import type {
   CurrencyCode,
@@ -67,8 +66,6 @@ export interface ReportLabels {
   transfer: string;
   // Shifts
   shifts: string;
-  provisional: string;
-  unverified: string;
   countedShort: string;
   diffShort: string;
   // Products
@@ -124,8 +121,6 @@ export function getReportLabels(lang: LanguageCode): ReportLabels {
       card: 'Tarjeta',
       transfer: 'Transferencia',
       shifts: 'Turnos',
-      provisional: 'Provisional',
-      unverified: 'Sin verificar',
       countedShort: 'Contó',
       diffShort: 'Dif.',
       products: 'Productos',
@@ -174,8 +169,6 @@ export function getReportLabels(lang: LanguageCode): ReportLabels {
     card: 'Card',
     transfer: 'Transfer',
     shifts: 'Shifts',
-    provisional: 'Provisional',
-    unverified: 'Unverified',
     countedShort: 'Counted',
     diffShort: 'Diff.',
     products: 'Products',
@@ -291,7 +284,6 @@ export function alertTypeLabel(type: AlertType, lang: LanguageCode): string {
       RECURRING_SHORTAGE: 'Faltante recurrente',
       EXCESSIVE_VOIDS: 'Cancelaciones excesivas',
       EXCESSIVE_DISCOUNTS: 'Descuentos excesivos',
-      UNVERIFIED_PROVISIONAL: 'Turno provisional sin verificar',
       LATE_VOID: 'Cancelación tardía',
     },
     en: {
@@ -300,7 +292,6 @@ export function alertTypeLabel(type: AlertType, lang: LanguageCode): string {
       RECURRING_SHORTAGE: 'Recurring shortage',
       EXCESSIVE_VOIDS: 'Excessive voids',
       EXCESSIVE_DISCOUNTS: 'Excessive discounts',
-      UNVERIFIED_PROVISIONAL: 'Unverified provisional',
       LATE_VOID: 'Late void',
     },
   };
@@ -322,10 +313,6 @@ export function sortAlertsForPrint<T extends { resolved: boolean; severity: Aler
     if (a.resolved !== b.resolved) return a.resolved ? 1 : -1;
     return SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
   });
-}
-
-export function provisionalTag(type: ShiftType): boolean {
-  return type === 'PROVISIONAL';
 }
 
 /**

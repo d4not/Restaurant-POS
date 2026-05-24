@@ -28,4 +28,12 @@ export const capacitorBridge: PlatformBridge = {
     isConnected: network.isConnected,
     onStatusChange: network.onStatusChange,
   },
+  app: {
+    // The mobile build doesn't host the admin panel — the tablet UI is POS-
+    // only. Throwing here surfaces the message in the ModePicker so the
+    // operator knows to use a desktop terminal instead.
+    async openAdmin() {
+      throw new Error('Admin Mode is not available on this device');
+    },
+  },
 };

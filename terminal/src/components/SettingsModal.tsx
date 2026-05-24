@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Spinner } from './Spinner';
+import { PinConfirmModal } from './PinConfirmModal';
 import { useUi } from '../store/ui';
 import { useSession } from '../store/session';
 import { usePreferences } from '../store/preferences';
@@ -519,14 +520,14 @@ function ServerUrlCard() {
         | { success?: boolean; data?: { status?: string } }
         | null;
       if (!body?.success || body.data?.status !== 'ok') {
-        setTestResult({ ok: false, error: 'Unexpected health response' });
+        setTestResult({ ok: false, error: t('settings.unexpectedHealth') });
         return;
       }
       setTestResult({ ok: true, latencyMs });
     } catch (err) {
       const reason =
         err instanceof DOMException && err.name === 'AbortError'
-          ? 'Timed out after 5s'
+          ? t('settings.timedOut')
           : err instanceof Error
             ? err.message
             : t('settings.couldNotReach');
@@ -979,6 +980,10 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
   const [draft, setDraft] = useState<PrinterRoleConfig>(config);
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  // Detect panel collapses by default; toggled by the "Detect" button next to
+  // the address input. The panel itself owns the enumeration query state so
+  // every reopen produces a fresh list (printers come and go).
+  const [detectOpen, setDetectOpen] = useState(false);
 
   // Keep the form in sync when the parent re-fetches the config (e.g. after
   // the user saves another section). Only rebase if the saved config genuinely
@@ -1077,19 +1082,44 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
         <label style={styles.label}>
           {draft.connection === 'network' ? t('settings.ipLabel') : t('settings.deviceLabel')}
         </label>
-        <input
-          style={styles.input}
-          value={draft.address}
-          placeholder={
-            draft.connection === 'network' ? '192.168.1.100:9100' : '/dev/usb/lp0'
-          }
-          onChange={(e) => setDraft({ ...draft, address: e.target.value })}
-        />
+        <div style={detectStyles.addressRow}>
+          <input
+            style={{ ...styles.input, flex: 1, minWidth: 0 }}
+            value={draft.address}
+            placeholder={
+              draft.connection === 'network' ? '192.168.1.100:9100' : '/dev/usb/lp0'
+            }
+            onChange={(e) => setDraft({ ...draft, address: e.target.value })}
+          />
+          {draft.connection === 'usb' && (
+            <button
+              type="button"
+              style={detectBtnStyle(detectOpen)}
+              onClick={() => setDetectOpen((o) => !o)}
+              aria-expanded={detectOpen}
+            >
+              🔍 {detectOpen ? t('settings.detectHide') : t('settings.detectUsb')}
+            </button>
+          )}
+        </div>
         <div style={styles.hint}>
           {draft.connection === 'network'
             ? t('settings.printerIpHint')
             : t('settings.devicePathHint')}
         </div>
+        {draft.connection === 'usb' && draft.address.startsWith('printer:') && (
+          <div style={detectStyles.driverNote}>
+            {t('settings.detectDriverNote')}
+          </div>
+        )}
+        {draft.connection === 'usb' && detectOpen && (
+          <UsbDetectPanel
+            onSelect={(addr) => {
+              setDraft({ ...draft, address: addr });
+              setDetectOpen(false);
+            }}
+          />
+        )}
       </div>
 
       <div style={{ ...styles.fieldRow, marginTop: 12 }}>
@@ -1158,6 +1188,409 @@ function PrinterRoleCard(props: PrinterRoleCardProps) {
     </div>
   );
 }
+
+// ─── USB / spooler detection panel ─────────────────────────────────────────
+// Lists printers the OS spooler knows about, plus raw /dev/usb/lp* paths on
+// Linux. Mounted inline under the address field when the role is in "USB"
+// mode and the operator taps "Detect". Selecting a row hands the formatted
+// address back to the parent through onSelect.
+
+interface UsbDetectPanelProps {
+  onSelect: (address: string) => void;
+}
+
+function UsbDetectPanel({ onSelect }: UsbDetectPanelProps) {
+  const { t } = useTranslation();
+  // Default to USB-only. Operators picking a kitchen printer almost never
+  // want the PDF-virtual / fax / "Save as PDF" entries the OS often surfaces.
+  const [usbOnly, setUsbOnly] = useState(true);
+
+  const detectQuery = useQuery({
+    queryKey: ['printer-detect'],
+    queryFn: async () => {
+      if (!window.electron) throw new Error('not_electron');
+      return window.electron.printer.listUsb();
+    },
+    enabled: Boolean(window.electron),
+    // Cheap operation — running it on every panel mount keeps the list
+    // honest if the operator hot-plugged a printer between opens.
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
+  });
+
+  const data = detectQuery.data;
+  const visible = data
+    ? usbOnly
+      ? data.printers.filter((p) => p.isUsb)
+      : data.printers
+    : [];
+
+  return (
+    <div style={detectStyles.panel}>
+      <div style={detectStyles.panelHead}>
+        <div>
+          <div style={detectStyles.panelTitle}>{t('settings.detectTitle')}</div>
+          <div style={detectStyles.panelSub}>
+            {detectQuery.isFetching
+              ? t('settings.detecting')
+              : data
+                ? t('settings.detectCount')
+                    .replace('{usb}', String(data.counts.usb))
+                    .replace('{total}', String(data.counts.system + data.counts.device))
+                : t('settings.detectHint')}
+          </div>
+        </div>
+        <div style={detectStyles.panelActions}>
+          <label style={detectStyles.filterToggle}>
+            <input
+              type="checkbox"
+              checked={usbOnly}
+              onChange={(e) => setUsbOnly(e.target.checked)}
+              style={{ width: 14, height: 14, cursor: 'pointer' }}
+            />
+            <span>{t('settings.detectUsbOnly')}</span>
+          </label>
+          <button
+            type="button"
+            style={detectStyles.refreshBtn}
+            onClick={() => detectQuery.refetch()}
+            disabled={detectQuery.isFetching}
+          >
+            {detectQuery.isFetching ? <Spinner size={11} /> : '↻'}{' '}
+            {t('settings.detectAgain')}
+          </button>
+        </div>
+      </div>
+
+      {detectQuery.isError && (
+        <div style={detectStyles.errBanner}>
+          {(detectQuery.error as Error)?.message === 'not_electron'
+            ? t('settings.detectElectronOnly')
+            : t('settings.detectFailed')}
+        </div>
+      )}
+
+      {data && visible.length === 0 && !detectQuery.isFetching && (
+        <div style={detectStyles.empty}>
+          {usbOnly && data.printers.length > 0
+            ? t('settings.detectEmptyUsb')
+            : data.platform === 'win32'
+              ? t('settings.detectEmptyWindows')
+              : data.platform === 'darwin'
+                ? t('settings.detectEmptyMac')
+                : t('settings.detectEmptyLinux')}
+        </div>
+      )}
+
+      {visible.length > 0 && (
+        <div style={detectStyles.list}>
+          {visible.map((printer) => (
+            <DetectRow
+              key={printer.id}
+              printer={printer}
+              onUse={() => onSelect(printer.address)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface DetectRowProps {
+  printer: DetectedPrinter;
+  onUse: () => void;
+}
+
+function DetectRow({ printer, onUse }: DetectRowProps) {
+  const { t } = useTranslation();
+  // Status label & color mirror the printer-check hub so an operator who has
+  // seen one will instantly read the other. "permission_denied" is the gotcha
+  // worth surfacing prominently on Linux device paths.
+  const statusLabel = (() => {
+    switch (printer.status) {
+      case 'ready': return t('settings.detectStatusReady');
+      case 'busy': return t('settings.detectStatusBusy');
+      case 'stopped': return t('settings.detectStatusStopped');
+      case 'attention': return t('settings.detectStatusAttention');
+      case 'permission_denied': return t('settings.detectStatusPermission');
+      default: return t('settings.detectStatusUnknown');
+    }
+  })();
+  const statusColor =
+    printer.status === 'ready'
+      ? 'var(--green)'
+      : printer.status === 'permission_denied' || printer.status === 'stopped'
+        ? 'var(--red)'
+        : printer.status === 'attention' || printer.status === 'busy'
+          ? 'var(--gold)'
+          : 'var(--text3)';
+
+  return (
+    <div style={detectStyles.row}>
+      <div style={detectRowIconStyle(printer.kind, printer.isUsb)}>
+        {printer.kind === 'device' ? '⎘' : printer.isUsb ? '⎌' : '⎘'}
+      </div>
+      <div style={detectStyles.rowMain}>
+        <div style={detectStyles.rowLabel}>
+          {printer.label}
+          {printer.isDefault && (
+            <span style={detectStyles.defaultBadge}>{t('settings.detectDefault')}</span>
+          )}
+        </div>
+        <div style={detectStyles.rowMeta}>
+          <span style={{ ...detectStyles.statusDot, background: statusColor }} />
+          <span style={{ color: statusColor }}>{statusLabel}</span>
+          {printer.port && (
+            <>
+              <span style={detectStyles.sep}>·</span>
+              <span style={detectStyles.port}>{printer.port}</span>
+            </>
+          )}
+          <span style={detectStyles.sep}>·</span>
+          <code style={detectStyles.address}>{printer.address}</code>
+        </div>
+        {printer.note && <div style={detectStyles.rowNote}>{printer.note}</div>}
+      </div>
+      <button
+        type="button"
+        style={detectStyles.useBtn}
+        onClick={onUse}
+      >
+        {t('settings.detectUse')}
+      </button>
+    </div>
+  );
+}
+
+// Functions that vary with row state live outside the const map so each can
+// declare its return type as React.CSSProperties — TypeScript otherwise widens
+// the literal CSS unions ("nowrap" → string) and trips up the index signature.
+const detectBtnStyle = (open: boolean): React.CSSProperties => ({
+  padding: '0 14px',
+  borderRadius: 8,
+  background: open ? 'var(--text1)' : 'var(--bg2)',
+  color: open ? '#fff' : 'var(--text1)',
+  fontSize: 12,
+  fontWeight: 600,
+  border: '1px solid ' + (open ? 'var(--text1)' : 'var(--border)'),
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  height: 42,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  whiteSpace: 'nowrap',
+  transition: 'background 0.12s, color 0.12s',
+});
+
+const detectRowIconStyle = (
+  kind: DetectedPrinterKind,
+  isUsb: boolean,
+): React.CSSProperties => ({
+  width: 30,
+  height: 30,
+  borderRadius: 6,
+  background:
+    kind === 'device'
+      ? 'rgba(74,140,92,0.14)'
+      : isUsb
+        ? 'rgba(201,164,92,0.18)'
+        : 'rgba(168,152,136,0.18)',
+  color:
+    kind === 'device'
+      ? 'var(--green)'
+      : isUsb
+        ? '#8a6d2a'
+        : 'var(--text2)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 14,
+  flexShrink: 0,
+});
+
+const detectStyles: Record<string, React.CSSProperties> = {
+  addressRow: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  driverNote: {
+    marginTop: 8,
+    padding: '8px 12px',
+    borderRadius: 8,
+    background: 'rgba(201,164,92,0.10)',
+    border: '1px solid rgba(201,164,92,0.4)',
+    color: '#8a6d2a',
+    fontSize: 11,
+    lineHeight: 1.45,
+  },
+  panel: {
+    marginTop: 10,
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    background: 'var(--bg)',
+    padding: 12,
+  },
+  panelHead: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  panelTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text1)',
+  },
+  panelSub: {
+    fontSize: 11,
+    color: 'var(--text3)',
+    marginTop: 2,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  panelActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  },
+  filterToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 11,
+    color: 'var(--text2)',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  refreshBtn: {
+    padding: '6px 12px',
+    borderRadius: 6,
+    background: 'var(--bg2)',
+    color: 'var(--text1)',
+    fontSize: 11,
+    fontWeight: 600,
+    border: '1px solid var(--border)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 30,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  errBanner: {
+    padding: '8px 10px',
+    borderRadius: 8,
+    background: 'rgba(196,80,64,0.10)',
+    border: '1px solid rgba(196,80,64,0.4)',
+    color: 'var(--red)',
+    fontSize: 11,
+  },
+  empty: {
+    padding: '20px 10px',
+    textAlign: 'center',
+    color: 'var(--text3)',
+    fontSize: 12,
+    lineHeight: 1.5,
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    maxHeight: 240,
+    overflowY: 'auto',
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 12px',
+    background: 'var(--bg2)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+  },
+  rowMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rowLabel: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text1)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  defaultBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    padding: '1px 6px',
+    borderRadius: 999,
+    background: 'rgba(201,164,92,0.18)',
+    color: '#8a6d2a',
+  },
+  rowMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 11,
+    color: 'var(--text2)',
+    marginTop: 3,
+    flexWrap: 'wrap',
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  sep: {
+    color: 'var(--text3)',
+  },
+  port: {
+    color: 'var(--text2)',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  address: {
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: 10,
+    color: 'var(--text3)',
+    background: 'var(--bg)',
+    padding: '1px 5px',
+    borderRadius: 3,
+    border: '1px solid var(--border)',
+    maxWidth: 220,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  rowNote: {
+    fontSize: 11,
+    color: 'var(--red)',
+    marginTop: 4,
+    lineHeight: 1.4,
+  },
+  useBtn: {
+    padding: '7px 12px',
+    borderRadius: 6,
+    background: 'var(--gold)',
+    color: '#2c2420',
+    fontSize: 12,
+    fontWeight: 600,
+    border: '1px solid rgba(44,36,32,0.08)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 32,
+    flexShrink: 0,
+  },
+};
 
 // ─── Appearance section ────────────────────────────────────────────────────
 // Auto-lock idle timeout. The theme itself is fixed (warm light) per design
@@ -1538,25 +1971,39 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
   const { t } = useTranslation();
   const [reviewNote, setReviewNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Pending PIN entry — undefined when no modal is open, otherwise the action
+  // to fire once the admin PIN is validated. Both branches re-use the same
+  // PinConfirmModal so the numpad UX matches the rest of the terminal.
+  const [pinAction, setPinAction] = useState<'approve' | 'reject' | null>(null);
 
   const approveMutation = useMutation({
-    mutationFn: () => approveSuggestion(suggestion.id, reviewNote.trim() || undefined),
+    mutationFn: (pin: string) =>
+      approveSuggestion(suggestion.id, pin, reviewNote.trim() || undefined),
     onSuccess: () => {
       setError(null);
+      setPinAction(null);
       onChanged();
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : t('settings.suggestionApproveFailed')),
   });
   const rejectMutation = useMutation({
-    mutationFn: () => rejectSuggestion(suggestion.id, reviewNote.trim() || undefined),
+    mutationFn: (pin: string) =>
+      rejectSuggestion(suggestion.id, pin, reviewNote.trim() || undefined),
     onSuccess: () => {
       setError(null);
+      setPinAction(null);
       onChanged();
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : t('settings.suggestionRejectFailed')),
   });
 
   const busy = approveMutation.isPending || rejectMutation.isPending;
+  const closePin = () => {
+    setPinAction(null);
+    setError(null);
+    approveMutation.reset();
+    rejectMutation.reset();
+  };
   const isPending = suggestion.status === 'PENDING';
 
   // Friendly summary of what the suggestion proposes — first line of the card.
@@ -1619,12 +2066,12 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
             disabled={busy}
             maxLength={500}
           />
-          {error && <div style={suggestionStyles.errBanner}>{error}</div>}
+          {error && !pinAction && <div style={suggestionStyles.errBanner}>{error}</div>}
           <div style={suggestionStyles.actions}>
             <button
               type="button"
               style={suggestionStyles.approveBtn}
-              onClick={() => approveMutation.mutate()}
+              onClick={() => { setError(null); setPinAction('approve'); }}
               disabled={busy}
             >
               {approveMutation.isPending ? <Spinner size={12} /> : t('settings.suggestionApprove')}
@@ -1632,13 +2079,34 @@ function SuggestionCard({ suggestion, onChanged }: SuggestionCardProps) {
             <button
               type="button"
               style={suggestionStyles.rejectBtn}
-              onClick={() => rejectMutation.mutate()}
+              onClick={() => { setError(null); setPinAction('reject'); }}
               disabled={busy}
             >
               {rejectMutation.isPending ? <Spinner size={12} /> : t('settings.suggestionReject')}
             </button>
           </div>
         </>
+      )}
+
+      {pinAction === 'approve' && (
+        <PinConfirmModal
+          title={t('settings.suggestionApprove')}
+          confirmLabel={t('settings.suggestionApprove')}
+          busy={approveMutation.isPending}
+          error={error}
+          onClose={closePin}
+          onConfirm={(pin) => approveMutation.mutate(pin)}
+        />
+      )}
+      {pinAction === 'reject' && (
+        <PinConfirmModal
+          title={t('settings.suggestionReject')}
+          confirmLabel={t('settings.suggestionReject')}
+          busy={rejectMutation.isPending}
+          error={error}
+          onClose={closePin}
+          onConfirm={(pin) => rejectMutation.mutate(pin)}
+        />
       )}
     </div>
   );

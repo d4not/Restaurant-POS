@@ -68,24 +68,21 @@ WAITER ≈ BARISTA  <  CASHIER  ≈  MANAGER  <  ADMIN
 
 ## Cash register / shift
 
-The terminal runs in a **singleton-shift** model: at most one register is OPEN at any time, and *every* user's orders attach to it. After PIN login, if no shift is open the entire UI is gated behind a "No shift open" screen with two actions.
+The terminal runs in a **singleton-shift** model: at most one register is OPEN at any time, and *every* user's orders attach to it. After PIN login, if no shift is open the entire UI is gated behind a "No shift open" screen — only a cashier+ can open one.
 
 | Action                                       | WAITER | BARISTA | CASHIER | MANAGER | ADMIN |
 | -------------------------------------------- | ------ | ------- | ------- | ------- | ----- |
 | Operations pill visible in topbar            | ✅     | ✅      | ✅      | ✅      | ✅    |
-| Open **normal** shift (counts opening cash)  | ❌     | ❌      | ✅      | ✅      | ✅    |
-| Open **provisional** shift (`opening = 0`)   | ✅     | ✅      | ✅      | ✅      | ✅    |
-| Close any shift (counts cash, records diff)  | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Open shift (counts opening cash)             | ❌     | ❌      | ✅      | ✅      | ✅    |
+| Close shift (counts cash, records diff)      | ❌     | ❌      | ✅      | ✅      | ✅    |
+| End the day (closes DailyReport)             | ❌     | ❌      | ❌      | ✅      | ✅    |
 | Cash in / cash out movements                 | ❌     | ❌      | ✅      | ✅      | ✅    |
 | Add expense / income card visible in hub     | ❌     | ❌      | ✅      | ✅      | ✅    |
 | Daily report card visible in hub             | ❌     | ❌      | ✅      | ✅      | ✅    |
 | Transfer supplies card visible in hub        | ✅     | ✅      | ✅      | ✅      | ✅    |
 | Printer check card visible in hub            | ✅     | ✅      | ✅      | ✅      | ✅    |
 
-The pill itself never shows money — only "Shift open" / "Provisional" / "Open shift". The amount is only visible inside the management modal.
-
-### Provisional shift flow
-Used when no cashier is on site yet. A waiter or barista opens one with `opening_amount = 0`; the UI shows a persistent gold banner reading **"Provisional shift in progress"** above the topbar. When a cashier arrives, they open the Operations Hub → Shift, count the cash physically, and submit. The system closes the provisional shift (recording the counted amount as `actual_amount` and the cashier as `closed_by_user_id`) and immediately opens a new normal shift with that counted amount as `opening_amount`. Cash carries over with no gap.
+The pill itself never shows money — only "Shift open" / "Open shift". The amount is only visible inside the management modal.
 
 ---
 
@@ -105,6 +102,21 @@ Used when no cashier is on site yet. A waiter or barista opens one with `opening
 📝 Cashier/manager submits a `TABLE_CREATE` suggestion to the admin queue; admin approves or rejects.
 
 Tap-to-open is direct: no popover/confirmation step. Wrong-table presses are reverted by cancelling the empty order.
+
+---
+
+## Admin Mode (in-terminal back office)
+
+The Launchpad-style surface at `terminal/src/components/adminMode/` — reports, inventory, employees, payroll, etc. Separate from the cashier's Operations Hub.
+
+| Action                                       | WAITER | BARISTA | CASHIER | MANAGER | ADMIN |
+| -------------------------------------------- | ------ | ------- | ------- | ------- | ----- |
+| Mode picker after PIN login                  | ❌     | ❌      | ❌      | ✅      | ✅    |
+| ⌘⇧A / Ctrl+Shift+A shortcut from POS         | ❌     | ❌      | ❌      | ✅      | ✅    |
+| "Admin Mode" entry in hamburger drawer       | ❌     | ❌      | ❌      | ✅      | ✅    |
+| "Enter Admin Mode" on no-shift screen        | ❌     | ❌      | ❌      | ✅      | ✅    |
+
+Cashiers run their day-to-day management from the Operations Hub (shift open/close, cash in/out, daily report, expense card, transfer, printer check). They do not enter Admin Mode.
 
 ---
 
@@ -188,7 +200,6 @@ Returns the matching user (`approver`) so audit fields can record who said yes (
 
 ## Known gaps / not implemented yet
 
-- **Emergency shift for waiters** — the user mentioned a flow where a waiter can create an order if no cashier is present and a cashier verifies it later. Not built; needs a `pending_verification` flag on `Order` and a cashier review step.
 - **No UI for `TABLE_UPDATE` / `TABLE_DELETE` suggestions** — cashier can only suggest a *new* table today; edit/delete go through directly when permitted, otherwise are blocked.
 - **No UI for product suggestions** — the terminal doesn't expose product CRUD. Live in the admin web.
 - **MANAGER ≠ admin** — managers do not currently approve suggestions, create tables, or delete tables. If this is wrong, change `LAYOUT_ADMINS` in `tables/routes.ts` and `SUGGEST_REVIEWERS` in `suggestions/routes.ts`, and `ROLES_LAYOUT_CREATE` / `isAdmin` checks on the frontend.

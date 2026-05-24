@@ -43,7 +43,6 @@ describe('Shift lifecycle — open → orders → pay → close → report', () 
       where: { cash_register_id: registerId },
       include: { alerts: true },
     });
-    expect(report.shift_type).toBe('REGULAR');
     expect(report.user_id).toBe(s.cashier.id);
     expect(report.gross_sales).toBe(15000);
     expect(report.net_sales).toBe(15000);

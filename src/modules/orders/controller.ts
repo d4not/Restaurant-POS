@@ -9,10 +9,13 @@ import type {
   CreatePaymentInput,
   ListOrderQuery,
   RemoveOrderItemInput,
+  ReopenOrderInput,
   RequestAttentionInput,
   RestoreOrderItemInput,
+  SoftDeleteOrderInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
+  UpdatePaymentMethodInput,
 } from './schema.js';
 
 function currentUserId(req: Request): string {
@@ -132,4 +135,29 @@ export async function flagAttention(req: Request, res: Response): Promise<void> 
 export async function clearAttention(req: Request, res: Response): Promise<void> {
   const order = await service.clearOrderAttention(req.params.id as string);
   res.json({ success: true, data: order });
+}
+
+export async function reopen(req: Request, res: Response): Promise<void> {
+  const order = await service.reopenOrder(
+    req.params.id as string,
+    req.body as ReopenOrderInput,
+  );
+  res.json({ success: true, data: order });
+}
+
+export async function softDelete(req: Request, res: Response): Promise<void> {
+  const order = await service.softDeleteOrder(
+    req.params.id as string,
+    req.body as SoftDeleteOrderInput,
+  );
+  res.json({ success: true, data: order });
+}
+
+export async function updatePaymentMethod(req: Request, res: Response): Promise<void> {
+  const result = await service.updatePaymentMethod(
+    req.params.id as string,
+    req.params.paymentId as string,
+    req.body as UpdatePaymentMethodInput,
+  );
+  res.json({ success: true, data: result });
 }

@@ -92,38 +92,6 @@ describe('Alert generation — shift-level thresholds at close', () => {
     expect(voidsAlert!.user_id).toBe(s.cashier.id);
   });
 
-  it('UNVERIFIED_PROVISIONAL at day close raises a CRITICAL alert per unverified shift', async () => {
-    const s = await seedLifecycle(app);
-    const admin = await makeUser({ role: 'ADMIN' });
-    const adminAuth = authHeader(admin.id, 'ADMIN');
-    const waiter = await makeUser({ role: 'WAITER' });
-    const waiterAuth = authHeader(waiter.id, 'WAITER');
-
-    const parent = await openShift(app, s.cashier.auth, 50000);
-    const prov = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(waiterAuth)
-      .send({ parent_shift_id: parent })
-      .expect(201);
-    // Close the provisional WITHOUT verifying it.
-    await closeShift(app, s.cashier.auth, prov.body.data.id, 0);
-    await closeShift(app, s.cashier.auth, parent, 50000);
-
-    const close = await request(app)
-      .post('/api/v1/daily-reports/close')
-      .set(adminAuth)
-      .send({})
-      .expect(200);
-    expect(close.body.data.unverified_provisionals).toBe(1);
-
-    const dayAlerts = await prisma.alert.findMany({
-      where: { daily_report_id: close.body.data.id },
-    });
-    expect(dayAlerts).toHaveLength(1);
-    expect(dayAlerts[0]!.type).toBe('UNVERIFIED_PROVISIONAL');
-    expect(dayAlerts[0]!.severity).toBe('CRITICAL');
-    expect(dayAlerts[0]!.user_id).toBe(waiter.id);
-  });
 });
 
 // Resolution flow — manager+ marks an alert resolved with a written note.

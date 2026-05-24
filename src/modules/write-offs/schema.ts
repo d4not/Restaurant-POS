@@ -10,6 +10,24 @@ export const createWriteOffSchema = z.object({
   date: z.coerce.date(),
 });
 
+export const createWriteOffBatchSchema = z.object({
+  storage_id: z.string().uuid(),
+  date: z.coerce.date(),
+  reason: z.nativeEnum(WriteOffReason),
+  notes: z.string().max(2000).optional(),
+  items: z
+    .array(
+      z.object({
+        supply_id: z.string().uuid(),
+        quantity: z.number().positive(),
+        // Per-line overrides — when omitted, the ticket-level reason/notes apply.
+        reason: z.nativeEnum(WriteOffReason).optional(),
+        notes: z.string().max(2000).optional(),
+      }),
+    )
+    .min(1),
+});
+
 export const listWriteOffQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -21,4 +39,5 @@ export const listWriteOffQuerySchema = z.object({
 });
 
 export type CreateWriteOffInput = z.infer<typeof createWriteOffSchema>;
+export type CreateWriteOffBatchInput = z.infer<typeof createWriteOffBatchSchema>;
 export type ListWriteOffQuery = z.infer<typeof listWriteOffQuerySchema>;

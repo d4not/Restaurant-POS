@@ -1,5 +1,13 @@
-# Reports, Provisional Shifts, Alerts & Blind Close — Feature Specification
+# Reports, Alerts & Blind Close — Feature Specification
 
+> **⚠ Provisional shifts removed.** Everything in this document about
+> "PROVISIONAL" / "REGULAR" shift types, the `parent_shift_id` hierarchy, the
+> manager verification flow (`POST /registers/:id/verify`,
+> `POST /registers/provisional`), the `UNVERIFIED_PROVISIONAL` alert, and the
+> `provisional_shifts` / `unverified_provisionals` fields on `DailyReport` no
+> longer apply — the feature was rolled back. Shifts are a single REGULAR kind
+> opened by a cashier+. The reports/alerts/blind-close stack still applies.
+>
 > **Scope**: Backend-only (Express API + Prisma migration). No frontend changes except
 > the blind-close UX tweak in Phase 6 and the admin print page in Phase 5.
 >

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { updateOrder, type ActiveOrder, type TakeoutChannel } from '../api/orders';
 import { ApiError } from '../api/client';
-import { TAKEOUT_CHANNEL_LABEL } from '../api/settings';
+import { useTranslation } from '../i18n';
+import { useTakeoutChannelLabel } from './TakeoutChannelPicker';
 
 interface Props {
   order: ActiveOrder;
@@ -118,28 +119,29 @@ interface FieldDef {
     | 'delivery_driver_name'
     | 'delivery_app'
     | 'delivery_app_order_id';
-  label: string;
-  placeholder?: string;
+  labelKey: string;
+  placeholderKey?: string;
   multiline?: boolean;
   inputMode?: 'text' | 'tel';
 }
 
-// Fields shown per channel. Empty string means "show but not required".
+// Fields shown per channel. Labels & placeholders use i18n keys looked up at
+// render time so the panel re-renders when the language switches.
 const CHANNEL_FIELDS: Record<TakeoutChannel, FieldDef[]> = {
   LOCAL: [
-    { key: 'customer_name', label: 'Customer name', placeholder: 'Pickup under what name?' },
+    { key: 'customer_name', labelKey: 'takeout.customerName', placeholderKey: 'takeout.localNamePh' },
   ],
   DELIVERY_LOCAL: [
-    { key: 'customer_name', label: 'Customer name', placeholder: 'Who placed the order' },
-    { key: 'customer_phone', label: 'Phone', placeholder: '+52 555 …', inputMode: 'tel' },
-    { key: 'delivery_address', label: 'Address', placeholder: 'Street, number, city', multiline: true },
-    { key: 'delivery_reference', label: 'References', placeholder: 'Cross streets, building, gate code…', multiline: true },
-    { key: 'delivery_driver_name', label: 'Driver', placeholder: 'Who is taking it' },
+    { key: 'customer_name', labelKey: 'takeout.customerName', placeholderKey: 'takeout.deliveryNamePh' },
+    { key: 'customer_phone', labelKey: 'takeout.customerPhone', placeholderKey: 'takeout.phonePh', inputMode: 'tel' },
+    { key: 'delivery_address', labelKey: 'takeout.address', placeholderKey: 'takeout.addressPh', multiline: true },
+    { key: 'delivery_reference', labelKey: 'takeout.references', placeholderKey: 'takeout.referencesPh', multiline: true },
+    { key: 'delivery_driver_name', labelKey: 'takeout.driver', placeholderKey: 'takeout.driverPh' },
   ],
   DELIVERY_APP: [
-    { key: 'delivery_app', label: 'App', placeholder: 'Uber Eats, DiDi Food, Rappi…' },
-    { key: 'delivery_app_order_id', label: 'App order #', placeholder: 'Reference shown by the app' },
-    { key: 'customer_name', label: 'Customer name', placeholder: 'Optional' },
+    { key: 'delivery_app', labelKey: 'takeout.app', placeholderKey: 'takeout.appPh' },
+    { key: 'delivery_app_order_id', labelKey: 'takeout.appOrder', placeholderKey: 'takeout.appOrderPh' },
+    { key: 'customer_name', labelKey: 'takeout.customerName', placeholderKey: 'common.optional' },
   ],
 };
 
@@ -151,6 +153,8 @@ function readField(order: ActiveOrder, key: FieldKey): string {
 
 export function TakeoutCustomerPanel({ order, editable }: Props) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const channelLabel = useTakeoutChannelLabel();
   const channel = order.takeout_channel;
 
   // Local draft state — we patch the server on blur (or after a short debounce
@@ -206,7 +210,7 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
     },
     onError: (err) => {
       setStatus('error');
-      setErrorMsg(err instanceof ApiError ? err.message : 'Could not save');
+      setErrorMsg(err instanceof ApiError ? err.message : t('takeout.couldNotSave'));
     },
   });
 
@@ -225,10 +229,10 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
     return (
       <div style={styles.panel}>
         <div style={styles.hd}>
-          <span style={styles.label}>Takeout details</span>
+          <span style={styles.label}>{t('takeout.detailsHeader')}</span>
         </div>
         <div style={styles.readonlyMuted}>
-          No channel set on this order.
+          {t('takeout.noChannelSet')}
         </div>
       </div>
     );
@@ -237,7 +241,7 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
   return (
     <div style={styles.panel}>
       <div style={styles.hd}>
-        <span style={styles.label}>Channel</span>
+        <span style={styles.label}>{t('takeout.channel')}</span>
         <span style={styles.pill}>
           <span
             style={{
@@ -248,7 +252,7 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
               display: 'inline-block',
             }}
           />
-          {TAKEOUT_CHANNEL_LABEL[channel]}
+          {channelLabel(channel)}
         </span>
       </div>
 
@@ -257,7 +261,7 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
         if (!editable) {
           return (
             <div key={f.key} style={styles.fieldRow}>
-              <span style={styles.fieldLabel}>{f.label}</span>
+              <span style={styles.fieldLabel}>{t(f.labelKey)}</span>
               <span style={value ? styles.readonly : styles.readonlyMuted}>
                 {value || '—'}
               </span>
@@ -268,13 +272,13 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
         return (
           <div key={f.key} style={styles.fieldRow}>
             <label style={styles.fieldLabel} htmlFor={`takeout-${f.key}`}>
-              {f.label}
+              {t(f.labelKey)}
             </label>
             {f.multiline ? (
               <textarea
                 id={`takeout-${f.key}`}
                 style={styles.textarea}
-                placeholder={f.placeholder}
+                placeholder={f.placeholderKey ? t(f.placeholderKey) : undefined}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 onBlur={() => commit(f.key)}
@@ -283,7 +287,7 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
               <input
                 id={`takeout-${f.key}`}
                 style={styles.input}
-                placeholder={f.placeholder}
+                placeholder={f.placeholderKey ? t(f.placeholderKey) : undefined}
                 value={value}
                 inputMode={f.inputMode}
                 onChange={(e) => onChange(e.target.value)}
@@ -301,9 +305,9 @@ export function TakeoutCustomerPanel({ order, editable }: Props) {
           ...(status === 'error' ? styles.statusErr : null),
         }}
       >
-        {status === 'saving' && 'Saving…'}
-        {status === 'saved' && 'Saved'}
-        {status === 'error' && (errorMsg ?? 'Save failed')}
+        {status === 'saving' && t('takeout.saving')}
+        {status === 'saved' && t('takeout.saved')}
+        {status === 'error' && (errorMsg ?? t('takeout.saveFailed'))}
       </div>
     </div>
   );

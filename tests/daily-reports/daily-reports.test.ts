@@ -215,77 +215,6 @@ describe('POST /api/v1/daily-reports/close', () => {
     expect(updated.daily_report_id).toBe(close.body.data.id);
   });
 
-  it('generates a CRITICAL UNVERIFIED_PROVISIONAL alert per unverified shift', async () => {
-    const s = await seedRing();
-    const admin = await makeUser({ role: 'ADMIN' });
-    const adminAuth = authHeader(admin.id, 'ADMIN');
-    const waiter = await makeUser({ role: 'WAITER' });
-    const waiterAuth = authHeader(waiter.id, 'WAITER');
-
-    // Cashier opens a regular shift, waiter opens a provisional against it.
-    // Cashier closes the provisional but never verifies — should trigger
-    // exactly one CRITICAL alert.
-    const parent = await openShift(s.cashier.auth, 50000);
-    const prov = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(waiterAuth)
-      .send({ parent_shift_id: parent })
-      .expect(201);
-    await closeShift(s.cashier.auth, prov.body.data.id, 0);
-    await closeShift(s.cashier.auth, parent, 50000);
-
-    const close = await request(app)
-      .post('/api/v1/daily-reports/close')
-      .set(adminAuth)
-      .send({})
-      .expect(200);
-
-    expect(close.body.data.unverified_provisionals).toBe(1);
-    expect(close.body.data.provisional_shifts).toBe(1);
-
-    const alerts = await prisma.alert.findMany({
-      where: { daily_report_id: close.body.data.id },
-    });
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0]!.type).toBe('UNVERIFIED_PROVISIONAL');
-    expect(alerts[0]!.severity).toBe('CRITICAL');
-    expect(alerts[0]!.user_id).toBe(waiter.id);
-  });
-
-  it('skips alerting when the provisional shift was verified', async () => {
-    const s = await seedRing();
-    const admin = await makeUser({ role: 'ADMIN', pin: '4242' });
-    const adminAuth = authHeader(admin.id, 'ADMIN');
-    const waiter = await makeUser({ role: 'WAITER' });
-    const waiterAuth = authHeader(waiter.id, 'WAITER');
-
-    const parent = await openShift(s.cashier.auth, 50000);
-    const prov = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(waiterAuth)
-      .send({ parent_shift_id: parent })
-      .expect(201);
-    await closeShift(s.cashier.auth, prov.body.data.id, 0);
-    // Manager+ verifies via PIN step-up.
-    await request(app)
-      .post(`/api/v1/registers/${prov.body.data.id}/verify`)
-      .set(adminAuth)
-      .send({ pin: '4242' })
-      .expect(200);
-    await closeShift(s.cashier.auth, parent, 50000);
-
-    const close = await request(app)
-      .post('/api/v1/daily-reports/close')
-      .set(adminAuth)
-      .send({})
-      .expect(200);
-    expect(close.body.data.unverified_provisionals).toBe(0);
-    const alerts = await prisma.alert.findMany({
-      where: { daily_report_id: close.body.data.id },
-    });
-    expect(alerts).toHaveLength(0);
-  });
-
   it('rejects a second close on the same day with 409', async () => {
     const s = await seedRing();
     const admin = await makeUser({ role: 'ADMIN' });
@@ -324,18 +253,10 @@ describe('GET /api/v1/daily-reports/:id', () => {
     const s = await seedRing();
     const admin = await makeUser({ role: 'ADMIN' });
     const adminAuth = authHeader(admin.id, 'ADMIN');
-    const waiter = await makeUser({ role: 'WAITER' });
-    const waiterAuth = authHeader(waiter.id, 'WAITER');
 
-    const parent = await openShift(s.cashier.auth, 50000);
-    await payOrder(s.cashier.auth, parent, s.productId, 1, 5000);
-    const prov = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(waiterAuth)
-      .send({ parent_shift_id: parent })
-      .expect(201);
-    await closeShift(s.cashier.auth, prov.body.data.id, 0);
-    await closeShift(s.cashier.auth, parent, 55000);
+    const reg = await openShift(s.cashier.auth, 50000);
+    await payOrder(s.cashier.auth, reg, s.productId, 1, 5000);
+    await closeShift(s.cashier.auth, reg, 55000);
 
     const close = await request(app)
       .post('/api/v1/daily-reports/close')
@@ -348,16 +269,13 @@ describe('GET /api/v1/daily-reports/:id', () => {
       .set(adminAuth)
       .expect(200);
 
-    // Two shifts contributed: the provisional + the parent.
-    expect(detail.body.data.shifts).toHaveLength(2);
+    expect(detail.body.data.shifts).toHaveLength(1);
     // Each shift carries its own ShiftReport (1:1) under the nested include.
     for (const shift of detail.body.data.shifts) {
       expect(shift.shift_report).not.toBeNull();
       expect(Array.isArray(shift.shift_report.alerts)).toBe(true);
     }
-    // Alerts attached at the day level (UNVERIFIED_PROVISIONAL).
     expect(Array.isArray(detail.body.data.alerts)).toBe(true);
-    expect(detail.body.data.alerts.length).toBeGreaterThan(0);
   });
 
   it('returns 404 for an unknown id', async () => {
@@ -474,5 +392,62 @@ describe('GET /api/v1/daily-reports', () => {
     expect(list.body.success).toBe(true);
     expect(list.body.data.items).toHaveLength(1);
     expect(list.body.data.nextCursor).toBeNull();
+  });
+});
+
+describe('POST /api/v1/daily-reports/:id/reopen', () => {
+  it('unlinks shifts, deletes the report, and frees the day so a new close produces a new folio', async () => {
+    const s = await seedRing();
+    const admin = await makeUser({ role: 'ADMIN' });
+    const adminAuth = authHeader(admin.id, 'ADMIN');
+
+    const reg = await openShift(s.cashier.auth, 10000);
+    await closeShift(s.cashier.auth, reg, 10000);
+    const first = await request(app)
+      .post('/api/v1/daily-reports/close')
+      .set(adminAuth)
+      .send({})
+      .expect(200);
+    const firstId = first.body.data.id as string;
+
+    await request(app)
+      .post(`/api/v1/daily-reports/${firstId}/reopen`)
+      .set(adminAuth)
+      .expect(204);
+
+    // Row is gone and the contributing shift is unlinked.
+    const gone = await prisma.dailyReport.findUnique({ where: { id: firstId } });
+    expect(gone).toBeNull();
+    const unlinkedReg = await prisma.cashRegister.findUniqueOrThrow({
+      where: { id: reg },
+      select: { daily_report_id: true },
+    });
+    expect(unlinkedReg.daily_report_id).toBeNull();
+
+    // Re-close succeeds and emits a fresh row (folio strictly increases via
+    // the autoincrement sequence).
+    const second = await request(app)
+      .post('/api/v1/daily-reports/close')
+      .set(adminAuth)
+      .send({})
+      .expect(200);
+    expect(second.body.data.id).not.toBe(firstId);
+    expect(second.body.data.folio).toBeGreaterThan(first.body.data.folio);
+  });
+
+  it('returns 404 when the report does not exist', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const res = await request(app)
+      .post('/api/v1/daily-reports/00000000-0000-0000-0000-000000000000/reopen')
+      .set(authHeader(admin.id, 'ADMIN'));
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects WAITER with 403', async () => {
+    const waiter = await makeUser({ role: 'WAITER' });
+    const res = await request(app)
+      .post('/api/v1/daily-reports/00000000-0000-0000-0000-000000000000/reopen')
+      .set(authHeader(waiter.id, 'WAITER'));
+    expect(res.status).toBe(403);
   });
 });

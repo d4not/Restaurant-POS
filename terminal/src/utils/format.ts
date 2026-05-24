@@ -25,6 +25,27 @@ export function formatMoneyPlain(centavos: string | number): string {
   return PLAIN_FORMATTER.format(value / 100);
 }
 
+// Percent with one decimal place. Pass a raw percentage (e.g. 28.5 → "28.5%").
+const PCT_FORMATTER = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+export function formatPct(pct: string | number): string {
+  const value = typeof pct === 'string' ? Number(pct) : pct;
+  if (!Number.isFinite(value)) return '—';
+  return `${PCT_FORMATTER.format(value)}%`;
+}
+
+export function formatNumber(value: string | number, decimals = 2): string {
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isFinite(n)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(n);
+}
+
 // Elapsed minutes since `iso`. Floor on the minute boundary so a 1-minute-old
 // order doesn't flicker between "0 min" and "1 min" within the same render.
 export function minutesSince(iso: string | Date): number {

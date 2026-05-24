@@ -7,7 +7,6 @@ import type {
 } from '../types/operations';
 
 export type DailyReportStatus = 'OPEN' | 'CLOSED';
-export type ShiftType = 'REGULAR' | 'PROVISIONAL';
 
 export type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -17,7 +16,6 @@ export type AlertType =
   | 'RECURRING_SHORTAGE'
   | 'EXCESSIVE_VOIDS'
   | 'EXCESSIVE_DISCOUNTS'
-  | 'UNVERIFIED_PROVISIONAL'
   | 'LATE_VOID';
 
 export interface Alert {
@@ -42,7 +40,6 @@ export interface ShiftReport {
   user_id: string;
   user_name: string;
   user_role: string;
-  shift_type: ShiftType;
   opened_at: string;
   closed_at: string;
   gross_sales: number;
@@ -64,19 +61,22 @@ export interface ShiftReport {
   expected_cash: number;
   actual_cash: number | null;
   cash_variance: number | null;
+  // Provisional snapshot — populated when the shift was opened by floor
+  // staff and a cashier+ ran verifyProvisional before close.
+  was_provisional: boolean;
+  provisional_opened_by_role: string | null;
+  provisional_verified_by_id: string | null;
+  provisional_verified_by_name: string | null;
+  provisional_verified_at: string | null;
+  provisional_expected_amount: number | null;
+  provisional_actual_amount: number | null;
+  provisional_difference: number | null;
   alerts?: Alert[];
 }
 
 export interface DailyReportShift extends CashRegister {
-  type: ShiftType;
-  parent_shift_id: string | null;
-  requires_verification: boolean;
-  verified_by_id: string | null;
-  verified_at: string | null;
-  verification_notes: string | null;
   daily_report_id: string | null;
   status: CashRegisterStatus;
-  verified_by?: { id: string; name: string } | null;
   shift_report?: ShiftReport | null;
 }
 
@@ -109,8 +109,6 @@ export interface DailyReport {
   bottom_products: unknown;
   sales_by_hour: unknown;
   total_shifts: number;
-  provisional_shifts: number;
-  unverified_provisionals: number;
   peak_hour: number | null;
   slowest_hour: number | null;
   closed_by_id: string | null;

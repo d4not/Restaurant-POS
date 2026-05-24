@@ -16,17 +16,30 @@ export interface BarcodeLookupExisting {
   active: boolean;
 }
 
+export type LookupSource =
+  | 'openfoodfacts'
+  | 'openbeautyfacts'
+  | 'openproductsfacts'
+  | 'upcitemdb';
+
+export interface SourcedLookup {
+  source: LookupSource;
+  barcode: string | null;
+  name: string;
+  brand: string | null;
+  image_url: string | null;
+  content_per_unit: number | null;
+  content_unit: ContentUnit | null;
+  categories: string[];
+}
+
 export interface BarcodeLookupResult {
   existing: BarcodeLookupExisting | null;
-  lookup: {
-    name: string;
-    brand: string | null;
-    image_url: string | null;
-    content_per_unit: number | null;
-    content_unit: ContentUnit | null;
-    categories: string[];
-    source: 'openfoodfacts';
-  } | null;
+  candidates: SourcedLookup[];
+}
+
+export interface ExternalSearchResult {
+  candidates: SourcedLookup[];
 }
 
 export interface ListSuppliesParams {
@@ -69,4 +82,8 @@ export function lookupBarcode(barcode: string) {
   return api.get<BarcodeLookupResult>(
     `/supplies/barcode-lookup/${encodeURIComponent(barcode)}`,
   );
+}
+
+export function externalSearch(q: string, limit = 10) {
+  return api.get<ExternalSearchResult>('/supplies/external-search', { q, limit });
 }

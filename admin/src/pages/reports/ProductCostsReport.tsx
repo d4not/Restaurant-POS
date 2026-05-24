@@ -4,13 +4,14 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { Badge, Button, Card, EmptyState, KPICard, Table } from '../../components/ui';
-import type { TableColumn, BadgeTone } from '../../components/ui';
+import { Badge, Button, Card, CSVExportButton, EmptyState, KPICard, Table } from '../../components/ui';
+import type { TableColumn, BadgeTone, SortState } from '../../components/ui';
 import { SearchInput } from '../../components/forms/SearchInput';
 import {
   useProductAnalysis,
@@ -20,6 +21,17 @@ import type { ProductCostRow } from '../../api/reports';
 import { formatMoney, formatNumber } from '../../utils/format';
 import { daysAgoYMD, toIsoDayEnd, toIsoDayStart, todayYMD } from './date-range';
 import { useTranslation } from '../../i18n';
+
+type SortKey = 'product' | 'cost' | 'price' | 'food_cost' | 'markup';
+
+const FOOD_COST_BUCKETS = [
+  { from:  0, to: 15, label: '0–15%',  color: 'var(--green)' },
+  { from: 15, to: 25, label: '15–25%', color: 'var(--green)' },
+  { from: 25, to: 30, label: '25–30%', color: 'var(--gold)'  },
+  { from: 30, to: 35, label: '30–35%', color: 'var(--gold)'  },
+  { from: 35, to: 45, label: '35–45%', color: 'var(--red)'   },
+  { from: 45, to: 200,label: '> 45%',  color: 'var(--red)'   },
+];
 
 /**
  * Flattened row — one per product (no variants) OR one per variant (the
@@ -94,6 +106,7 @@ export function ProductCostsReport() {
   const [search, setSearch] = useState('');
   const [bucket, setBucket] = useState<'all' | 'good' | 'watch' | 'bad'>('all');
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortState>({ key: 'food_cost', dir: 'desc' });
 
   const query = useProductCostsReport(activeOnly);
 
@@ -104,7 +117,7 @@ export function ProductCostsReport() {
 
   const filtered = useMemo<FlatRow[]>(() => {
     const needle = search.trim().toLowerCase();
-    return flat.filter((r) => {
+    const base = flat.filter((r) => {
       if (needle) {
         const name = [r.product_name, r.variant_name ?? '', r.category_name ?? '']
           .join(' ')
@@ -118,7 +131,31 @@ export function ProductCostsReport() {
         default:      return true;
       }
     });
-  }, [flat, search, bucket]);
+
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    base.sort((a, b) => {
+      switch (sort.key as SortKey) {
+        case 'product':
+          return a.product_name.localeCompare(b.product_name) * dir;
+        case 'cost':
+          return (a.recipe_cost - b.recipe_cost) * dir;
+        case 'price':
+          return ((a.sell_price ?? 0) - (b.sell_price ?? 0)) * dir;
+        case 'food_cost':
+          // Unpriced products always sort to the bottom regardless of dir, so
+          // they don't dominate "highest food cost" or "lowest food cost".
+          if (!a.sell_price && !b.sell_price) return 0;
+          if (!a.sell_price) return 1;
+          if (!b.sell_price) return -1;
+          return (a.food_cost_pct - b.food_cost_pct) * dir;
+        case 'markup':
+          return (a.markup - b.markup) * dir;
+        default:
+          return 0;
+      }
+    });
+    return base;
+  }, [flat, search, bucket, sort]);
 
   /* ── KPIs (across the current filter) ─────────────────── */
 
@@ -139,6 +176,28 @@ export function ProductCostsReport() {
     return priced.reduce((s, r) => s + r.food_cost_pct, 0) / priced.length;
   }, [filtered]);
 
+  /** Sell-price-weighted food cost — closer to the "if every item sold once,
+   *  what % of revenue would be ingredients?" answer than the simple mean. */
+  const weightedFoodCost = useMemo(() => {
+    let priceSum = 0, costSum = 0;
+    for (const r of filtered) {
+      if (!r.sell_price) continue;
+      priceSum += r.sell_price;
+      costSum += r.recipe_cost;
+    }
+    return priceSum > 0 ? (costSum / priceSum) * 100 : 0;
+  }, [filtered]);
+
+  const distribution = useMemo(() => {
+    return FOOD_COST_BUCKETS.map((b) => ({
+      label: b.label,
+      color: b.color,
+      count: filtered.filter(
+        (r) => r.sell_price && r.food_cost_pct >= b.from && r.food_cost_pct < b.to,
+      ).length,
+    }));
+  }, [filtered]);
+
   /* ── Table columns ────────────────────────────────────── */
 
   const columns: TableColumn<FlatRow>[] = [
@@ -146,6 +205,7 @@ export function ProductCostsReport() {
       key: 'product',
       header: t('productCosts.colProduct'),
       width: '2fr',
+      sortable: true,
       render: (r) => (
         <div>
           <div className="fw-600 fs-13">{r.product_name}</div>
@@ -178,6 +238,7 @@ export function ProductCostsReport() {
       key: 'cost',
       header: t('productCosts.colRecipeCost'),
       width: '120px',
+      sortable: true,
       render: (r) => (
         <span className="fs-13">{formatMoney(r.recipe_cost)}</span>
       ),
@@ -186,6 +247,7 @@ export function ProductCostsReport() {
       key: 'price',
       header: t('productCosts.colSellPrice'),
       width: '120px',
+      sortable: true,
       render: (r) =>
         r.sell_price == null ? (
           <span className="fs-12 text-muted">—</span>
@@ -197,6 +259,7 @@ export function ProductCostsReport() {
       key: 'food_cost',
       header: t('productCosts.colFoodCostPct'),
       width: '130px',
+      sortable: true,
       render: (r) => {
         if (!r.sell_price) return <span className="fs-12 text-muted">—</span>;
         return (
@@ -210,6 +273,7 @@ export function ProductCostsReport() {
       key: 'markup',
       header: t('productCosts.colMargin'),
       width: '100px',
+      sortable: true,
       render: (r) =>
         r.markup > 0 ? (
           <span className="fs-13">×{formatNumber(r.markup, 2)}</span>
@@ -218,6 +282,27 @@ export function ProductCostsReport() {
         ),
     },
   ];
+
+  /* ── CSV ──────────────────────────────────────────────── */
+
+  const buildCsvRows = () => {
+    const header = ['product', 'variant', 'category', 'type', 'recipe_cost', 'sell_price', 'food_cost_pct', 'markup', 'active'];
+    const rows: (string | number)[][] = [header];
+    for (const r of filtered) {
+      rows.push([
+        r.product_name,
+        r.variant_name ?? '',
+        r.category_name ?? '',
+        r.type,
+        r.recipe_cost / 100,
+        r.sell_price == null ? '' : r.sell_price / 100,
+        r.sell_price ? Number(r.food_cost_pct.toFixed(2)) : '',
+        r.markup > 0 ? Number(r.markup.toFixed(3)) : '',
+        r.active ? 'true' : 'false',
+      ]);
+    }
+    return rows;
+  };
 
   return (
     <>
@@ -229,30 +314,73 @@ export function ProductCostsReport() {
             avgFoodCost > 0 ? `${formatNumber(avgFoodCost, 1)}%` : '—'
           }
           sub={
-            filtered.length > 0
-              ? `${filtered.length} line${filtered.length === 1 ? '' : 's'} in view`
-              : 'Awaiting data'
+            weightedFoodCost > 0
+              ? `Weighted: ${formatNumber(weightedFoodCost, 1)}%`
+              : `${filtered.length} line${filtered.length === 1 ? '' : 's'} in view`
           }
         />
         <KPICard
-          label="Healthy"
+          label={t('reports.healthy')}
           value={counts.good}
           valueColor="green"
           sub="< 25% food cost"
         />
         <KPICard
-          label="Watch"
+          label={t('reports.watch')}
           value={counts.watch}
           valueColor="gold"
           sub="25%–35% food cost"
         />
         <KPICard
-          label="Over target"
+          label={t('reports.overTarget')}
           value={counts.bad}
           valueColor="red"
           sub="> 35% food cost"
         />
       </div>
+
+      <Card title={t('reports.foodCostDistribution')} className="mb-16">
+        {filtered.length === 0 ? (
+          <EmptyState message="No products to chart" />
+        ) : (
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={distribution} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis
+                dataKey="label"
+                stroke="var(--text3)"
+                tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+              />
+              <YAxis
+                allowDecimals={false}
+                stroke="var(--text3)"
+                tick={{ fontSize: 11, fill: 'var(--text2)' }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip
+                cursor={{ fill: 'var(--gold-bg)' }}
+                contentStyle={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border2)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: 'var(--text)',
+                }}
+                formatter={(v) => [`${v} product${Number(v) === 1 ? '' : 's'}`, '']}
+              />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                {distribution.map((d, i) => (
+                  <Cell key={i} fill={d.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
 
       <div className="toolbar">
         <SearchInput
@@ -273,21 +401,21 @@ export function ProductCostsReport() {
           className={`filter-pill ${bucket === 'good' ? 'active' : ''}`}
           onClick={() => setBucket('good')}
         >
-          Healthy
+          {t('reports.healthy')}
         </button>
         <button
           type="button"
           className={`filter-pill ${bucket === 'watch' ? 'active' : ''}`}
           onClick={() => setBucket('watch')}
         >
-          Watch
+          {t('reports.watch')}
         </button>
         <button
           type="button"
           className={`filter-pill ${bucket === 'bad' ? 'active' : ''}`}
           onClick={() => setBucket('bad')}
         >
-          Over target
+          {t('reports.overTarget')}
         </button>
 
         <button
@@ -297,6 +425,14 @@ export function ProductCostsReport() {
         >
           {activeOnly ? 'Show inactive' : '✓ Inactive visible'}
         </button>
+
+        <div style={{ flex: 1 }} />
+
+        <CSVExportButton
+          filename="product-costs.csv"
+          buildRows={buildCsvRows}
+          disabled={filtered.length === 0}
+        />
       </div>
 
       <Card>
@@ -307,6 +443,8 @@ export function ProductCostsReport() {
           onRowClick={(r) => setExpandedKey((cur) => (cur === r.key ? null : r.key))}
           isInitialLoad={query.isLoading}
           error={query.error as Error | null}
+          sort={sort}
+          onSortChange={setSort}
           emptyMessage={
             search || bucket !== 'all'
               ? 'No products match this filter'

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, getApiBase, getServerRoot, setApiBase } from '../api/client';
 import { pinLogin } from '../api/auth';
+import type { AuthUser, LoginResult } from '../api/auth';
 import { useSession } from '../store/session';
 import { useHaptics } from '../hooks/useHaptics';
 import { IconBackspace } from '../components/Icons';
@@ -11,6 +12,14 @@ import {
   saveServerUrl,
 } from '../store/serverUrl';
 import { useTranslation } from '../i18n';
+import { ModePicker } from './ModePicker';
+
+// MANAGER+ operators are offered a mode picker after PIN entry; everyone else
+// flows straight into the POS view. Keep this in sync with the backend role
+// hierarchy in docs/PERMISSIONS.md.
+function canPickAdminMode(user: AuthUser): boolean {
+  return user.role === 'MANAGER' || user.role === 'ADMIN';
+}
 
 const PIN_LENGTH = 4;
 
@@ -318,6 +327,10 @@ export function PinLogin() {
   const sessionExpired = useSession((s) => s.sessionExpired);
   const consumeSessionExpired = useSession((s) => s.consumeSessionExpired);
   const haptics = useHaptics();
+  // Holds a successful PIN result for MANAGER+ until they choose POS vs Admin
+  // mode. We deliberately don't call signIn() yet — that would dismiss this
+  // screen and route the user into the no-shift / orders flow.
+  const [pendingSession, setPendingSession] = useState<LoginResult | null>(null);
   // Tracks which PIN we've already attempted, so StrictMode's double-invoke of
   // useEffect (and the busy state update that re-runs the effect) doesn't
   // cancel the in-flight request before signIn fires. A ref survives the
@@ -348,7 +361,13 @@ export function PinLogin() {
     pinLogin(pin)
       .then((res) => {
         haptics.success();
-        signIn(res.token, res.user);
+        // MANAGER+ pause on the mode picker; everyone else (waiter, barista,
+        // cashier) goes straight into POS mode like before.
+        if (canPickAdminMode(res.user)) {
+          setPendingSession(res);
+        } else {
+          signIn(res.token, res.user);
+        }
       })
       .catch((err) => {
         const message = err instanceof ApiError ? err.message : t('login.couldNotSignIn');
@@ -412,6 +431,13 @@ export function PinLogin() {
     setServerUrl(getApiBase());
     setServerModalOpen(false);
     setError(null);
+  }
+
+  // Once a MANAGER/ADMIN has entered the right PIN we hand off to the mode
+  // picker. ModePicker commits the session (signIn) when the operator picks a
+  // mode, which unmounts this component on the next App render.
+  if (pendingSession) {
+    return <ModePicker token={pendingSession.token} user={pendingSession.user} />;
   }
 
   return (

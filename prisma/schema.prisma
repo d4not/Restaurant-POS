@@ -98,30 +98,9 @@ enum CashRegisterStatus {
   CLOSED
 }
 
-// NORMAL    — opened by a cashier+ with a counted opening_amount.
-// PROVISIONAL — opened by a barista/waiter when no cashier is on site yet.
-// The system flags PROVISIONAL shifts in the UI and forces the cashier to
-// physically count cash before closing them. After a PROVISIONAL closes, a
-// new NORMAL shift is opened with that counted amount as opening_amount.
-enum CashRegisterKind {
-  NORMAL
-  PROVISIONAL
-}
-
 enum CashMovementType {
   CASH_IN
   CASH_OUT
-}
-
-// ShiftType drives the report/verification workflow added in the reports
-// module. REGULAR is a normal cashier-opened shift; PROVISIONAL is opened by
-// any authenticated employee when a cashier isn't available and must be
-// verified by a manager+ after close. Coexists with the older `kind` column
-// (NORMAL/PROVISIONAL) which still gates the existing singleton-shift logic;
-// new code should read `type` and the two are kept in sync at write time.
-enum ShiftType {
-  REGULAR
-  PROVISIONAL
 }
 
 enum DailyReportStatus {
@@ -135,7 +114,6 @@ enum AlertType {
   RECURRING_SHORTAGE
   EXCESSIVE_VOIDS
   EXCESSIVE_DISCOUNTS
-  UNVERIFIED_PROVISIONAL
   LATE_VOID
 }
 
@@ -155,12 +133,18 @@ enum OrderStatus {
 enum OrderType {
   DINE_IN
   TAKEOUT
+  EMPLOYEE
 }
 
 enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+  // Deferred settlement: the amount is owed by an employee and is deducted
+  // from their next payroll period instead of moving cash through the
+  // drawer. Only valid on Orders where order_type=EMPLOYEE; never counts
+  // toward the cash register's expected_amount.
+  PAYROLL_DEDUCT
 }
 
 enum AttendanceStatus {
@@ -184,6 +168,23 @@ enum PayrollStatus {
   DRAFT
   APPROVED
   PAID
+}
+
+// Payroll adjustments are itemized bonuses or deductions a manager attaches to
+// a draft payroll period. source_kind on the row distinguishes MANUAL (entered
+// in the UI) from TIPS (auto-created when a TipPool is closed); TIPS rows are
+// pinned read-only so undoing them requires reopening the pool.
+enum PayrollAdjustmentType {
+  BONUS
+  DEDUCTION
+}
+
+// Tip pools are weekly. A pool opens lazily for the current Monday-Sunday week
+// the first time anyone reads it. Closing the pool distributes the collected
+// total across included employees as PayrollAdjustment rows.
+enum TipPoolStatus {
+  OPEN
+  CLOSED
 }
 
 enum TableStatus {
@@ -229,48 +230,56 @@ enum TakeoutChannel {
 // ============================================================================
 
 model User {
-  id                String   @id @default(uuid()) @db.Uuid
+  id                String    @id @default(uuid()) @db.Uuid
   name              String
-  email             String   @unique
+  email             String    @unique
   pin               String
   password_hash     String
   role              UserRole
-  active            Boolean  @default(true)
+  active            Boolean   @default(true)
   // Phase 8 — payroll fields. weekly_salary is nullable so users without
   // payroll (e.g. owners, API clients) coexist with employees.
-  weekly_salary     Decimal? @db.Decimal(14, 0)
+  weekly_salary     Decimal?  @db.Decimal(14, 0)
   hire_date         DateTime?
   position          String?
   phone             String?
   emergency_contact String?
   notes             String?
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
 
-  purchases         Purchase[]
-  transfers         Transfer[]
-  inventory_checks  InventoryCheck[]
-  write_offs        WriteOff[]
-  cash_registers    CashRegister[]
-  cash_registers_closed CashRegister[] @relation("CashRegisterClosedBy")
-  cash_movements    CashMovement[]
-  orders            Order[]
-  orders_cancelled  Order[]             @relation("OrderCancelledBy")
-  order_items_added   OrderItem[]       @relation("OrderItemAddedBy")
-  order_items_voided  OrderItem[]       @relation("OrderItemVoidedBy")
-  suggestions_created  Suggestion[]    @relation("SuggestionCreator")
-  suggestions_reviewed Suggestion[]    @relation("SuggestionReviewer")
-  attendance        Attendance[]        @relation("AttendanceEmployee")
-  attendance_logs   Attendance[]        @relation("AttendanceRecorder")
-  payroll_periods   PayrollPeriod[]     @relation("PayrollEmployee")
-  payroll_approvals PayrollPeriod[]     @relation("PayrollApprover")
-  payment_approvals Payment[]           @relation("PaymentApprover")
-  // Reports/shifts module: shifts this user verified after a provisional
-  // close, daily reports they closed, and alerts surfaced about their
-  // activity.
-  shifts_verified      CashRegister[] @relation("ShiftVerifier")
-  daily_reports_closed DailyReport[]
-  alerts               Alert[]
+  purchases               Purchase[]
+  transfers               Transfer[]
+  inventory_checks        InventoryCheck[]
+  write_offs              WriteOff[]
+  cash_registers          CashRegister[]
+  cash_registers_closed   CashRegister[]   @relation("CashRegisterClosedBy")
+  cash_registers_verified CashRegister[]   @relation("CashRegisterProvisionalVerifier")
+  cash_movements          CashMovement[]
+  orders                  Order[]
+  orders_cancelled        Order[]          @relation("OrderCancelledBy")
+  orders_deleted          Order[]          @relation("OrderDeletedBy")
+  orders_as_employee      Order[]          @relation("OrderEmployee")
+  order_items_added       OrderItem[]      @relation("OrderItemAddedBy")
+  order_items_voided      OrderItem[]      @relation("OrderItemVoidedBy")
+  suggestions_created     Suggestion[]     @relation("SuggestionCreator")
+  suggestions_reviewed    Suggestion[]     @relation("SuggestionReviewer")
+  attendance              Attendance[]     @relation("AttendanceEmployee")
+  attendance_logs         Attendance[]     @relation("AttendanceRecorder")
+  payroll_periods         PayrollPeriod[]  @relation("PayrollEmployee")
+  payroll_approvals       PayrollPeriod[]  @relation("PayrollApprover")
+  payment_approvals       Payment[]        @relation("PaymentApprover")
+  // Reports module: daily reports this user closed, and alerts raised about
+  // their activity.
+  daily_reports_closed    DailyReport[]
+  alerts                  Alert[]
+  employee_sales_received EmployeeSale[]   @relation("EmployeeSaleRecipient")
+  employee_sales_recorded EmployeeSale[]   @relation("EmployeeSaleRecorder")
+  // Phase 11 — People module
+  schedule_slots          EmployeeScheduleSlot[]
+  payroll_adjustments     PayrollAdjustment[] @relation("PayrollAdjustmentCreator")
+  tip_pools_closed        TipPool[]           @relation("TipPoolCloser")
+  tip_allocations         TipAllocation[]
 
   @@index([email])
   @@map("users")
@@ -404,14 +413,14 @@ model Storage {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  storage_stocks        StorageStock[]
-  purchases             Purchase[]
-  transfers_from        Transfer[]           @relation("TransferFrom")
-  transfers_to          Transfer[]           @relation("TransferTo")
-  inventory_checks      InventoryCheck[]
-  write_offs            WriteOff[]
-  stock_movements       StockMovement[]
-  deduction_rules       DeductionRule[]
+  storage_stocks   StorageStock[]
+  purchases        Purchase[]
+  transfers_from   Transfer[]       @relation("TransferFrom")
+  transfers_to     Transfer[]       @relation("TransferTo")
+  inventory_checks InventoryCheck[]
+  write_offs       WriteOff[]
+  stock_movements  StockMovement[]
+  deduction_rules  DeductionRule[]
 
   @@map("storages")
 }
@@ -683,18 +692,20 @@ model Product {
   updated_at     DateTime    @updatedAt
   deleted_at     DateTime?
 
-  category               ProductCategory?        @relation(fields: [category_id], references: [id])
-  tax                    Tax?                    @relation(fields: [tax_id], references: [id])
-  supply                 Supply?                 @relation(fields: [supply_id], references: [id])
-  variants               ProductVariant[]
-  modifier_groups        ProductModifierGroup[]
-  modifications          ProductModification[]
-  recipe                 Recipe?                 @relation("ProductRecipe")
+  category             ProductCategory?          @relation(fields: [category_id], references: [id])
+  tax                  Tax?                      @relation(fields: [tax_id], references: [id])
+  supply               Supply?                   @relation(fields: [supply_id], references: [id])
+  variants             ProductVariant[]
+  modifier_groups      ProductModifierGroup[]
+  modifications        ProductModification[]
+  recipe               Recipe?                   @relation("ProductRecipe")
   // When this product is a PREPARATION and is used as an ingredient in other recipes.
-  recipe_items_as_prep   RecipeItem[]            @relation("RecipeItemPreparation")
-  order_items            OrderItem[]
-  modifier_overrides     ModifierProductOverride[]
-  suggestions            Suggestion[]
+  recipe_items_as_prep RecipeItem[]              @relation("RecipeItemPreparation")
+  order_items          OrderItem[]
+  modifier_overrides   ModifierProductOverride[]
+  suggestions          Suggestion[]
+  employee_products    EmployeeProduct[]
+  employee_sales       EmployeeSale[]
 
   @@index([category_id])
   @@index([type])
@@ -716,9 +727,11 @@ model ProductVariant {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
-  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  recipe  Recipe? @relation("VariantRecipe")
-  order_items OrderItem[]
+  product           Product           @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  recipe            Recipe?           @relation("VariantRecipe")
+  order_items       OrderItem[]
+  employee_products EmployeeProduct[]
+  employee_sales    EmployeeSale[]
 
   @@index([product_id])
   @@map("product_variants")
@@ -768,8 +781,8 @@ model Modifier {
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
 
-  group  ModifierGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
-  supply Supply?       @relation(fields: [supply_id], references: [id])
+  group                ModifierGroup             @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  supply               Supply?                   @relation(fields: [supply_id], references: [id])
   order_item_modifiers OrderItemModifier[]
   product_overrides    ModifierProductOverride[]
 
@@ -892,62 +905,59 @@ model ModifierProductOverride {
 // ============================================================================
 
 model CashRegister {
-  id              String             @id @default(uuid()) @db.Uuid
-  user_id         String             @db.Uuid
-  // PROVISIONAL shifts are opened by floor staff (barista/waiter) when no
-  // cashier is on site. They MUST be closed by a cashier+ with a counted
-  // actual_amount before normal operations resume.
-  kind            CashRegisterKind   @default(NORMAL)
-  opened_at       DateTime           @default(now())
-  closed_at       DateTime?
-  // Cashier+ who closed this shift — for provisional shifts this is the
-  // arriving cashier doing the count, distinct from user_id (the opener).
-  closed_by_user_id String?         @db.Uuid
-  opening_amount  Decimal             @db.Decimal(14, 0)
+  id                String             @id @default(uuid()) @db.Uuid
+  user_id           String             @db.Uuid
+  opened_at         DateTime           @default(now())
+  closed_at         DateTime?
+  closed_by_user_id String?            @db.Uuid
+  opening_amount    Decimal            @db.Decimal(14, 0)
   // expected_amount is maintained incrementally as cash payments, change-given
   // and CashMovements land. It's authoritative for the close-flow so the user
   // doesn't have to re-run a big aggregate query every time.
-  expected_amount Decimal             @default(0) @db.Decimal(14, 0)
-  actual_amount   Decimal?            @db.Decimal(14, 0)
-  difference      Decimal?            @db.Decimal(14, 0)
-  status          CashRegisterStatus  @default(OPEN)
-  notes           String?
-  created_at      DateTime            @default(now())
-  updated_at      DateTime            @updatedAt
+  expected_amount   Decimal            @default(0) @db.Decimal(14, 0)
+  actual_amount     Decimal?           @db.Decimal(14, 0)
+  difference        Decimal?           @db.Decimal(14, 0)
+  status            CashRegisterStatus @default(OPEN)
+  notes             String?
 
-  // Reports module additions. `type` mirrors `kind` for the new workflow
-  // (REGULAR vs PROVISIONAL) and is the column the reports/verification code
-  // reads. `parent_shift_id` points a PROVISIONAL shift back at the REGULAR
-  // shift it was opened against (the cashier inherits the parent's drawer).
-  // `requires_verification` flips on for provisionals; the verified_* trio
-  // is filled when a manager+ signs off on the closed provisional.
-  // `daily_report_id` ties the shift into the consolidated DailyReport once
-  // the day is closed.
-  type                  ShiftType    @default(REGULAR)
-  parent_shift_id       String?      @db.Uuid
-  parent_shift          CashRegister?  @relation("ShiftHierarchy", fields: [parent_shift_id], references: [id])
-  child_shifts          CashRegister[] @relation("ShiftHierarchy")
-  requires_verification Boolean      @default(false)
-  verified_by_id        String?      @db.Uuid
-  verified_by           User?        @relation("ShiftVerifier", fields: [verified_by_id], references: [id])
-  verified_at           DateTime?
-  verification_notes    String?
-  daily_report_id       String?      @db.Uuid
-  daily_report          DailyReport? @relation(fields: [daily_report_id], references: [id])
-  shift_report          ShiftReport?
+  // Provisional shift — set when a non-cashier (waiter/barista) opens a shift
+  // because no cashier is on site. Cash movements are blocked while
+  // provisional. A cashier+ later runs verifyProvisional, counts the drawer,
+  // records the diff, and the same register continues running with
+  // is_provisional=false until the regular close flow.
+  is_provisional              Boolean   @default(false)
+  provisional_verified_by_id  String?   @db.Uuid
+  provisional_verified_at     DateTime?
+  provisional_expected_amount Decimal?  @db.Decimal(14, 0)
+  provisional_actual_amount   Decimal?  @db.Decimal(14, 0)
+  provisional_difference      Decimal?  @db.Decimal(14, 0)
 
-  user            User           @relation(fields: [user_id], references: [id])
-  closed_by       User?          @relation("CashRegisterClosedBy", fields: [closed_by_user_id], references: [id])
-  orders          Order[]
-  cash_movements  CashMovement[]
+  // Informational running total of tips collected during the shift across all
+  // payment methods. Maintained incrementally on each payment and recomputed
+  // authoritatively at close. Does NOT feed expected_amount — tips live in the
+  // tip jar / pool, never in the drawer.
+  tips_collected Decimal @default(0) @db.Decimal(14, 0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Links the shift into the consolidated DailyReport once the day is closed.
+  daily_report_id String?      @db.Uuid
+  daily_report    DailyReport? @relation(fields: [daily_report_id], references: [id])
+  shift_report    ShiftReport?
+
+  user                    User           @relation(fields: [user_id], references: [id])
+  closed_by               User?          @relation("CashRegisterClosedBy", fields: [closed_by_user_id], references: [id])
+  provisional_verified_by User?          @relation("CashRegisterProvisionalVerifier", fields: [provisional_verified_by_id], references: [id])
+  orders                  Order[]
+  cash_movements          CashMovement[]
+  employee_sales          EmployeeSale[]
 
   @@index([user_id])
   @@index([status])
   @@index([opened_at])
-  @@index([kind])
-  @@index([type])
-  @@index([parent_shift_id])
   @@index([daily_report_id])
+  @@index([is_provisional])
   @@map("cash_registers")
 }
 
@@ -970,15 +980,15 @@ model CashMovement {
 }
 
 model Order {
-  id              String      @id @default(uuid()) @db.Uuid
-  register_id     String      @db.Uuid
-  order_number    Int
-  status          OrderStatus @default(OPEN)
-  order_type      OrderType
+  id                    String          @id @default(uuid()) @db.Uuid
+  register_id           String          @db.Uuid
+  order_number          Int
+  status                OrderStatus     @default(OPEN)
+  order_type            OrderType
   // Required when order_type=TAKEOUT, NULL for DINE_IN. Service-layer
   // enforcement only — Postgres can't express the conditional easily and
   // adding a CHECK constraint conflicts with existing rows.
-  takeout_channel TakeoutChannel?
+  takeout_channel       TakeoutChannel?
   // Customer + delivery snapshots for takeout orders. All optional — the
   // cashier fills the relevant subset for the active channel:
   //   LOCAL          → customer_name (so the comanda prints "for John")
@@ -988,49 +998,61 @@ model Order {
   // The fields stay populated even if the channel changes — the snapshot is
   // historical. Service-layer code clears every field when order_type flips
   // back to DINE_IN.
-  customer_name           String?
-  customer_phone          String?
-  delivery_address        String?
-  delivery_reference      String?
-  delivery_driver_name    String?
-  delivery_app            String?
-  delivery_app_order_id   String?
+  customer_name         String?
+  customer_phone        String?
+  delivery_address      String?
+  delivery_reference    String?
+  delivery_driver_name  String?
+  delivery_app          String?
+  delivery_app_order_id String?
   // Optional dine-in table assignment. Multiple OPEN orders on the same table
   // are permitted (group ordering); the table is freed only after the LAST
   // open order is PAID or CANCELLED. ON DELETE SET NULL so deleting the table
   // doesn't lose order history.
-  table_id        String?     @db.Uuid
-  subtotal        Decimal     @default(0) @db.Decimal(14, 0)
-  tax_amount      Decimal     @default(0) @db.Decimal(14, 0)
-  discount_amount Decimal     @default(0) @db.Decimal(14, 0)
-  discount_reason String?
-  total           Decimal     @default(0) @db.Decimal(14, 0)
-  notes           String?
-  user_id         String      @db.Uuid
+  table_id              String?         @db.Uuid
+  subtotal              Decimal         @default(0) @db.Decimal(14, 0)
+  tax_amount            Decimal         @default(0) @db.Decimal(14, 0)
+  discount_amount       Decimal         @default(0) @db.Decimal(14, 0)
+  discount_reason       String?
+  total                 Decimal         @default(0) @db.Decimal(14, 0)
+  notes                 String?
+  user_id               String          @db.Uuid
+  // Required when order_type=EMPLOYEE, NULL otherwise. Identifies the
+  // employee whose tab this is — and whose payroll absorbs any payment
+  // with method=PAYROLL_DEDUCT. Service-layer enforced.
+  employee_user_id      String?         @db.Uuid
   // Keeps the daily-reset order_number unique — two orders on the same date
   // cannot share the same number. Date stored at midnight UTC.
-  order_date      DateTime    @db.Date
+  order_date            DateTime        @db.Date
   // Waiter-to-cashier "Request Edit" flag. Waiters can't delete items or apply
   // discounts; when they need one, they flip this flag with an optional reason
   // so the cashier's OrdersList highlights the order. The cashier clears it
   // after resolving.
-  needs_attention  Boolean    @default(false)
-  attention_reason String?
+  needs_attention       Boolean         @default(false)
+  attention_reason      String?
   // Audit fields populated when an order is moved to CANCELLED. The cashier
   // must enter a free-text reason (>=5 chars) and re-confirm with their PIN
   // before the cancel is accepted.
-  cancel_reason       String?
-  cancelled_by_user_id String?  @db.Uuid
-  cancelled_at         DateTime?
-  created_at      DateTime    @default(now())
-  updated_at      DateTime    @updatedAt
+  cancel_reason         String?
+  cancelled_by_user_id  String?         @db.Uuid
+  cancelled_at          DateTime?
+  // Manager-authorised soft delete. Hides the row from the default history
+  // listing while preserving it for audit and reports. Only MANAGER/ADMIN can
+  // set this; previously-paid orders keep their payments and inventory state.
+  deleted_at            DateTime?
+  deleted_by_user_id    String?         @db.Uuid
+  created_at            DateTime        @default(now())
+  updated_at            DateTime        @updatedAt
 
-  register CashRegister @relation(fields: [register_id], references: [id])
-  user     User         @relation(fields: [user_id], references: [id])
-  table    Table?       @relation(fields: [table_id], references: [id])
-  cancelled_by User?    @relation("OrderCancelledBy", fields: [cancelled_by_user_id], references: [id])
-  items    OrderItem[]
-  payments Payment[]
+  register     CashRegister @relation(fields: [register_id], references: [id])
+  user         User         @relation(fields: [user_id], references: [id])
+  table        Table?       @relation(fields: [table_id], references: [id])
+  employee     User?        @relation("OrderEmployee", fields: [employee_user_id], references: [id])
+  cancelled_by User?        @relation("OrderCancelledBy", fields: [cancelled_by_user_id], references: [id])
+  deleted_by   User?        @relation("OrderDeletedBy", fields: [deleted_by_user_id], references: [id])
+  items        OrderItem[]
+  payments     Payment[]
+  suggestions  Suggestion[]
 
   @@unique([order_date, order_number])
   @@index([register_id])
@@ -1038,19 +1060,21 @@ model Order {
   @@index([status])
   @@index([order_type])
   @@index([table_id])
+  @@index([employee_user_id])
   @@index([created_at])
+  @@index([deleted_at])
   @@map("orders")
 }
 
 model OrderItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  order_id        String   @db.Uuid
-  product_id      String   @db.Uuid
-  variant_id      String?  @db.Uuid
-  quantity        Int      @default(1)
-  unit_price      Decimal  @db.Decimal(14, 0)
-  modifiers_price Decimal  @default(0) @db.Decimal(14, 0)
-  line_total      Decimal  @db.Decimal(14, 0)
+  id               String          @id @default(uuid()) @db.Uuid
+  order_id         String          @db.Uuid
+  product_id       String          @db.Uuid
+  variant_id       String?         @db.Uuid
+  quantity         Int             @default(1)
+  unit_price       Decimal         @db.Decimal(14, 0)
+  modifiers_price  Decimal         @default(0) @db.Decimal(14, 0)
+  line_total       Decimal         @db.Decimal(14, 0)
   // Per-item tax snapshot. tax_rate is captured from the product's linked Tax
   // at the moment the item is added — later edits to the tax row don't rewrite
   // historical orders. Prices are tax-INCLUSIVE: line_total is what the
@@ -1059,20 +1083,20 @@ model OrderItem {
   //   base_amount = round(line_total / (1 + tax_rate/100))
   //   tax_amount  = line_total - base_amount
   // All default to 0 for tax-exempt products (base_amount = line_total).
-  tax_rate        Decimal  @default(0) @db.Decimal(6, 2)
-  tax_amount      Decimal  @default(0) @db.Decimal(14, 0)
-  base_amount     Decimal  @default(0) @db.Decimal(14, 0)
-  notes           String?
+  tax_rate         Decimal         @default(0) @db.Decimal(6, 2)
+  tax_amount       Decimal         @default(0) @db.Decimal(14, 0)
+  base_amount      Decimal         @default(0) @db.Decimal(14, 0)
+  notes            String?
   // Kitchen routing — set when the cashier/waiter fires the order to the
   // kitchen printer. Once true, the item is not reprinted on subsequent
   // "Send to Kitchen" actions (only newly-added items go through). sent_at
   // is null until the first send and stays put through later edits.
-  sent_to_kitchen Boolean  @default(false)
-  sent_at         DateTime?
+  sent_to_kitchen  Boolean         @default(false)
+  sent_at          DateTime?
   // The waiter/cashier who put this line on the ticket. Optional so
   // pre-existing items (added by the admin panel before terminal rollout)
   // and seeded test orders don't violate the constraint.
-  added_by        String?  @db.Uuid
+  added_by         String?         @db.Uuid
   // Soft-delete (void) audit. Items that have been sent to the kitchen are
   // never hard-deleted — instead voided_at is stamped so the ticket can show
   // the line struck-through, the cashier can Restore it, and the next
@@ -1080,7 +1104,7 @@ model OrderItem {
   // once the kitchen has been told; restoring an item whose void was already
   // printed clears sent_to_kitchen so the kitchen sees a fresh request.
   voided_at        DateTime?
-  voided_by        String?  @db.Uuid
+  voided_by        String?         @db.Uuid
   // Categorical code chosen by the cashier from the void modal. Required at
   // the service layer when sent_to_kitchen=true (along with void_reason ≥ 3
   // chars); null for unsent free-cancel paths and for legacy rows voided
@@ -1088,14 +1112,14 @@ model OrderItem {
   void_reason_code VoidReasonCode?
   void_reason      String?
   void_printed_at  DateTime?
-  created_at      DateTime @default(now())
+  created_at       DateTime        @default(now())
 
-  order      Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product    Product             @relation(fields: [product_id], references: [id])
-  variant    ProductVariant?     @relation(fields: [variant_id], references: [id])
-  added_by_user User?            @relation("OrderItemAddedBy", fields: [added_by], references: [id])
-  voided_by_user User?           @relation("OrderItemVoidedBy", fields: [voided_by], references: [id])
-  modifiers  OrderItemModifier[]
+  order          Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product        Product             @relation(fields: [product_id], references: [id])
+  variant        ProductVariant?     @relation(fields: [variant_id], references: [id])
+  added_by_user  User?               @relation("OrderItemAddedBy", fields: [added_by], references: [id])
+  voided_by_user User?               @relation("OrderItemVoidedBy", fields: [voided_by], references: [id])
+  modifiers      OrderItemModifier[]
 
   @@index([order_id])
   @@index([product_id])
@@ -1108,9 +1132,9 @@ model OrderItem {
 }
 
 model OrderItemModifier {
-  id            String @id @default(uuid()) @db.Uuid
-  order_item_id String @db.Uuid
-  modifier_id   String @db.Uuid
+  id            String  @id @default(uuid()) @db.Uuid
+  order_item_id String  @db.Uuid
+  modifier_id   String  @db.Uuid
   // Snapshots — these survive menu edits so order history stays accurate.
   name          String
   extra_price   Decimal @db.Decimal(14, 0)
@@ -1124,16 +1148,20 @@ model OrderItemModifier {
 }
 
 model Payment {
-  id                   String        @id @default(uuid()) @db.Uuid
-  order_id             String        @db.Uuid
-  method               PaymentMethod
-  amount               Decimal       @db.Decimal(14, 0)
-  change_amount        Decimal       @default(0) @db.Decimal(14, 0)
-  reference            String?
+  id                  String        @id @default(uuid()) @db.Uuid
+  order_id            String        @db.Uuid
+  method              PaymentMethod
+  amount              Decimal       @db.Decimal(14, 0)
+  change_amount       Decimal       @default(0) @db.Decimal(14, 0)
+  // Tip portion of `amount`. Always satisfies tip_amount <= amount. The order
+  // ledger only sees (amount - tip_amount); the tip is routed to the tip jar
+  // (cash) or owed to the pool (card/transfer). PAYROLL_DEDUCT rejects any tip.
+  tip_amount          Decimal       @default(0) @db.Decimal(14, 0)
+  reference           String?
   // Set when a waiter/barista initiated the payment with a cashier+'s PIN.
   // Null when the JWT user already had cashier+ rights.
-  approved_by_user_id  String?       @db.Uuid
-  created_at           DateTime      @default(now())
+  approved_by_user_id String?       @db.Uuid
+  created_at          DateTime      @default(now())
 
   order       Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
   approved_by User? @relation("PaymentApprover", fields: [approved_by_user_id], references: [id])
@@ -1141,6 +1169,7 @@ model Payment {
   @@index([order_id])
   @@index([method])
   @@index([approved_by_user_id])
+  @@index([tip_amount])
   @@map("payments")
 }
 
@@ -1154,54 +1183,68 @@ model Payment {
 // the system). sales_by_category and top_products are Json because their
 // shape is report-specific and never queried relationally.
 model ShiftReport {
-  id                String    @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-  cash_register_id  String    @unique @db.Uuid
-  cash_register     CashRegister @relation(fields: [cash_register_id], references: [id])
+  cash_register_id String       @unique @db.Uuid
+  cash_register    CashRegister @relation(fields: [cash_register_id], references: [id])
 
-  user_id           String    @db.Uuid
-  user_name         String
-  user_role         String
-  shift_type        ShiftType
-  opened_at         DateTime
-  closed_at         DateTime
+  user_id   String   @db.Uuid
+  user_name String
+  user_role String
+  opened_at DateTime
+  closed_at DateTime
 
-  gross_sales       Int       @default(0)
-  discounts         Int       @default(0)
-  comps             Int       @default(0)
-  void_total        Int       @default(0)
-  void_count        Int       @default(0)
-  net_sales         Int       @default(0)
-  tax_collected     Int       @default(0)
+  gross_sales   Int @default(0)
+  discounts     Int @default(0)
+  comps         Int @default(0)
+  void_total    Int @default(0)
+  void_count    Int @default(0)
+  net_sales     Int @default(0)
+  tax_collected Int @default(0)
 
-  total_tickets     Int       @default(0)
-  avg_ticket        Int       @default(0)
+  total_tickets Int @default(0)
+  avg_ticket    Int @default(0)
 
-  cash_sales        Int       @default(0)
-  card_sales        Int       @default(0)
-  transfer_sales    Int       @default(0)
-  other_sales       Int       @default(0)
+  cash_sales     Int @default(0)
+  card_sales     Int @default(0)
+  transfer_sales Int @default(0)
+  other_sales    Int @default(0)
 
-  opening_amount    Int       @default(0)
-  cash_in           Int       @default(0)
-  cash_out          Int       @default(0)
-  expected_cash     Int       @default(0)
-  actual_cash       Int?
-  cash_variance     Int?
+  opening_amount Int  @default(0)
+  cash_in        Int  @default(0)
+  cash_out       Int  @default(0)
+  expected_cash  Int  @default(0)
+  actual_cash    Int?
+  cash_variance  Int?
+  // Tips collected during the shift across all methods, snapshotted from
+  // CashRegister.tips_collected at close. Informational — never part of the
+  // cash variance calculation (tips don't go through the drawer).
+  tips_collected Int  @default(0)
 
-  sales_by_category Json      @default("[]")
-  top_products      Json      @default("[]")
+  // Provisional snapshot — when the register was opened by floor staff and a
+  // cashier later ran verifyProvisional, those numbers are denormalised here
+  // so the admin panel renders the partial cut alongside the final close.
+  // was_provisional is the natural query filter ("show me shifts that were
+  // ever provisional"); the rest mirror CashRegister.provisional_*.
+  was_provisional              Boolean   @default(false)
+  provisional_opened_by_role   String?
+  provisional_verified_by_id   String?   @db.Uuid
+  provisional_verified_by_name String?
+  provisional_verified_at      DateTime?
+  provisional_expected_amount  Int?
+  provisional_actual_amount    Int?
+  provisional_difference       Int?
 
-  verified_by_id    String?   @db.Uuid
-  verified_by_name  String?
-  verified_at       DateTime?
+  sales_by_category Json @default("[]")
+  top_products      Json @default("[]")
 
-  alerts            Alert[]
+  alerts Alert[]
 
-  created_at        DateTime  @default(now())
+  created_at DateTime @default(now())
 
   @@index([user_id])
   @@index([created_at])
+  @@index([was_provisional])
   @@map("shift_reports")
 }
 
@@ -1210,71 +1253,69 @@ model ShiftReport {
 // frontend prefixes "Z-". Status only flows OPEN → CLOSED; the close action
 // is gated on no shift still being open for that day.
 model DailyReport {
-  id                  String            @id @default(uuid()) @db.Uuid
-  date                DateTime          @unique @db.Date
-  folio               Int               @default(autoincrement())
-  status              DailyReportStatus @default(OPEN)
+  id     String            @id @default(uuid()) @db.Uuid
+  date   DateTime          @unique @db.Date
+  folio  Int               @default(autoincrement())
+  status DailyReportStatus @default(OPEN)
 
-  gross_sales         Int       @default(0)
-  discounts           Int       @default(0)
-  comps               Int       @default(0)
-  void_total          Int       @default(0)
-  void_count          Int       @default(0)
-  net_sales           Int       @default(0)
-  tax_collected       Int       @default(0)
+  gross_sales   Int @default(0)
+  discounts     Int @default(0)
+  comps         Int @default(0)
+  void_total    Int @default(0)
+  void_count    Int @default(0)
+  net_sales     Int @default(0)
+  tax_collected Int @default(0)
 
-  total_tickets       Int       @default(0)
-  avg_ticket          Int       @default(0)
+  total_tickets Int @default(0)
+  avg_ticket    Int @default(0)
 
-  cash_sales          Int       @default(0)
-  card_sales          Int       @default(0)
-  transfer_sales      Int       @default(0)
-  other_sales         Int       @default(0)
+  cash_sales     Int @default(0)
+  card_sales     Int @default(0)
+  transfer_sales Int @default(0)
+  other_sales    Int @default(0)
 
-  total_opening_amount Int      @default(0)
-  total_cash_in       Int       @default(0)
-  total_cash_out      Int       @default(0)
-  total_expected_cash Int       @default(0)
-  total_actual_cash   Int?
-  total_cash_variance Int?
+  total_opening_amount Int  @default(0)
+  total_cash_in        Int  @default(0)
+  total_cash_out       Int  @default(0)
+  total_expected_cash  Int  @default(0)
+  total_actual_cash    Int?
+  total_cash_variance  Int?
 
-  sales_by_category   Json      @default("[]")
-  top_products        Json      @default("[]")
-  bottom_products     Json      @default("[]")
-  sales_by_hour       Json      @default("[]")
+  sales_by_category Json @default("[]")
+  top_products      Json @default("[]")
+  bottom_products   Json @default("[]")
+  sales_by_hour     Json @default("[]")
 
-  total_shifts        Int       @default(0)
-  provisional_shifts  Int       @default(0)
-  unverified_provisionals Int   @default(0)
+  total_shifts Int @default(0)
 
-  peak_hour           Int?
-  slowest_hour        Int?
+  peak_hour    Int?
+  slowest_hour Int?
 
-  shifts              CashRegister[]
-  alerts              Alert[]
+  shifts CashRegister[]
+  alerts Alert[]
 
   // Snapshotted at close time so the printed report renders correctly even
   // if the operator changes the active language/currency afterwards. See
   // REPORTS-SPEC §2.4 and §5.1.
-  currency            String    @default("MXN")
-  language            String    @default("es")
+  currency String @default("MXN")
+  language String @default("es")
 
   // Optional bills/coins breakdown counted by the manager. JSON keys are
   // denominations in centavos (as strings); values are counts. The sum of
   // (denomination × count) must match total_actual_cash when present.
   denomination_breakdown Json?
 
-  closed_by_id        String?   @db.Uuid
-  closed_by           User?     @relation(fields: [closed_by_id], references: [id])
-  closed_at           DateTime?
-  notes               String?
+  closed_by_id String?   @db.Uuid
+  closed_by    User?     @relation(fields: [closed_by_id], references: [id])
+  closed_at    DateTime?
+  notes        String?
   // Final cash verdict the manager writes at close time ("Corte cuadrado",
   // "Faltante de $30, se descontará"). Separate from notes — notes are
   // operational context, resolution is the sign-off.
-  resolution          String?
+  resolution   String?
 
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   @@index([date])
   @@index([status])
@@ -1287,26 +1328,26 @@ model DailyReport {
 // (e.g. {variance: -3050, threshold: 2000}). Resolved by a manager+ with a
 // short note for the audit trail.
 model Alert {
-  id              String        @id @default(uuid()) @db.Uuid
-  type            AlertType
-  severity        AlertSeverity
-  message         String
-  data            Json          @default("{}")
+  id       String        @id @default(uuid()) @db.Uuid
+  type     AlertType
+  severity AlertSeverity
+  message  String
+  data     Json          @default("{}")
 
-  user_id         String?       @db.Uuid
-  user            User?         @relation(fields: [user_id], references: [id])
+  user_id String? @db.Uuid
+  user    User?   @relation(fields: [user_id], references: [id])
 
-  shift_report_id String?       @db.Uuid
-  shift_report    ShiftReport?  @relation(fields: [shift_report_id], references: [id])
-  daily_report_id String?       @db.Uuid
-  daily_report    DailyReport?  @relation(fields: [daily_report_id], references: [id])
+  shift_report_id String?      @db.Uuid
+  shift_report    ShiftReport? @relation(fields: [shift_report_id], references: [id])
+  daily_report_id String?      @db.Uuid
+  daily_report    DailyReport? @relation(fields: [daily_report_id], references: [id])
 
-  resolved        Boolean       @default(false)
-  resolved_by_id  String?       @db.Uuid
-  resolved_at     DateTime?
-  resolution      String?
+  resolved       Boolean   @default(false)
+  resolved_by_id String?   @db.Uuid
+  resolved_at    DateTime?
+  resolution     String?
 
-  created_at      DateTime      @default(now())
+  created_at DateTime @default(now())
 
   @@index([type, resolved])
   @@index([severity])
@@ -1355,8 +1396,32 @@ model PayrollPeriod {
   paid_absences   Int           @default(0)
   unpaid_absences Int           @default(0)
   gross_pay       Decimal       @default(0) @db.Decimal(14, 0)
+  // Legacy aggregate column — kept as a mirror for back-compat. From now on,
+  // `deductions` equals `absence_deductions + adjustment_deductions` and is
+  // recomputed by the service on every write.
   deductions      Decimal       @default(0) @db.Decimal(14, 0)
+  // Sum of PAYROLL_DEDUCT payments on the employee's EMPLOYEE-tab orders that
+  // were settled inside this week. Persisted separately from `deductions` so
+  // the audit trail keeps unpaid-absence deductions distinct from tab debts.
+  tab_deductions  Decimal       @default(0) @db.Decimal(14, 0)
+  // Legacy aggregate column — mirrors `adjustment_bonuses + tips_amount` so
+  // existing API consumers still see the same shape.
   bonuses         Decimal       @default(0) @db.Decimal(14, 0)
+
+  // ── People-module breakdown (Phase 11) ──────────────────────────────────
+  // unpaid_absences * floor(weekly_salary / days_expected). The piece of
+  // `deductions` that comes purely from attendance.
+  absence_deductions    Decimal @default(0) @db.Decimal(14, 0)
+  // Sum of PayrollAdjustment where type=BONUS and source_kind='MANUAL'.
+  adjustment_bonuses    Decimal @default(0) @db.Decimal(14, 0)
+  // Sum of PayrollAdjustment where type=DEDUCTION (manual + tips never
+  // produces DEDUCTION rows).
+  adjustment_deductions Decimal @default(0) @db.Decimal(14, 0)
+  // Snapshot of the tip allocation paid into this period when the matching
+  // TipPool was closed. Mirrored as a TIPS-sourced BONUS adjustment for the
+  // audit timeline.
+  tips_amount           Decimal @default(0) @db.Decimal(14, 0)
+
   net_pay         Decimal       @default(0) @db.Decimal(14, 0)
   status          PayrollStatus @default(DRAFT)
   notes           String?
@@ -1364,8 +1429,9 @@ model PayrollPeriod {
   created_at      DateTime      @default(now())
   updated_at      DateTime      @updatedAt
 
-  user     User  @relation("PayrollEmployee", fields: [user_id], references: [id])
-  approver User? @relation("PayrollApprover", fields: [approved_by], references: [id])
+  user        User                 @relation("PayrollEmployee", fields: [user_id], references: [id])
+  approver    User?                @relation("PayrollApprover", fields: [approved_by], references: [id])
+  adjustments PayrollAdjustment[]
 
   @@unique([user_id, week_start])
   @@index([status])
@@ -1397,11 +1463,11 @@ model Zone {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
-  tables       Table[]
+  tables      Table[]
   // Floor-canvas free-floating text labels scoped to this zone. Cascade delete
   // so wiping a zone doesn't leave orphaned labels on the canvas.
-  zone_labels  ZoneLabel[]
-  floor_decor  FloorDecor[]
+  zone_labels ZoneLabel[]
+  floor_decor FloorDecor[]
 
   @@map("zones")
 }
@@ -1457,6 +1523,13 @@ enum SuggestionType {
   PRODUCT_CREATE
   PRODUCT_UPDATE
   PRODUCT_DELETE
+  // Cashier-proposed history edits on a PAID/CANCELLED order. The cashier
+  // gates the suggestion with their own PIN; on approve, a manager re-runs
+  // the matching destructive flow (reopen / soft-delete / change-method)
+  // and the suggestion is closed APPROVED.
+  ORDER_REOPEN
+  ORDER_DELETE
+  ORDER_CHANGE_PAYMENT
 }
 
 enum SuggestionStatus {
@@ -1479,12 +1552,16 @@ model Suggestion {
   note    String?
 
   // Targeting — populated only for UPDATE/DELETE so the admin UI can surface
-  // a link to the live record. CREATE suggestions leave both null.
+  // a link to the live record. CREATE suggestions leave both null. Order-
+  // scoped types (ORDER_REOPEN/DELETE/CHANGE_PAYMENT) populate target_order_id
+  // instead — at most ONE pending suggestion per order is allowed (enforced
+  // by a partial unique index in the migration).
   target_table_id   String? @db.Uuid
   target_product_id String? @db.Uuid
+  target_order_id   String? @db.Uuid
 
-  created_by  String   @db.Uuid
-  reviewed_by String?  @db.Uuid
+  created_by  String    @db.Uuid
+  reviewed_by String?   @db.Uuid
   // Optional admin note ("approved with capacity bumped to 4 by request").
   review_note String?
   reviewed_at DateTime?
@@ -1492,10 +1569,11 @@ model Suggestion {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  creator  User     @relation("SuggestionCreator",  fields: [created_by],  references: [id])
+  creator  User     @relation("SuggestionCreator", fields: [created_by], references: [id])
   reviewer User?    @relation("SuggestionReviewer", fields: [reviewed_by], references: [id])
-  table    Table?   @relation(fields: [target_table_id],   references: [id], onDelete: SetNull)
+  table    Table?   @relation(fields: [target_table_id], references: [id], onDelete: SetNull)
   product  Product? @relation(fields: [target_product_id], references: [id], onDelete: SetNull)
+  order    Order?   @relation(fields: [target_order_id], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([type])
@@ -1503,6 +1581,7 @@ model Suggestion {
   @@index([reviewed_by])
   @@index([target_table_id])
   @@index([target_product_id])
+  @@index([target_order_id])
   @@map("suggestions")
 }
 
@@ -1552,4 +1631,186 @@ model FloorDecor {
 
   @@index([zone_id])
   @@map("floor_decor")
+}
+
+// ============================================================================
+// Employee Discounts — staff perk products at admin-set prices
+// ============================================================================
+
+// Catalogue of products the business sells to employees at a custom price (not
+// derived from a markup — admin types the number). Each entry links to a
+// regular Product (optionally a specific Variant) and snapshots a name so the
+// terminal panel can render the catalogue even before opening the product.
+model EmployeeProduct {
+  id             String   @id @default(uuid()) @db.Uuid
+  product_id     String   @db.Uuid
+  variant_id     String?  @db.Uuid
+  // Admin-typed price in centavos. Independent from product.sell_price /
+  // variant.sell_price — no formula, no markup. Lives separately so changing
+  // the regular menu price doesn't silently rewrite the employee perk.
+  employee_price Decimal  @db.Decimal(14, 0)
+  // Optional label override ("Latte Grande - Empleado"). When null the panel
+  // renders the product/variant name.
+  label          String?
+  active         Boolean  @default(true)
+  display_order  Int      @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  product Product         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variant_id], references: [id], onDelete: Cascade)
+  sales   EmployeeSale[]
+
+  // One entry per (product, variant) — variant=null is allowed once and means
+  // "the base product itself".
+  @@unique([product_id, variant_id])
+  @@index([product_id])
+  @@index([active])
+  @@map("employee_products")
+}
+
+// Audit record for each time an employee took home a perk product. Lives
+// outside the regular Order pipeline so it doesn't clutter sales reports; the
+// terminal hub renders a recent-history list off this table.
+model EmployeeSale {
+  id                  String   @id @default(uuid()) @db.Uuid
+  employee_product_id String   @db.Uuid
+  product_id          String   @db.Uuid
+  variant_id          String?  @db.Uuid
+  // The employee who took the product. Just a User reference — the role gate
+  // happens in the service layer (any active user can be the recipient).
+  employee_user_id    String   @db.Uuid
+  // Cashier/manager/admin who recorded the sale. Distinct from the recipient.
+  recorded_by_user_id String   @db.Uuid
+  // Optional register attachment — the sale is logged against the open shift
+  // when one exists so the daily report can include it.
+  register_id         String?  @db.Uuid
+  // Snapshots so the history view survives later renames / price edits.
+  product_name        String
+  unit_price          Decimal  @db.Decimal(14, 0)
+  quantity            Int      @default(1)
+  total               Decimal  @db.Decimal(14, 0)
+  notes               String?
+  date                DateTime @default(now())
+  created_at          DateTime @default(now())
+
+  employee_product EmployeeProduct @relation(fields: [employee_product_id], references: [id])
+  product          Product         @relation(fields: [product_id], references: [id])
+  variant          ProductVariant? @relation(fields: [variant_id], references: [id])
+  employee         User            @relation("EmployeeSaleRecipient", fields: [employee_user_id], references: [id])
+  recorded_by      User            @relation("EmployeeSaleRecorder", fields: [recorded_by_user_id], references: [id])
+  register         CashRegister?   @relation(fields: [register_id], references: [id])
+
+  @@index([employee_product_id])
+  @@index([product_id])
+  @@index([variant_id])
+  @@index([employee_user_id])
+  @@index([recorded_by_user_id])
+  @@index([register_id])
+  @@index([date])
+  @@map("employee_sales")
+}
+
+// ============================================================================
+// Phase 11 — People module: schedule, payroll adjustments, tips
+// ============================================================================
+
+// One contiguous time block per (user, day_of_week). Days without a slot mean
+// the employee is off that day. start/end stored as minutes-since-midnight to
+// keep DB-side arithmetic trivial and timezone-free. day_of_week uses ISO
+// numbering, matching the project's existing week utilities: 0=Mon ... 6=Sun.
+model EmployeeScheduleSlot {
+  id            String   @id @default(uuid()) @db.Uuid
+  user_id       String   @db.Uuid
+  day_of_week   Int
+  start_minutes Int
+  end_minutes   Int
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, day_of_week])
+  @@index([user_id])
+  @@map("employee_schedule_slots")
+}
+
+// Itemized BONUS or DEDUCTION attached to a draft payroll period. Managers
+// add MANUAL rows by hand; the tip-pool close flow auto-creates BONUS rows
+// with source_kind='TIPS' and source_id pointing at the matching allocation.
+// TIPS rows are pinned read-only in the UI — undoing them means reopening
+// the pool.
+model PayrollAdjustment {
+  id                 String                @id @default(uuid()) @db.Uuid
+  payroll_period_id  String                @db.Uuid
+  type               PayrollAdjustmentType
+  label              String
+  amount             Decimal               @db.Decimal(14, 0)
+  source_kind        String                @default("MANUAL")
+  source_id          String?               @db.Uuid
+  created_by_user_id String                @db.Uuid
+  created_at         DateTime              @default(now())
+
+  period  PayrollPeriod @relation(fields: [payroll_period_id], references: [id], onDelete: Cascade)
+  creator User          @relation("PayrollAdjustmentCreator", fields: [created_by_user_id], references: [id])
+
+  @@index([payroll_period_id])
+  @@index([created_by_user_id])
+  @@index([source_kind, source_id])
+  @@map("payroll_adjustments")
+}
+
+// Weekly tip pool. Opens lazily for the current Monday-Sunday week the first
+// time anyone reads it. Closing the pool distributes the collected total to
+// each included employee as a TIPS-sourced PayrollAdjustment on their matching
+// PayrollPeriod (which must already exist in DRAFT status).
+model TipPool {
+  id                String        @id @default(uuid()) @db.Uuid
+  week_start        DateTime      @db.Date
+  week_end          DateTime      @db.Date
+  // Snapshot of sum(payment.tip_amount) in the window at the last refresh.
+  // Recomputed lazily on read so voided/refunded payments don't cause drift.
+  total_collected   Decimal       @default(0) @db.Decimal(14, 0)
+  // Sum of final_amount on included allocations, written at close time.
+  total_distributed Decimal       @default(0) @db.Decimal(14, 0)
+  status            TipPoolStatus @default(OPEN)
+  notes             String?
+  closed_by_user_id String?       @db.Uuid
+  closed_at         DateTime?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+
+  closer      User?           @relation("TipPoolCloser", fields: [closed_by_user_id], references: [id])
+  allocations TipAllocation[]
+
+  @@unique([week_start])
+  @@index([status])
+  @@map("tip_pools")
+}
+
+// Per-user slice of a weekly pool. `included` defaults to true for any user
+// with attended_days > 0 AND a weekly_salary. Manager can toggle off (skip)
+// or set override_amount (deviates from the equal split). final_amount =
+// override_amount ?? base_amount; persisted so closing the pool can read it
+// without recomputing.
+model TipAllocation {
+  id              String   @id @default(uuid()) @db.Uuid
+  pool_id         String   @db.Uuid
+  user_id         String   @db.Uuid
+  included        Boolean  @default(true)
+  attended_days   Int      @default(0)
+  base_amount     Decimal  @default(0) @db.Decimal(14, 0)
+  override_amount Decimal? @db.Decimal(14, 0)
+  final_amount    Decimal  @default(0) @db.Decimal(14, 0)
+  note            String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  pool TipPool @relation(fields: [pool_id], references: [id], onDelete: Cascade)
+  user User    @relation(fields: [user_id], references: [id])
+
+  @@unique([pool_id, user_id])
+  @@index([user_id])
+  @@map("tip_allocations")
 }

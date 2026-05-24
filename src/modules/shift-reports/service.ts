@@ -44,8 +44,6 @@ const shiftReportInclude = {
   cash_register: {
     select: {
       id: true,
-      type: true,
-      kind: true,
       status: true,
       opened_at: true,
       closed_at: true,
@@ -189,14 +187,21 @@ export async function generateShiftReport(
     where: { id: cashRegisterId },
     select: {
       id: true,
-      type: true,
       opening_amount: true,
       opened_at: true,
       closed_at: true,
-      verified_by_id: true,
-      verified_at: true,
       user: { select: { id: true, name: true, role: true } },
-      verified_by: { select: { id: true, name: true } },
+      // Provisional snapshot — denormalised onto the ShiftReport so the admin
+      // panel can render the partial-cut data even after the verifier user
+      // row changes. provisional_verified_by_id is NOT set here when
+      // verifyProvisional was never run, in which case all provisional_*
+      // fields are null and was_provisional=false on the snapshot.
+      provisional_verified_by_id: true,
+      provisional_verified_at: true,
+      provisional_expected_amount: true,
+      provisional_actual_amount: true,
+      provisional_difference: true,
+      provisional_verified_by: { select: { id: true, name: true } },
     },
   });
 
@@ -241,7 +246,7 @@ export async function generateShiftReport(
 
   const payments = await tx.payment.findMany({
     where: { order: { register_id: cashRegisterId, status: OrderStatus.PAID } },
-    select: { method: true, amount: true, change_amount: true },
+    select: { method: true, amount: true, change_amount: true, tip_amount: true },
   });
 
   const cashMovements = await tx.cashMovement.findMany({
@@ -268,27 +273,32 @@ export async function generateShiftReport(
   const voidCount = cancelledOrders.length;
 
   // ---- Payment breakdown ----------------------------------------------------
+  // Each payment's `amount` is the gross tender (sale + tip + change). To get
+  // the order-side contribution we subtract change_amount AND tip_amount —
+  // tips live in the jar, not the drawer (Phase 11).
   let cashSales = new Decimal(0);
   let cardSales = new Decimal(0);
   let transferSales = new Decimal(0);
   let otherSales = new Decimal(0);
+  let tipsCollected = new Decimal(0);
   for (const p of payments) {
     const amount = new Decimal(p.amount);
     const change = new Decimal(p.change_amount);
+    const tip = new Decimal(p.tip_amount);
+    tipsCollected = tipsCollected.add(tip);
+    const orderPortion = amount.sub(tip);
     switch (p.method) {
       case PaymentMethod.CASH:
-        // cash_sales is the net contribution to the drawer — overpayments
-        // go back to the customer as change and don't count.
-        cashSales = cashSales.add(amount).sub(change);
+        cashSales = cashSales.add(orderPortion).sub(change);
         break;
       case PaymentMethod.CARD:
-        cardSales = cardSales.add(amount);
+        cardSales = cardSales.add(orderPortion);
         break;
       case PaymentMethod.TRANSFER:
-        transferSales = transferSales.add(amount);
+        transferSales = transferSales.add(orderPortion);
         break;
       default:
-        otherSales = otherSales.add(amount);
+        otherSales = otherSales.add(orderPortion);
     }
   }
 
@@ -307,13 +317,36 @@ export async function generateShiftReport(
 
   const { sales_by_category, top_products } = summarizeItemRollups(paidItems);
 
+  // Provisional history denormalisation. was_provisional=true means the
+  // register was opened by floor staff and a cashier+ ran verifyProvisional
+  // before close. The snapshot fields capture the partial-cut numbers so
+  // the admin panel can render them alongside the final close.
+  const wasProvisional = register.provisional_verified_at != null;
+  const provisionalSnapshot = wasProvisional
+    ? {
+        provisional_opened_by_role: register.user.role as string,
+        provisional_verified_by_id: register.provisional_verified_by_id ?? null,
+        provisional_verified_by_name:
+          register.provisional_verified_by?.name ?? null,
+        provisional_verified_at: register.provisional_verified_at,
+        provisional_expected_amount: register.provisional_expected_amount
+          ? toInt(new Decimal(register.provisional_expected_amount))
+          : null,
+        provisional_actual_amount: register.provisional_actual_amount
+          ? toInt(new Decimal(register.provisional_actual_amount))
+          : null,
+        provisional_difference: register.provisional_difference
+          ? toInt(new Decimal(register.provisional_difference))
+          : null,
+      }
+    : {};
+
   const created = await tx.shiftReport.create({
     data: {
       cash_register_id: register.id,
       user_id: register.user.id,
       user_name: register.user.name,
       user_role: register.user.role,
-      shift_type: register.type,
       opened_at: register.opened_at,
       // closed_at is stamped by closeRegister() before this runs; falling back
       // to "now" keeps the column non-null even in unusual call orders.
@@ -344,15 +377,13 @@ export async function generateShiftReport(
       expected_cash: toInt(expectedCash),
       actual_cash: toInt(actualCash),
       cash_variance: toInt(cashVariance),
+      tips_collected: toInt(tipsCollected),
+
+      was_provisional: wasProvisional,
+      ...provisionalSnapshot,
 
       sales_by_category: sales_by_category as unknown as Prisma.InputJsonValue,
       top_products: top_products as unknown as Prisma.InputJsonValue,
-
-      // For provisional shifts the verifier comes later via the verify endpoint.
-      // If a re-close ever happens after verification (it shouldn't), surface it.
-      verified_by_id: register.verified_by_id,
-      verified_by_name: register.verified_by?.name ?? null,
-      verified_at: register.verified_at,
     },
     include: shiftReportInclude,
   });
@@ -398,8 +429,7 @@ async function readNumericSetting(
  *   - void_count > max_voids_per_shift   → EXCESSIVE_VOIDS (HIGH)
  *   - discounts / gross_sales > max_pct  → EXCESSIVE_DISCOUNTS (MEDIUM)
  *
- * Day-level alerts (UNVERIFIED_PROVISIONAL, etc.) are handled separately at
- * day close. RECURRING_SHORTAGE (3-shift streak) is intentionally unimplemented
+ * RECURRING_SHORTAGE (3-shift streak) is intentionally unimplemented
  * here — surfacing it requires a streak query across the user's prior shifts
  * and the current spec asks only for the standalone CASH_SHORTAGE on this
  * shift to land in the report.
@@ -522,7 +552,6 @@ async function generateShiftAlerts(
 export async function listShiftReports(query: ListShiftReportQuery) {
   const where: Prisma.ShiftReportWhereInput = {
     ...(query.user_id ? { user_id: query.user_id } : {}),
-    ...(query.type ? { shift_type: query.type } : {}),
     ...(query.from || query.to
       ? {
           closed_at: {
@@ -567,8 +596,8 @@ function readShiftProducts(value: unknown): ShiftProductRow[] {
 /**
  * Mid-shift handoff report (REPORTS-SPEC §5.5). Replaces the WhatsApp
  * message a cashier used to send at shift change. Simpler than the daily
- * report: cash formula + sales + payments + top 5 + alerts + provisional
- * verification status. No denomination breakdown — that's a day-close-only
+ * report: cash formula + sales + payments + top 5 + alerts. No
+ * denomination breakdown — that's a day-close-only
  * concern. No verification/signature box — the manager doesn't sign per
  * shift, only at end of day.
  *
@@ -624,8 +653,6 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
       case 'report_show_payments': return showPayments;
       case 'report_show_products': return showProducts;
       case 'report_show_alerts': return showAlerts;
-      // The verification toggle hides the "Verified by …" / "UNVERIFIED"
-      // line that provisional shifts emit at the foot of the report.
       case 'report_show_verification': return showVerification;
       // The shifts flag doesn't apply to the per-shift report — there's no
       // shifts roll-up section to hide.
@@ -647,10 +674,6 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
   const bizName = (businessName ?? '').trim() || 'Cafe POS';
   const bizAddr = (businessAddress ?? '').trim();
   const status = varianceStatus(report.cash_variance, labels);
-  const isProv = report.shift_type === 'PROVISIONAL';
-  const verifiedTag = isProv && report.verified_at === null
-    ? ` · ${escapeHtml(labels.unverified.toUpperCase())}`
-    : '';
 
   // Custom header replaces the default outright when provided. Same trust
   // model as the daily renderer — only ADMINs can write `report_*` keys.
@@ -666,10 +689,9 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
   </header>`;
 
   // Cashier identity + open/close times — single banner line above the cash
-  // formula. Provisional shifts surface their unverified state up here so
-  // it's the first thing the reader sees.
+  // formula.
   const subHeader = `<div class="sub-header">
-    <span><strong>${escapeHtml(report.user_name)}</strong>${isProv ? ` · ${escapeHtml(labels.provisional.toUpperCase())}${verifiedTag}` : ''}</span>
+    <span><strong>${escapeHtml(report.user_name)}</strong></span>
     <span>${escapeHtml(labels.opened)} ${escapeHtml(timeUtc(report.opened_at))} · ${escapeHtml(labels.closed)} ${escapeHtml(timeUtc(report.closed_at))}</span>
   </div>`;
 
@@ -796,18 +818,6 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
       }).join('\n')}</section>`
     : '';
 
-  // Provisional shifts surface their verifier (or "Sin verificar") at the
-  // foot of the report so the next reader can see whether the shift cleared.
-  // Rendered as its own block so a custom footer can't accidentally drop the
-  // audit signal, and gated on the verification visibility flag so the
-  // editor's "Verification & signatures" toggle hides it consistently.
-  const verifyLine = isProv && overrides.visibility.verification
-    ? (report.verified_at && report.verified_by_name
-        ? `${escapeHtml(labels.verifiedBy)} ${escapeHtml(report.verified_by_name)}`
-        : escapeHtml(labels.unverified.toUpperCase()))
-    : '';
-  const verifyHtml = verifyLine ? `<div class="ftr verify-line">${verifyLine}</div>` : '';
-
   const closedDate = `${shortDate(report.closed_at, language)} ${timeUtc(report.closed_at)}`;
   const footerHtml = overrides.customFooterHtml ?? `<footer class="ftr">
     <div>${escapeHtml(labels.closedBy)} ${escapeHtml(report.user_name)} · ${escapeHtml(closedDate)}</div>
@@ -822,7 +832,6 @@ export async function renderShiftReportHtml(id: string): Promise<string> {
     paymentsHtml,
     productsHtml,
     alertsHtml,
-    verifyHtml,
     footerHtml,
   ].filter(Boolean).join('\n');
 

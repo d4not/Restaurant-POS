@@ -6,10 +6,13 @@ import { api } from './client';
 // truncate to JS float precision.
 
 export type OrderStatus = 'OPEN' | 'PAID' | 'CANCELLED';
-export type OrderType = 'DINE_IN' | 'TAKEOUT';
+export type OrderType = 'DINE_IN' | 'TAKEOUT' | 'EMPLOYEE';
 export type TakeoutChannel = 'LOCAL' | 'DELIVERY_LOCAL' | 'DELIVERY_APP';
 export type ProductType = 'PRODUCT' | 'DISH' | 'PREPARATION';
-export type PaymentMethodType = 'CASH' | 'CARD' | 'TRANSFER';
+// PAYROLL_DEDUCT settles against an employee's next paycheck and only applies
+// to EMPLOYEE orders. The drawer is untouched.
+export type PaymentMethodType = 'CASH' | 'CARD' | 'TRANSFER' | 'PAYROLL_DEDUCT';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'BARISTA' | 'WAITER';
 // Why a sent line was voided. The first three are kitchen-side outcomes;
 // BEFORE_PREP is the only one that doesn't represent waste (the kitchen
 // hadn't started cooking yet).
@@ -80,6 +83,25 @@ export interface ActiveOrderTable {
   zone: { id: string; name: string };
 }
 
+// Cashier-proposed history edit that's waiting on manager approval. At most
+// one PENDING per order at a time (enforced by a partial unique index in the
+// DB). The manager sees a highlighted row in Order History with Approve /
+// Reject buttons; the cashier sees a "Waiting for manager" badge.
+export type OrderSuggestionType =
+  | 'ORDER_REOPEN'
+  | 'ORDER_DELETE'
+  | 'ORDER_CHANGE_PAYMENT';
+
+export interface PendingOrderSuggestion {
+  id: string;
+  type: OrderSuggestionType;
+  // Free-form. Service-layer validates per type; UI shows a friendly label.
+  payload: Record<string, unknown>;
+  note: string | null;
+  created_at: string;
+  creator: { id: string; name: string; role: UserRole };
+}
+
 export interface ActiveOrder {
   id: string;
   register_id: string;
@@ -87,6 +109,9 @@ export interface ActiveOrder {
   status: OrderStatus;
   order_type: OrderType;
   takeout_channel: TakeoutChannel | null;
+  // Populated when order_type=EMPLOYEE — the recipient of the tab.
+  employee_user_id: string | null;
+  employee: { id: string; name: string; role: UserRole } | null;
   customer_name: string | null;
   customer_phone: string | null;
   delivery_address: string | null;
@@ -112,6 +137,10 @@ export interface ActiveOrder {
   items: ActiveOrderItem[];
   payments: ActiveOrderPayment[];
   register: { id: string; status: 'OPEN' | 'CLOSED'; user_id: string };
+  // Backend includes a pending suggestion when the cashier has proposed a
+  // post-close edit and a manager hasn't approved/rejected it yet. The
+  // include returns an array (Prisma relation) but at most one row exists.
+  suggestions: PendingOrderSuggestion[];
 }
 
 export function fetchActiveOrders(): Promise<ActiveOrder[]> {
@@ -128,6 +157,15 @@ export interface OrderHistoryQuery {
   status?: OrderStatus;
   from?: Date | null;
   to?: Date | null;
+  // Filter pills on the history toolbar — single product, single payment
+  // method, single table. All optional; the backend reduces to no-op when
+  // missing.
+  product_id?: string;
+  payment_method?: PaymentMethodType;
+  table_id?: string;
+  // Bound the query to one shift. The history page groups by register and
+  // re-issues fetchOrderHistory per section header.
+  register_id?: string;
   cursor?: string;
   limit?: number;
 }
@@ -140,6 +178,10 @@ export function fetchOrderHistory(query: OrderHistoryQuery): Promise<PageResult<
   if (query.status) params.set('status', query.status);
   if (query.from) params.set('from', query.from.toISOString());
   if (query.to) params.set('to', query.to.toISOString());
+  if (query.product_id) params.set('product_id', query.product_id);
+  if (query.payment_method) params.set('payment_method', query.payment_method);
+  if (query.table_id) params.set('table_id', query.table_id);
+  if (query.register_id) params.set('register_id', query.register_id);
   if (query.cursor) params.set('cursor', query.cursor);
   params.set('limit', String(query.limit ?? 30));
   return api.get<PageResult<ActiveOrder>>(`/orders?${params.toString()}`);
@@ -149,6 +191,8 @@ export interface CreateOrderInput {
   register_id: string;
   order_type: OrderType;
   takeout_channel?: TakeoutChannel;
+  // Required when order_type=EMPLOYEE.
+  employee_user_id?: string;
   table_id?: string | null;
   notes?: string;
 }
@@ -326,4 +370,153 @@ export function flagOrderAttention(orderId: string, reason?: string) {
 
 export function clearOrderAttention(orderId: string) {
   return api.delete(`/orders/${orderId}/request-attention`);
+}
+
+// ────── Manager-only history edits — each carries a manager PIN that the
+// backend validates against authorizeManagerPin and records on the order.
+
+export interface ReopenOrderInput {
+  pin: string;
+  reason?: string;
+}
+
+export function reopenOrder(orderId: string, input: ReopenOrderInput): Promise<ActiveOrder> {
+  const body: Record<string, string> = { pin: input.pin };
+  if (input.reason && input.reason.trim()) body.reason = input.reason.trim();
+  return api.post<ActiveOrder>(`/orders/${orderId}/reopen`, body);
+}
+
+export interface SoftDeleteOrderInput {
+  pin: string;
+  reason: string;
+}
+
+export function softDeleteOrder(orderId: string, input: SoftDeleteOrderInput): Promise<ActiveOrder> {
+  return api.post<ActiveOrder>(`/orders/${orderId}/soft-delete`, {
+    pin: input.pin,
+    reason: input.reason.trim(),
+  });
+}
+
+export interface UpdatePaymentMethodInput {
+  pin: string;
+  method: PaymentMethodType;
+  reference?: string | null;
+}
+
+export function updatePaymentMethod(
+  orderId: string,
+  paymentId: string,
+  input: UpdatePaymentMethodInput,
+): Promise<{ payment: ActiveOrderPayment; order: ActiveOrder }> {
+  const body: Record<string, unknown> = { pin: input.pin, method: input.method };
+  if (input.reference !== undefined) {
+    body.reference = input.reference?.trim() || null;
+  }
+  return api.patch<{ payment: ActiveOrderPayment; order: ActiveOrder }>(
+    `/orders/${orderId}/payments/${paymentId}/method`,
+    body,
+  );
+}
+
+// ────── Cashier-proposed suggestions on history orders. Cashiers submit
+// using THEIR cashier PIN; the action stays in PENDING until a manager
+// approves or rejects from the same screen.
+
+export interface CreateReopenSuggestionInput {
+  type: 'ORDER_REOPEN';
+  pin: string;
+  reason?: string;
+}
+export interface CreateDeleteSuggestionInput {
+  type: 'ORDER_DELETE';
+  pin: string;
+  reason: string;
+}
+export interface CreateChangePaymentSuggestionInput {
+  type: 'ORDER_CHANGE_PAYMENT';
+  pin: string;
+  payment_id: string;
+  method: PaymentMethodType;
+  reference?: string | null;
+}
+export type CreateOrderSuggestionInput =
+  | CreateReopenSuggestionInput
+  | CreateDeleteSuggestionInput
+  | CreateChangePaymentSuggestionInput;
+
+export interface OrderSuggestion {
+  id: string;
+  type: OrderSuggestionType;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  payload: Record<string, unknown>;
+  note: string | null;
+  created_at: string;
+  creator: { id: string; name: string; role: UserRole };
+}
+
+export function createOrderSuggestion(
+  orderId: string,
+  input: CreateOrderSuggestionInput,
+): Promise<OrderSuggestion> {
+  const body: Record<string, unknown> = { type: input.type, pin: input.pin };
+  if (input.type === 'ORDER_REOPEN') {
+    if (input.reason && input.reason.trim()) body.reason = input.reason.trim();
+  } else if (input.type === 'ORDER_DELETE') {
+    body.reason = input.reason.trim();
+  } else {
+    body.payment_id = input.payment_id;
+    body.method = input.method;
+    if (input.reference !== undefined) {
+      body.reference = input.reference?.trim() || null;
+    }
+  }
+  return api.post<OrderSuggestion>(`/orders/${orderId}/suggestions`, body);
+}
+
+export interface ReviewOrderSuggestionInput {
+  pin: string;
+  review_note?: string;
+}
+
+export function approveOrderSuggestion(
+  suggestionId: string,
+  input: ReviewOrderSuggestionInput,
+): Promise<OrderSuggestion> {
+  const body: Record<string, unknown> = { pin: input.pin };
+  if (input.review_note && input.review_note.trim()) {
+    body.review_note = input.review_note.trim();
+  }
+  return api.post<OrderSuggestion>(`/order-suggestions/${suggestionId}/approve`, body);
+}
+
+export function rejectOrderSuggestion(
+  suggestionId: string,
+  input: ReviewOrderSuggestionInput,
+): Promise<OrderSuggestion> {
+  const body: Record<string, unknown> = { pin: input.pin };
+  if (input.review_note && input.review_note.trim()) {
+    body.review_note = input.review_note.trim();
+  }
+  return api.post<OrderSuggestion>(`/order-suggestions/${suggestionId}/reject`, body);
+}
+
+// Manager+ view of every order suggestion in a given status — backs the
+// Suggested Changes admin view. Returns the order snapshot alongside each
+// suggestion so the manager has enough context to decide.
+export interface OrderSuggestionListItem extends OrderSuggestion {
+  order: {
+    id: string;
+    order_number: number;
+    status: OrderStatus;
+    total: string;
+    order_type: OrderType;
+    created_at: string;
+  } | null;
+}
+
+export function listOrderSuggestions(
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' = 'PENDING',
+): Promise<OrderSuggestionListItem[]> {
+  return api.get<OrderSuggestionListItem[]>(`/order-suggestions?status=${status}`);
 }

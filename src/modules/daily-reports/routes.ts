@@ -45,3 +45,12 @@ dailyReportRouter.get(
   validate(uuidParamSchema, 'params'),
   asyncHandler(controller.printReport),
 );
+
+// Reopen a closed DailyReport. Unlinks shifts and deletes the row so the
+// day can be edited and re-closed (which will produce a fresh folio).
+dailyReportRouter.post(
+  '/:id/reopen',
+  requireRole('ADMIN', 'MANAGER'),
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.reopen),
+);

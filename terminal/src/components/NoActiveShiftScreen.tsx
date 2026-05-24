@@ -1,36 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import {
-  openProvisionalRegister,
   openRegister,
   type CashRegisterRow,
 } from '../api/registers';
 import { useSession } from '../store/session';
+import { useUi } from '../store/ui';
 import { useTranslation } from '../i18n';
 import { Spinner } from './Spinner';
 import { IconRegister } from './operations-hub/HubIcons';
-import { IconShield } from './Icons';
 
 const ROLES_NORMAL_SHIFT: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
-
-function actionCardStyle(active: boolean): React.CSSProperties {
-  return {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    padding: '20px 22px',
-    borderRadius: 12,
-    border: '1px solid ' + (active ? 'var(--gold)' : 'var(--border)'),
-    background: active ? 'rgba(201,164,92,0.08)' : 'var(--bg)',
-    textAlign: 'left',
-    cursor: active ? 'pointer' : 'not-allowed',
-    fontFamily: 'inherit',
-    transition: 'all 0.15s',
-    minHeight: 168,
-    opacity: active ? 1 : 0.6,
-  };
-}
+// Admin Mode is manager+ territory — cashiers stay on the Operations Hub for
+// their day-to-day management surface. Kept separate from the shift gate so
+// the two can move independently if access ever broadens.
+const ROLES_ADMIN_MODE: ReadonlySet<string> = new Set(['MANAGER', 'ADMIN']);
 
 const styles: Record<string, React.CSSProperties> = {
   root: {
@@ -45,7 +30,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   card: {
     width: '100%',
-    maxWidth: 720,
+    maxWidth: 540,
     background: 'var(--bg2)',
     border: '1px solid var(--border)',
     borderRadius: 16,
@@ -65,11 +50,6 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 8,
     marginBottom: 28,
     lineHeight: 1.5,
-  },
-  actionGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: 14,
   },
   actionIcon: {
     width: 44,
@@ -136,11 +116,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     gap: 8,
   },
-  ctaGold: {
-    background: 'var(--gold)',
-    color: '#2c2420',
-    border: '1px solid rgba(44,36,32,0.08)',
-  },
   err: {
     marginTop: 12,
     padding: '10px 12px',
@@ -172,7 +147,60 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 6,
   },
+  adminRow: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTop: '1px dashed var(--border)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  adminText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    minWidth: 0,
+  },
+  adminTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text1)',
+  },
+  adminHint: {
+    fontSize: 11,
+    color: 'var(--text3)',
+    lineHeight: 1.4,
+  },
+  adminBtn: {
+    padding: '10px 16px',
+    borderRadius: 8,
+    background: 'var(--bg2)',
+    color: 'var(--text1)',
+    fontSize: 13,
+    fontWeight: 600,
+    border: '1px solid var(--text1)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 40,
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
 };
+
+function actionCardStyle(active: boolean): React.CSSProperties {
+  return {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    padding: '20px 22px',
+    borderRadius: 12,
+    border: '1px solid ' + (active ? 'var(--gold)' : 'var(--border)'),
+    background: active ? 'rgba(201,164,92,0.08)' : 'var(--bg)',
+    minHeight: 168,
+    opacity: active ? 1 : 0.6,
+  };
+}
 
 function parseAmount(input: string): number | null {
   const cleaned = input.replace(/[^0-9.,]/g, '').replace(/,/g, '.');
@@ -184,56 +212,52 @@ function parseAmount(input: string): number | null {
   return Math.round(value * 100);
 }
 
-// Full-screen entry gate. Mounted by App.tsx whenever no shift is OPEN. The
-// shell hides the topbar/floor plan/etc behind this — there's nothing to show
-// until a shift exists.
+// Full-screen entry gate. Mounted by App.tsx whenever no shift is OPEN.
+// Cashier+ counts the drawer up front; floor staff (waiter/barista) can
+// instead open a PROVISIONAL shift — orders flow as normal, but cash in/out
+// is blocked until a cashier arrives and verifies the count.
 export function NoActiveShiftScreen() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const role = useSession((s) => s.user?.role ?? 'WAITER');
   const signOut = useSession((s) => s.signOut);
+  const openAdmin = useUi((s) => s.openAdmin);
   const canOpenNormal = ROLES_NORMAL_SHIFT.has(role);
+  const canEnterAdmin = ROLES_ADMIN_MODE.has(role);
 
-  const [mode, setMode] = useState<'normal' | 'provisional'>(canOpenNormal ? 'normal' : 'provisional');
   const [openingInput, setOpeningInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!canOpenNormal) setMode('provisional');
-  }, [canOpenNormal]);
 
   function onSuccess(reg: CashRegisterRow) {
     queryClient.setQueryData(['register', 'current'], reg);
     queryClient.invalidateQueries({ queryKey: ['register'] });
   }
 
-  const normalMutation = useMutation({
+  const openMutation = useMutation({
     mutationFn: (amountCentavos: number) => openRegister({ opening_amount: amountCentavos }),
     onSuccess,
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotOpen')),
   });
 
-  const provisionalMutation = useMutation({
-    mutationFn: () => openProvisionalRegister(),
-    onSuccess,
-    onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotOpen')),
-  });
-
-  const isPending = normalMutation.isPending || provisionalMutation.isPending;
-
   function submit() {
     setError(null);
-    if (mode === 'normal') {
-      const amt = parseAmount(openingInput);
-      if (amt == null) {
-        setError(t('register.enterStarting'));
-        return;
-      }
-      normalMutation.mutate(amt);
-    } else {
-      provisionalMutation.mutate();
+    const amt = parseAmount(openingInput);
+    if (amt == null) {
+      setError(t('register.enterStarting'));
+      return;
     }
+    openMutation.mutate(amt);
   }
+
+  const ctaLabel = canOpenNormal
+    ? t('noShift.openNormal')
+    : t('noShift.openProvisional');
+  const cardTitle = canOpenNormal
+    ? t('noShift.openNormal')
+    : t('noShift.openProvisional');
+  const cardSub = canOpenNormal
+    ? t('noShift.openNormalSub')
+    : t('noShift.openProvisionalSub');
 
   return (
     <div style={styles.root}>
@@ -241,78 +265,54 @@ export function NoActiveShiftScreen() {
         <h1 style={styles.title}>{t('noShift.title')}</h1>
         <p style={styles.sub}>{t('noShift.subtitle')}</p>
 
-        <div style={styles.actionGrid}>
-          <button
-            type="button"
-            style={actionCardStyle(canOpenNormal)}
-            onClick={() => canOpenNormal && setMode('normal')}
-            disabled={!canOpenNormal}
-            title={canOpenNormal ? undefined : t('noShift.cashierOnly')}
-            aria-pressed={mode === 'normal'}
-          >
-            <div style={styles.actionIcon}><IconRegister /></div>
-            <div style={styles.actionTitle}>{t('noShift.openNormal')}</div>
-            <div style={styles.actionSub}>
-              {canOpenNormal ? t('noShift.openNormalSub') : t('noShift.cashierOnly')}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            style={actionCardStyle(true)}
-            onClick={() => setMode('provisional')}
-            aria-pressed={mode === 'provisional'}
-          >
-            <div style={styles.actionIcon}><IconShield /></div>
-            <div style={styles.actionTitle}>{t('noShift.openProvisional')}</div>
-            <div style={styles.actionSub}>{t('noShift.openProvisionalSub')}</div>
-          </button>
+        <div style={actionCardStyle(true)}>
+          <div style={styles.actionIcon}><IconRegister /></div>
+          <div style={styles.actionTitle}>{cardTitle}</div>
+          <div style={styles.actionSub}>{cardSub}</div>
         </div>
 
-        {mode === 'normal' && canOpenNormal && (
-          <div style={styles.field}>
-            <span style={styles.label}>{t('register.openingCash')} (MXN)</span>
-            <input
-              autoFocus
-              inputMode="decimal"
-              style={styles.input}
-              placeholder="500.00"
-              value={openingInput}
-              onChange={(e) => setOpeningInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--text3)' }}>{t('register.openingHint')}</span>
-          </div>
-        )}
-
-        {mode === 'provisional' && (
-          <div style={{ ...styles.field, ...{ marginTop: 18 } }}>
-            <span style={{ ...styles.label, color: 'var(--gold)' }}>{t('register.provisionalKind')}</span>
-            <span style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>
-              {t('noShift.provisionalNote')}
-            </span>
-          </div>
-        )}
+        <div style={styles.field}>
+          <span style={styles.label}>{t('register.openingCash')} (MXN)</span>
+          <input
+            autoFocus
+            inputMode="decimal"
+            style={styles.input}
+            placeholder="500.00"
+            value={openingInput}
+            onChange={(e) => setOpeningInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{t('register.openingHint')}</span>
+        </div>
 
         <button
           type="button"
-          style={{
-            ...styles.cta,
-            ...(mode === 'provisional' ? styles.ctaGold : null),
-          }}
+          style={styles.cta}
           onClick={submit}
-          disabled={isPending}
+          disabled={openMutation.isPending}
         >
-          {isPending && <Spinner size={14} />}
-          {mode === 'normal' ? t('noShift.openNormal') : t('noShift.openProvisional')}
+          {openMutation.isPending && <Spinner size={14} />}
+          {ctaLabel}
         </button>
 
         {error && <div style={styles.err}>{error}</div>}
+
+        {canEnterAdmin && (
+          <div style={styles.adminRow}>
+            <div style={styles.adminText}>
+              <span style={styles.adminTitle}>{t('noShift.adminTitle')}</span>
+              <span style={styles.adminHint}>{t('noShift.adminHint')}</span>
+            </div>
+            <button type="button" style={styles.adminBtn} onClick={openAdmin}>
+              {t('noShift.adminCta')}
+            </button>
+          </div>
+        )}
 
         <div style={styles.footRow}>
           <span>{t('login.signedInAs')} · {role}</span>

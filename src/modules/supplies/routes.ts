@@ -10,6 +10,11 @@ import {
   listSupplyQuerySchema,
   supplyStockQuerySchema,
   barcodeParamSchema,
+  externalSearchQuerySchema,
+  supplyMovementsQuerySchema,
+  supplyPurchaseHistoryQuerySchema,
+  supplyCountVarianceQuerySchema,
+  resolveDependenciesSchema,
 } from './schema.js';
 import { tareWeightRouter } from '../tare-weights/routes.js';
 
@@ -25,6 +30,12 @@ supplyRouter.get(
   '/barcode-lookup/:barcode',
   validate(barcodeParamSchema, 'params'),
   asyncHandler(controller.barcodeLookup),
+);
+// Free-text product search via Open Food Facts. Same hoist-before-/:id rule.
+supplyRouter.get(
+  '/external-search',
+  validate(externalSearchQuerySchema, 'query'),
+  asyncHandler(controller.externalSearch),
 );
 supplyRouter.get('/:id', validate(uuidParamSchema, 'params'), asyncHandler(controller.getById));
 supplyRouter.patch(
@@ -44,6 +55,61 @@ supplyRouter.get(
   validate(uuidParamSchema, 'params'),
   validate(supplyStockQuerySchema, 'query'),
   asyncHandler(controller.listStocks),
+);
+
+// Counts every downstream reference (recipes, products via recipes, modifiers,
+// storages-with-stock, last movement) so the delete UI can warn the operator
+// before they soft-delete a supply that other parts of the system rely on.
+supplyRouter.get(
+  '/:id/dependencies',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.getDependencies),
+);
+
+// ─── Phase 2: per-supply analytics for the SupplyInfoView tabs ────────────
+// Each route corresponds to one section on the supply detail page.
+
+supplyRouter.get(
+  '/:id/movements',
+  validate(uuidParamSchema, 'params'),
+  validate(supplyMovementsQuerySchema, 'query'),
+  asyncHandler(controller.listMovements),
+);
+
+supplyRouter.get(
+  '/:id/suppliers',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.listSuppliers),
+);
+
+supplyRouter.get(
+  '/:id/purchase-history',
+  validate(uuidParamSchema, 'params'),
+  validate(supplyPurchaseHistoryQuerySchema, 'query'),
+  asyncHandler(controller.listPurchaseHistory),
+);
+
+supplyRouter.get(
+  '/:id/consuming-products',
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.listConsumingProducts),
+);
+
+supplyRouter.get(
+  '/:id/count-variance',
+  validate(uuidParamSchema, 'params'),
+  validate(supplyCountVarianceQuerySchema, 'query'),
+  asyncHandler(controller.listCountVariance),
+);
+
+// Phase 4: cascade resolver. Applies per-RecipeItem actions (replace /
+// remove_line / remove_owner), nulls out Modifier/Product/ProductModification
+// references, and optionally soft-deletes the supply — all in one tx.
+supplyRouter.post(
+  '/:id/resolve-dependencies',
+  validate(uuidParamSchema, 'params'),
+  validate(resolveDependenciesSchema),
+  asyncHandler(controller.resolveDependencies),
 );
 
 // Nested: /api/v1/supplies/:id/tare-weight

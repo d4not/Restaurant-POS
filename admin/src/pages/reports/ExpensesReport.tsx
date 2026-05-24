@@ -1,19 +1,31 @@
 import { useMemo, useState } from 'react';
-import { Badge, Card, EmptyState, KPICard, Table } from '../../components/ui';
+import { Badge, Card, CSVExportButton, EmptyState, KPICard, Table } from '../../components/ui';
 import type { TableColumn } from '../../components/ui';
 import {
   IncomeExpenseChart,
   type IncomeExpenseDatum,
 } from '../../components/charts/IncomeExpenseChart';
 import { MiniBars } from '../../components/charts/MiniBars';
+import {
+  DateRangeFilter,
+  type DateRangeValue,
+} from '../../components/forms/DateRangeFilter';
+import { SearchInput } from '../../components/forms/SearchInput';
 import { useOrders } from '../../hooks/useOrders';
 import { usePurchases } from '../../hooks/usePurchases';
 import type { Purchase } from '../../api/purchases';
 import type { Order } from '../../types/operations';
-import { formatDate, formatMoney } from '../../utils/format';
+import { formatDate, formatMoney, formatPct } from '../../utils/format';
+import { csvFilename } from '../../utils/csv';
+import {
+  daysAgoYMD,
+  todayYMD,
+  toIsoDayEnd,
+  toIsoDayStart,
+} from './date-range';
 import { useTranslation } from '../../i18n';
 
-/* ── Month helpers ────────────────────────────────────────── */
+/* ── Month helpers (for the historical chart) ─────────────── */
 
 interface MonthBucket {
   key: string;
@@ -47,46 +59,97 @@ function monthsBack(count: number): MonthBucket[] {
 
 export function ExpensesReport() {
   const { t } = useTranslation();
-  // The six-month window that drives both the headline chart and the KPIs.
-  // "This month" = the last bucket; "last 6 months" = full list.
+  const [range, setRange] = useState<DateRangeValue>({
+    from: daysAgoYMD(29),
+    to: todayYMD(),
+  });
+  const [supplierId, setSupplierId] = useState<string>('');
+  const [search, setSearch] = useState<string>('');
+
+  // The 6-month chart is independent of the range filter; it always shows
+  // the rolling half-year so trends stay visible regardless of zoom level.
   const buckets = useMemo(() => monthsBack(6), []);
-  const [showCurrentMonthOnly, setShowCurrentMonthOnly] = useState(true);
-
-  const current = buckets[buckets.length - 1]!;
   const windowStart = buckets[0]!.start;
-  const windowEnd = current.end;
+  const windowEnd = buckets[buckets.length - 1]!.end;
 
-  const ordersQ = useOrders({
+  /* ── Long-window queries (for the chart) ───────────────── */
+  const ordersChartQ = useOrders({
     status: 'PAID',
     from: windowStart.toISOString(),
     to:   windowEnd.toISOString(),
   });
-  const orders = useMemo<Order[]>(
-    () => ordersQ.data?.pages.flatMap((p) => p.items) ?? [],
-    [ordersQ.data],
+  const ordersChart = useMemo<Order[]>(
+    () => ordersChartQ.data?.pages.flatMap((p) => p.items) ?? [],
+    [ordersChartQ.data],
   );
 
-  const purchasesQ = usePurchases({
+  const purchasesChartQ = usePurchases({
     status: 'CONFIRMED',
     from: windowStart.toISOString(),
     to:   windowEnd.toISOString(),
   });
-  const purchases = useMemo<Purchase[]>(
-    () => purchasesQ.data?.pages.flatMap((p) => p.items) ?? [],
-    [purchasesQ.data],
+  const purchasesChart = useMemo<Purchase[]>(
+    () => purchasesChartQ.data?.pages.flatMap((p) => p.items) ?? [],
+    [purchasesChartQ.data],
   );
 
-  /* ── Monthly chart data ───────────────────────────────── */
+  /* ── Range queries (for KPIs, breakdown, table) ────────── */
+  const ordersRangeQ = useOrders({
+    status: 'PAID',
+    from: toIsoDayStart(range.from),
+    to:   toIsoDayEnd(range.to),
+  });
+  const ordersRange = useMemo<Order[]>(
+    () => ordersRangeQ.data?.pages.flatMap((p) => p.items) ?? [],
+    [ordersRangeQ.data],
+  );
+
+  const purchasesRangeQ = usePurchases({
+    status: 'CONFIRMED',
+    from: toIsoDayStart(range.from),
+    to:   toIsoDayEnd(range.to),
+  });
+  const purchasesRange = useMemo<Purchase[]>(
+    () => purchasesRangeQ.data?.pages.flatMap((p) => p.items) ?? [],
+    [purchasesRangeQ.data],
+  );
+
+  /* ── Supplier list (derived from purchases in chart window — that's the
+   *    widest set we know about). Used by the supplier dropdown. ─────── */
+  const supplierOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of purchasesChart) {
+      if (p.supplier?.id) map.set(p.supplier.id, p.supplier.name);
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [purchasesChart]);
+
+  /* ── Filtered purchases (after supplier + search) ──────── */
+  const filteredPurchases = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return purchasesRange.filter((p) => {
+      if (supplierId && p.supplier?.id !== supplierId) return false;
+      if (!needle) return true;
+      const hay = [p.supplier?.name ?? '', p.notes ?? '', p.storage?.name ?? '']
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [purchasesRange, supplierId, search]);
+
+  /* ── Chart data ────────────────────────────────────────── */
 
   const chartData = useMemo<IncomeExpenseDatum[]>(() => {
     return buckets.map((b) => {
-      const income = orders
+      const income = ordersChart
         .filter((o) => {
           const d = new Date(o.created_at);
           return d >= b.start && d <= b.end;
         })
         .reduce((sum, o) => sum + Number(o.total), 0);
-      const expenses = purchases
+      const expenses = purchasesChart
         .filter((p) => {
           const d = new Date(p.date);
           return d >= b.start && d <= b.end;
@@ -99,52 +162,41 @@ export function ExpensesReport() {
         profit: income - expenses,
       };
     });
-  }, [buckets, orders, purchases]);
+  }, [buckets, ordersChart, purchasesChart]);
 
-  /* ── Current-month KPIs ───────────────────────────────── */
+  /* ── KPIs (driven by the date range, not the chart window) ─ */
 
-  const last = chartData[chartData.length - 1] ?? {
-    income: 0,
-    expenses: 0,
-    profit: 0,
-  };
-  const marginPct = last.income > 0 ? (last.profit / last.income) * 100 : 0;
+  const income = useMemo(
+    () => ordersRange.reduce((s, o) => s + Number(o.total), 0),
+    [ordersRange],
+  );
+  const expenses = useMemo(
+    () => filteredPurchases.reduce((s, p) => s + Number(p.total), 0),
+    [filteredPurchases],
+  );
+  const profit = income - expenses;
+  const marginPct = income > 0 ? (profit / income) * 100 : 0;
 
   /* ── Expense breakdown (by supplier) ──────────────────── */
 
   const breakdown = useMemo(() => {
-    // Group expenses by supplier name. Suppliers are the closest category-like
-    // grouping available in the purchases data; in a future phase this could
-    // be replaced with dedicated expense categories (payroll, rent, utilities).
-    const scope = showCurrentMonthOnly
-      ? purchases.filter((p) => {
-          const d = new Date(p.date);
-          return d >= current.start && d <= current.end;
-        })
-      : purchases;
     const byKey = new Map<string, { label: string; value: number }>();
-    for (const p of scope) {
+    for (const p of filteredPurchases) {
       const label = p.supplier?.name ?? 'Unknown supplier';
       const row = byKey.get(label) ?? { label, value: 0 };
       row.value += Number(p.total);
       byKey.set(label, row);
     }
     return [...byKey.values()].sort((a, b) => b.value - a.value);
-  }, [purchases, current, showCurrentMonthOnly]);
+  }, [filteredPurchases]);
 
   /* ── Recorded expenses table ──────────────────────────── */
 
   const tableRows = useMemo<Purchase[]>(() => {
-    const scope = showCurrentMonthOnly
-      ? purchases.filter((p) => {
-          const d = new Date(p.date);
-          return d >= current.start && d <= current.end;
-        })
-      : purchases;
-    return [...scope].sort(
+    return [...filteredPurchases].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
-  }, [purchases, current, showCurrentMonthOnly]);
+  }, [filteredPurchases]);
 
   const columns: TableColumn<Purchase>[] = [
     {
@@ -158,19 +210,20 @@ export function ExpensesReport() {
       ),
     },
     {
-      key: 'category',
-      header: t('common.category'),
+      key: 'supplier',
+      header: t('suppliers.title'),
       width: '1fr',
-      render: () => <Badge tone="gray">{t('nav.supplies')}</Badge>,
+      render: (p) => (
+        <Badge tone="gray">{p.supplier?.name ?? t('suppliers.title')}</Badge>
+      ),
     },
     {
-      key: 'description',
+      key: 'storage',
       header: t('common.description'),
       width: '1.2fr',
       render: (p) => (
         <span className="text-muted fs-12">
-          {p.supplier?.name ?? t('suppliers.title')}
-          {p.storage?.name ? ` → ${p.storage.name}` : ''}
+          {p.storage?.name ?? '—'}
         </span>
       ),
     },
@@ -194,37 +247,62 @@ export function ExpensesReport() {
     },
   ];
 
-  const bothLoading = ordersQ.isLoading || purchasesQ.isLoading;
+  /* ── CSV export ───────────────────────────────────────── */
+
+  const buildCsvRows = () => {
+    const header = ['date', 'supplier', 'storage', 'notes', 'total'];
+    const rows: (string | number)[][] = [header];
+    for (const p of tableRows) {
+      rows.push([
+        new Date(p.date).toISOString(),
+        p.supplier?.name ?? '',
+        p.storage?.name ?? '',
+        p.notes ?? '',
+        Number(p.total) / 100,
+      ]);
+    }
+    return rows;
+  };
+
+  const bothLoading = ordersRangeQ.isLoading || purchasesRangeQ.isLoading;
 
   return (
     <>
+      <DateRangeFilter
+        value={range}
+        onChange={setRange}
+        rightSlot={
+          <CSVExportButton
+            filename={csvFilename('expenses', range.from, range.to)}
+            buildRows={buildCsvRows}
+            disabled={tableRows.length === 0}
+          />
+        }
+      />
+
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <KPICard
           accent
           label={t('expenses.income')}
-          value={formatMoney(last.income)}
-          sub={bothLoading ? `${t('common.loading')}…` : `${t('orders.statusPaid')} · ${current.label}`}
+          value={formatMoney(income)}
+          sub={bothLoading ? `${t('common.loading')}…` : `${ordersRange.length} ${t('orders.statusPaid').toLowerCase()}`}
         />
         <KPICard
           label={t('expenses.expense')}
-          value={formatMoney(last.expenses)}
-          sub={bothLoading ? `${t('common.loading')}…` : t('purchases.statusConfirmed')}
+          value={formatMoney(expenses)}
+          sub={bothLoading ? `${t('common.loading')}…` : `${tableRows.length} ${t('purchases.statusConfirmed').toLowerCase()}`}
         />
         <KPICard
           label={t('expenses.profit')}
-          value={formatMoney(last.profit)}
-          valueColor={last.profit >= 0 ? 'green' : 'red'}
-          sub={
-            last.income > 0
-              ? `${marginPct.toFixed(0)}%`
-              : t('orders.empty')
-          }
+          value={formatMoney(profit)}
+          valueColor={profit >= 0 ? 'green' : 'red'}
+          sub={income > 0 ? `${formatPct(marginPct, 0)} ${t('common.discount')}` : t('orders.empty')}
         />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card title={t('expenses.last6Months')}>
-          {bothLoading ? (
+          {ordersChartQ.isLoading || purchasesChartQ.isLoading ? (
             <div className="loading-block">
               <span className="spinner" />
               {t('common.loading')}…
@@ -240,18 +318,7 @@ export function ExpensesReport() {
           )}
         </Card>
 
-        <Card
-          title={t('expenses.breakdown')}
-          actions={
-            <button
-              type="button"
-              className="filter-pill"
-              onClick={() => setShowCurrentMonthOnly((v) => !v)}
-            >
-              {showCurrentMonthOnly ? current.label : t('expenses.last6Months')}
-            </button>
-          }
-        >
+        <Card title={t('reports.expensesBySupplier')}>
           {bothLoading ? (
             <div className="loading-block">
               <span className="spinner" />
@@ -266,31 +333,56 @@ export function ExpensesReport() {
           ) : (
             <MiniBars
               rows={breakdown.slice(0, 6)}
-              formatValue={(row) => formatMoney(row.value)}
+              formatValue={(row, total) =>
+                `${formatMoney(row.value)} (${formatPct(total > 0 ? (row.value / total) * 100 : 0, 0)})`
+              }
             />
           )}
         </Card>
       </div>
 
-      <Card
-        title={t('expenses.title')}
-        actions={
-          <span className="fs-12 text-muted">
-            {showCurrentMonthOnly ? current.label : t('expenses.last6Months')}
-          </span>
-        }
-      >
+      <div className="toolbar">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder={t('reports.searchSupplier')}
+        />
+        <select
+          className="search-box"
+          style={{ flex: '0 0 220px' }}
+          value={supplierId}
+          onChange={(e) => setSupplierId(e.target.value)}
+        >
+          <option value="">{t('reports.allSuppliers')}</option>
+          {supplierOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        {(supplierId || search) && (
+          <button
+            type="button"
+            className="filter-pill"
+            onClick={() => { setSupplierId(''); setSearch(''); }}
+          >
+            {t('common.cancel')}
+          </button>
+        )}
+      </div>
+
+      <Card title={t('expenses.title')}>
         <Table
           columns={columns}
           rows={tableRows}
           getRowKey={(p) => p.id}
-          isInitialLoad={purchasesQ.isLoading}
-          error={purchasesQ.error as Error | null}
+          isInitialLoad={purchasesRangeQ.isLoading}
+          error={purchasesRangeQ.error as Error | null}
           emptyMessage={t('expenses.title')}
           emptySub={t('expenses.subtitle')}
-          hasMore={!!purchasesQ.hasNextPage}
-          isLoadingMore={purchasesQ.isFetchingNextPage}
-          onLoadMore={() => purchasesQ.fetchNextPage()}
+          hasMore={!!purchasesRangeQ.hasNextPage}
+          isLoadingMore={purchasesRangeQ.isFetchingNextPage}
+          onLoadMore={() => purchasesRangeQ.fetchNextPage()}
         />
       </Card>
     </>

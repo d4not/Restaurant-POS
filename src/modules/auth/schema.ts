@@ -26,11 +26,13 @@ export const pinLoginSchema = z.object({
 //   - mode='self' (default): PIN must match the currently-authenticated user
 //   - mode='cashier': PIN must match ANY active CASHIER/MANAGER/ADMIN
 //     — used by the waiter→cashier authorization flow on sent items.
+//   - mode='manager': PIN must match ANY active MANAGER/ADMIN — used by the
+//     history-edit actions (reopen / soft-delete / change payment method).
 export const verifyPinSchema = z.object({
   pin: z
     .string()
     .regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
-  mode: z.enum(['self', 'cashier']).optional().default('self'),
+  mode: z.enum(['self', 'cashier', 'manager']).optional().default('self'),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

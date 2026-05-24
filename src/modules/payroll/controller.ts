@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
 import type {
+  CreateAdjustmentInput,
   GeneratePayrollInput,
   ListPayrollQuery,
   UpdatePayrollInput,
@@ -34,4 +35,19 @@ export async function update(req: Request, res: Response): Promise<void> {
     req.body as UpdatePayrollInput,
   );
   res.json({ success: true, data: record });
+}
+
+export async function addAdjustment(req: Request, res: Response): Promise<void> {
+  const period = await service.addAdjustment(
+    req.params.id as string,
+    currentUserId(req),
+    req.body as CreateAdjustmentInput,
+  );
+  res.status(201).json({ success: true, data: period });
+}
+
+export async function removeAdjustment(req: Request, res: Response): Promise<void> {
+  const params = req.params as { id: string; adjustmentId: string };
+  const period = await service.removeAdjustment(params.id, params.adjustmentId);
+  res.json({ success: true, data: period });
 }

@@ -1,7 +1,11 @@
 import type { Request, Response } from 'express';
 import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
-import type { CreateWriteOffInput, ListWriteOffQuery } from './schema.js';
+import type {
+  CreateWriteOffBatchInput,
+  CreateWriteOffInput,
+  ListWriteOffQuery,
+} from './schema.js';
 
 function currentUserId(req: Request): string {
   if (!req.auth) throw new UnauthorizedError('Missing auth context');
@@ -14,6 +18,14 @@ export async function create(req: Request, res: Response): Promise<void> {
     req.body as CreateWriteOffInput,
   );
   res.status(201).json({ success: true, data: writeOff });
+}
+
+export async function createBatch(req: Request, res: Response): Promise<void> {
+  const rows = await service.createWriteOffBatch(
+    currentUserId(req),
+    req.body as CreateWriteOffBatchInput,
+  );
+  res.status(201).json({ success: true, data: rows });
 }
 
 export async function list(req: Request, res: Response): Promise<void> {

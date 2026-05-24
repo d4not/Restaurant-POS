@@ -335,7 +335,7 @@ describe('GET /api/v1/reports/products-sold', () => {
     discountAmount?: number;
   }) {
     const register = await prisma.cashRegister.create({
-      data: { user_id: opts.userId, opening_amount: 0, status: 'CLOSED', kind: 'NORMAL' },
+      data: { user_id: opts.userId, opening_amount: 0, status: 'CLOSED' },
     });
     const lineTotal = opts.unitPrice * opts.quantity;
     const order = await prisma.order.create({
@@ -454,7 +454,7 @@ describe('GET /api/v1/reports/products-sold', () => {
       data: { name: 'Espresso', type: ProductType.DISH },
     });
     const register = await prisma.cashRegister.create({
-      data: { user_id: s.userId, opening_amount: 0, status: 'CLOSED', kind: 'NORMAL' },
+      data: { user_id: s.userId, opening_amount: 0, status: 'CLOSED' },
     });
     const subtotal = 10000;
     const order = await prisma.order.create({

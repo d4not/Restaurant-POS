@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as service from './service.js';
+import { resolveRecipeIngredients } from './recipe-resolver.js';
 import type {
   CreateRecipeInput,
   UpdateRecipeInput,
@@ -79,4 +80,11 @@ export async function removeItem(req: Request, res: Response): Promise<void> {
 export async function recalculate(req: Request, res: Response): Promise<void> {
   const result = await service.recalculateRecipe(req.params.id as string);
   res.json({ success: true, data: result });
+}
+
+export async function ingredients(req: Request, res: Response): Promise<void> {
+  const productId = req.query.product_id as string;
+  const variantId = (req.query.variant_id as string | undefined) || null;
+  const items = await resolveRecipeIngredients(productId, variantId);
+  res.json({ success: true, data: items });
 }

@@ -22,9 +22,9 @@ import { productRouter } from './modules/products/routes.js';
 import { modifierGroupRouter } from './modules/modifiers/routes.js';
 import { recipeRouter } from './modules/recipes/routes.js';
 import { alertRouter } from './modules/alerts/routes.js';
+import { stockAvailabilityRouter } from './modules/stock-availability/routes.js';
 import { reportRouter } from './modules/reports/routes.js';
 import { cashRegisterRouter } from './modules/cash-registers/routes.js';
-import { shiftsRouter } from './modules/shifts/routes.js';
 import { shiftReportRouter } from './modules/shift-reports/routes.js';
 import { dailyReportRouter } from './modules/daily-reports/routes.js';
 import { orderRouter } from './modules/orders/routes.js';
@@ -32,6 +32,8 @@ import { authRouter } from './modules/auth/routes.js';
 import { employeeRouter } from './modules/employees/routes.js';
 import { attendanceRouter } from './modules/attendance/routes.js';
 import { payrollRouter } from './modules/payroll/routes.js';
+import { scheduleRouter } from './modules/schedule/routes.js';
+import { tipsRouter } from './modules/tips/routes.js';
 import { taxRouter } from './modules/taxes/routes.js';
 import { settingsRouter } from './modules/settings/routes.js';
 import { zoneRouter } from './modules/zones/routes.js';
@@ -40,8 +42,13 @@ import { tableRouter } from './modules/tables/routes.js';
 import { floorRouter } from './modules/floors/routes.js';
 import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
+import { orderSuggestionReviewRouter } from './modules/order-suggestions/routes.js';
 import { printRouter } from './modules/print/routes.js';
 import { uploadRouter, uploadRoot } from './modules/uploads/routes.js';
+import {
+  employeeProductRouter,
+  employeeSaleRouter,
+} from './modules/employee-discounts/routes.js';
 
 // Build CORS options from CORS_ORIGINS (comma-separated). Empty → reflect
 // every origin, which is fine for the local-first default and for setups where
@@ -124,11 +131,8 @@ export function createApp(): Express {
   app.use('/api/v1/modifier-groups', modifierGroupRouter);
   app.use('/api/v1/recipes', recipeRouter);
   app.use('/api/v1/alerts', alertRouter);
+  app.use('/api/v1/stock', stockAvailabilityRouter);
   app.use('/api/v1/reports', reportRouter);
-  // Mount shifts BEFORE cash-registers so /registers/provisional and
-  // /registers/:id/verify resolve to the new module. cash-registers still
-  // owns /current, /, /:id, /:id/close, and /:id/cash-movements.
-  app.use('/api/v1/registers', shiftsRouter);
   app.use('/api/v1/registers', cashRegisterRouter);
   app.use('/api/v1/shift-reports', shiftReportRouter);
   app.use('/api/v1/daily-reports', dailyReportRouter);
@@ -136,6 +140,8 @@ export function createApp(): Express {
   app.use('/api/v1/employees', employeeRouter);
   app.use('/api/v1/attendance', attendanceRouter);
   app.use('/api/v1/payroll', payrollRouter);
+  app.use('/api/v1/schedule', scheduleRouter);
+  app.use('/api/v1/tips', tipsRouter);
   app.use('/api/v1/taxes', taxRouter);
   app.use('/api/v1/settings', settingsRouter);
   app.use('/api/v1/zones', zoneRouter);
@@ -144,8 +150,11 @@ export function createApp(): Express {
   app.use('/api/v1/floors', floorRouter);
   app.use('/api/v1/floor-decor', floorDecorRouter);
   app.use('/api/v1/suggestions', suggestionRouter);
+  app.use('/api/v1/order-suggestions', orderSuggestionReviewRouter);
   app.use('/api/v1/print', printRouter);
   app.use('/api/v1/uploads', uploadRouter);
+  app.use('/api/v1/employee-products', employeeProductRouter);
+  app.use('/api/v1/employee-sales', employeeSaleRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

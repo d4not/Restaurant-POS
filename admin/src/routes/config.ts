@@ -72,9 +72,10 @@ export const NAV: NavEntry[] = [
     labelKey: 'nav.menu',
     icon: '🍽',
     items: [
-      { id: 'products',         labelKey: 'nav.products',        path: '/menu/products' },
-      { id: 'modifier-groups',  labelKey: 'nav.modifierGroups',  path: '/menu/modifier-groups' },
-      { id: 'categories',       labelKey: 'nav.categories',      path: '/menu/categories' },
+      { id: 'products',          labelKey: 'nav.products',         path: '/menu/products' },
+      { id: 'modifier-groups',   labelKey: 'nav.modifierGroups',   path: '/menu/modifier-groups' },
+      { id: 'categories',        labelKey: 'nav.categories',       path: '/menu/categories' },
+      { id: 'employee-products', labelKey: 'nav.employeeProducts', path: '/menu/employee-products' },
     ],
   },
   {

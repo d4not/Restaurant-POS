@@ -29,6 +29,10 @@ export const createOrderSchema = z
     // Required when order_type=TAKEOUT, ignored for DINE_IN. Service-layer
     // validates "is this channel currently active in settings".
     takeout_channel: z.nativeEnum(TakeoutChannel).optional(),
+    // Required when order_type=EMPLOYEE — identifies the employee whose tab
+    // this is and whose payroll absorbs any PAYROLL_DEDUCT payment. Ignored
+    // otherwise. Service-layer enforced.
+    employee_user_id: z.string().uuid().optional(),
     notes: z.string().max(2000).optional(),
     ...takeoutCustomerFields,
   })
@@ -46,6 +50,9 @@ export const updateOrderSchema = z
     // walked up but ends up wanting delivery). Cleared automatically when
     // order_type flips to DINE_IN.
     takeout_channel: z.nativeEnum(TakeoutChannel).nullable().optional(),
+    // Re-assign the employee on an EMPLOYEE order. Service-layer rejects this
+    // if the order is not currently EMPLOYEE.
+    employee_user_id: z.string().uuid().nullable().optional(),
     ...takeoutCustomerFields,
   })
   .strict();
@@ -59,8 +66,15 @@ export const listOrderQuerySchema = z.object({
   order_type: z.nativeEnum(OrderType).optional(),
   table_id: z.string().uuid().optional(),
   zone_id: z.string().uuid().optional(),
+  // History filters: orders that contain X product (any non-voided line) and
+  // orders that recorded a payment with a given method.
+  product_id: z.string().uuid().optional(),
+  payment_method: z.nativeEnum(PaymentMethod).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  // Soft-deleted rows are excluded by default. Pass true to include them — only
+  // used by admin reviews.
+  include_deleted: z.coerce.boolean().optional(),
 });
 
 export const addOrderItemSchema = z
@@ -120,6 +134,11 @@ export const createPaymentSchema = z
   .object({
     method: z.nativeEnum(PaymentMethod),
     amount: z.number().int().positive(),
+    // Portion of `amount` that the customer left as a tip. The cashier
+    // physically routes this to the tip jar — it never enters the drawer
+    // and never counts toward the order balance. Required to be ≤ amount;
+    // PAYROLL_DEDUCT rejects any non-zero tip. Defaults to 0.
+    tip_amount: z.number().int().nonnegative().optional(),
     reference: z.string().max(200).nullable().optional(),
     // Required only when the JWT user is WAITER/BARISTA. Validated against any
     // active CASHIER/MANAGER/ADMIN PIN by the service layer; the matching user
@@ -149,6 +168,32 @@ export const cancelOrderSchema = z
   })
   .strict();
 
+// Post-close edit actions on history orders. All three require a MANAGER/ADMIN
+// PIN — the service layer matches it against authorizeManagerPin and records
+// the approving user against the order for audit.
+
+export const reopenOrderSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export const softDeleteOrderSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+    reason: z.string().trim().min(5, 'Reason must be at least 5 characters').max(500),
+  })
+  .strict();
+
+export const updatePaymentMethodSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+    method: z.nativeEnum(PaymentMethod),
+    reference: z.string().max(200).nullable().optional(),
+  })
+  .strict();
+
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
 export type ListOrderQuery = z.infer<typeof listOrderQuerySchema>;
@@ -159,3 +204,6 @@ export type RequestAttentionInput = z.infer<typeof requestAttentionSchema>;
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
 export type RemoveOrderItemInput = z.infer<typeof removeOrderItemSchema>;
 export type RestoreOrderItemInput = z.infer<typeof restoreOrderItemSchema>;
+export type ReopenOrderInput = z.infer<typeof reopenOrderSchema>;
+export type SoftDeleteOrderInput = z.infer<typeof softDeleteOrderSchema>;
+export type UpdatePaymentMethodInput = z.infer<typeof updatePaymentMethodSchema>;

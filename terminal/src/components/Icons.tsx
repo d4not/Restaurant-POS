@@ -146,6 +146,12 @@ export const IconChevronLeft: Icon = (props) => (
   </svg>
 );
 
+export const IconChevronDown: Icon = (props) => (
+  <svg {...base} {...props}>
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+
 export const IconMore: Icon = (props) => (
   <svg {...base} {...props}>
     <circle cx="5"  cy="12" r="1.6" fill="currentColor" stroke="none" />
@@ -159,5 +165,19 @@ export const IconImage: Icon = (props) => (
     <rect x="3" y="4" width="18" height="16" rx="2" />
     <circle cx="8.5" cy="9.5" r="1.4" />
     <polyline points="4 17 10 12 14 16 20 10" />
+  </svg>
+);
+
+export const IconSearch: Icon = (props) => (
+  <svg {...base} {...props}>
+    <circle cx="11" cy="11" r="6.5" />
+    <line x1="20" y1="20" x2="16" y2="16" />
+  </svg>
+);
+
+export const IconReopen: Icon = (props) => (
+  <svg {...base} {...props}>
+    <polyline points="3 8 3 13 8 13" />
+    <path d="M3.5 13a8 8 0 1 0 2.3-6.3L3 9" />
   </svg>
 );

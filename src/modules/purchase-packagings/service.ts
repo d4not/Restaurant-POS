@@ -50,8 +50,25 @@ async function clearOtherPrimaries(
 export async function createPackaging(input: CreatePackagingInput) {
   return prisma.$transaction(async (tx) => {
     await assertRefs(tx, input.supply_id, input.supplier_id);
-    const created = await tx.purchasePackaging.create({ data: input });
-    if (input.is_primary) {
+
+    // The first active packaging for a supply is the primary by default —
+    // otherwise the supplier link wouldn't surface in SupplyInfoView until
+    // the first confirmed purchase, which surprised the operator when they
+    // expected the supplier they just typed in to appear straight away.
+    // Honours an explicit `false` from the caller; only the unset case
+    // gets the auto-primary nudge.
+    let isPrimary = input.is_primary;
+    if (isPrimary === undefined) {
+      const existing = await tx.purchasePackaging.count({
+        where: { supply_id: input.supply_id, active: true },
+      });
+      isPrimary = existing === 0;
+    }
+
+    const created = await tx.purchasePackaging.create({
+      data: { ...input, is_primary: isPrimary },
+    });
+    if (isPrimary) {
       await clearOtherPrimaries(tx, input.supply_id, created.id);
     }
     return created;

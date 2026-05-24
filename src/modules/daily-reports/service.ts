@@ -1,10 +1,8 @@
 import {
   AlertSeverity,
-  AlertType,
   CashRegisterStatus,
   DailyReportStatus,
   Prisma,
-  ShiftType,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import {
@@ -53,7 +51,6 @@ const dailyReportInclude = {
     orderBy: { closed_at: 'asc' },
     include: {
       user: { select: { id: true, name: true } },
-      verified_by: { select: { id: true, name: true } },
       shift_report: {
         include: {
           alerts: { orderBy: { created_at: 'asc' } },
@@ -186,43 +183,13 @@ async function loadHourlyBuckets(
 }
 
 /**
- * Generate alerts for a closing day. Currently only one rule lands here:
- * UNVERIFIED_PROVISIONAL — any provisional shift that closed without a
- * manager+ signing off is a CRITICAL audit gap. Shift-level alerts (cash
- * shortage, voids, etc.) live on ShiftReport, not DailyReport.
- */
-async function generateDailyAlerts(
-  tx: Tx,
-  dailyReportId: string,
-  shifts: Array<{ id: string; type: ShiftType; verified_at: Date | null; user_id: string; user: { name: string } }>,
-): Promise<void> {
-  const unverified = shifts.filter(
-    (s) => s.type === ShiftType.PROVISIONAL && s.verified_at === null,
-  );
-  if (unverified.length === 0) return;
-
-  await tx.alert.createMany({
-    data: unverified.map((s) => ({
-      type: AlertType.UNVERIFIED_PROVISIONAL,
-      severity: AlertSeverity.CRITICAL,
-      message: `Provisional shift opened by ${s.user.name} closed without manager verification`,
-      data: { shift_id: s.id, opener_user_id: s.user_id } as Prisma.InputJsonValue,
-      user_id: s.user_id,
-      daily_report_id: dailyReportId,
-    })),
-  });
-}
-
-/**
  * Close today's day and produce the consolidated DailyReport. Per
  * REPORTS-SPEC §4.2:
  *   1. No OPEN shifts may exist for today.
  *   2. Aggregate all ShiftReports closed today into one row.
  *   3. Merge JSON snapshots (categories, top products) and add bottom_products.
  *   4. Compute sales_by_hour from raw order data.
- *   5. Tally provisional shift counts.
- *   6. Link every contributing shift to this DailyReport.
- *   7. Surface UNVERIFIED_PROVISIONAL alerts.
+ *   5. Link every contributing shift to this DailyReport.
  *
  * The unique constraint on date is the idempotency guard: closing the same
  * day twice fails at the DB level. Returns the freshly-closed report with
@@ -276,6 +243,18 @@ export async function closeDailyReport(
   }
 
   return prisma.$transaction(async (tx) => {
+    // Idempotency guard before we do any work. The unique index on date will
+    // also catch this at insert time, but here we can surface the existing
+    // folio so the UI doesn't have to translate a generic P2002.
+    const existing = await tx.dailyReport.findUnique({
+      where: { date: dayStart },
+      select: { folio: true },
+    });
+    if (existing) {
+      const folio = `Z-${String(existing.folio).padStart(4, '0')}`;
+      throw new ConflictError(`Today is already closed (${folio})`);
+    }
+
     // Singleton-shift invariant aside, multiple shifts could theoretically
     // span a day. Refuse if any one is still OPEN — the report would be
     // incomplete and would need re-running.
@@ -305,16 +284,13 @@ export async function closeDailyReport(
       throw new BadRequestError('No shifts closed today');
     }
 
-    // Pull the underlying registers in one shot so we can both link them and
-    // compute provisional/unverified counts without re-fetching.
+    // Pull the underlying registers so we can link them to the daily report.
     const cashRegisters = await tx.cashRegister.findMany({
       where: {
         id: { in: shiftReports.map((r) => r.cash_register_id) },
       },
       select: {
         id: true,
-        type: true,
-        verified_at: true,
         user_id: true,
         user: { select: { name: true } },
       },
@@ -402,9 +378,6 @@ export async function closeDailyReport(
 
     // ---- Shift summary counts ----------------------------------------------
     const total_shifts = shiftReports.length;
-    const provisionalRegisters = cashRegisters.filter((r) => r.type === ShiftType.PROVISIONAL);
-    const provisional_shifts = provisionalRegisters.length;
-    const unverified_provisionals = provisionalRegisters.filter((r) => r.verified_at === null).length;
 
     // ---- Manager-counted cash override --------------------------------------
     // When the manager submits an actual_cash value at close time, it
@@ -450,8 +423,6 @@ export async function closeDailyReport(
         bottom_products: bottom_products as unknown as Prisma.InputJsonValue,
         sales_by_hour: sales_by_hour as unknown as Prisma.InputJsonValue,
         total_shifts,
-        provisional_shifts,
-        unverified_provisionals,
         peak_hour,
         slowest_hour,
         currency,
@@ -473,12 +444,35 @@ export async function closeDailyReport(
       data: { daily_report_id: dailyReport.id },
     });
 
-    await generateDailyAlerts(tx, dailyReport.id, cashRegisters);
-
     return tx.dailyReport.findUniqueOrThrow({
       where: { id: dailyReport.id },
       include: dailyReportInclude,
     });
+  });
+}
+
+/**
+ * Reopen a closed DailyReport so the day can be edited and re-closed. Unlinks
+ * every shift from the report, drops any day-level alerts that hung off it,
+ * then deletes the DailyReport row itself. The unique-on-date index is freed
+ * so a subsequent close produces a fresh folio. Audit context (resolution,
+ * denomination breakdown) is intentionally discarded — the re-close will
+ * regenerate it from current state.
+ */
+export async function reopenDailyReport(id: string) {
+  return prisma.$transaction(async (tx) => {
+    const report = await tx.dailyReport.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!report) throw new NotFoundError('DailyReport');
+
+    await tx.cashRegister.updateMany({
+      where: { daily_report_id: id },
+      data: { daily_report_id: null },
+    });
+    await tx.alert.deleteMany({ where: { daily_report_id: id } });
+    await tx.dailyReport.delete({ where: { id } });
   });
 }
 
@@ -712,8 +706,6 @@ function renderPaymentsSection(
 }
 
 interface ShiftRow {
-  type: ShiftType;
-  verified_at: Date | null;
   opened_at: Date;
   closed_at: Date | null;
   user: { id: string; name: string } | null;
@@ -726,15 +718,10 @@ interface ShiftRow {
 }
 
 /**
- * Compact per-shift block. One block per shift, each block:
+ * Compact per-shift block. One block per shift:
  *
  *   Carlos M.        09:00–17:00     $1,425    47 tickets
  *     Contó $1,380 · Diferencia -$30.00 FALTANTE
- *     ↳ PROVISIONAL · SIN VERIFICAR        ← only when applicable
- *
- * The provisional sub-line is rendered for type=PROVISIONAL shifts. When
- * verified_at is null, "Sin verificar" is appended so the manager sees at a
- * glance which slots still need a sign-off.
  */
 function renderShiftsSection(
   shifts: ShiftRow[],
@@ -749,11 +736,6 @@ function renderShiftsSection(
     const closed = s.closed_at ? timeUtc(s.closed_at) : '—';
     const variance = sr?.cash_variance ?? null;
     const status = varianceStatus(variance, labels);
-    const isProv = s.type === ShiftType.PROVISIONAL;
-    const unverified = isProv && s.verified_at === null;
-    const provLine = isProv
-      ? `<div class="shift-prov">↳ ${escapeHtml(labels.provisional.toUpperCase())}${unverified ? ` · ${escapeHtml(labels.unverified.toUpperCase())}` : ''}</div>`
-      : '';
     return `<div class="shift-block">
       <span>${escapeHtml(s.user?.name ?? '—')}</span>
       <span>${escapeHtml(opened)}–${escapeHtml(closed)}</span>
@@ -762,7 +744,6 @@ function renderShiftsSection(
       <div class="shift-detail">
         ${escapeHtml(labels.countedShort)} ${escapeHtml(fmt(sr?.actual_cash ?? null))} · ${escapeHtml(labels.diffShort)} ${escapeHtml(fmtSigned(variance))} ${escapeHtml(status.label)}
       </div>
-      ${provLine}
     </div>`;
   });
   return `<section><h2>${escapeHtml(labels.shifts)}</h2>${blocks.join('\n')}</section>`;

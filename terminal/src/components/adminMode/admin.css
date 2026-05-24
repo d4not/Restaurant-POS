@@ -1,0 +1,617 @@
+/* Admin Mode — Launchpad animations and shared CSS.
+   Pulled out of inline styles because keyframes need a stylesheet.
+   All animations honour `prefers-reduced-motion` — operators on
+   long shifts often dial that on to avoid eye strain. */
+
+@keyframes adminFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes adminFadeUp {
+  from { opacity: 0; transform: translate3d(0, 12px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes adminPopIn {
+  0%   { opacity: 0; transform: scale(0.96) translate3d(0, -8px, 0); }
+  100% { opacity: 1; transform: scale(1)    translate3d(0, 0, 0);   }
+}
+
+@keyframes adminSlideUp {
+  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.admin-mount-fade {
+  animation: adminFadeIn 220ms ease-out both;
+}
+
+.admin-mount-up {
+  animation: adminFadeUp 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.admin-mount-pop {
+  animation: adminPopIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.admin-view-enter {
+  animation: adminSlideUp 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ─── Launcher root: narrative · palette entry · section row ─────────────
+   Replaces the previous centre-greeting grid. Three stacked zones,
+   varied spacing so the rhythm is intentional (not the same padding
+   everywhere). The narrative cell owns the most space and the strongest
+   type; the palette entry sits in the middle with breathing room; the
+   section row is a single horizontal strip of compact cards at the
+   bottom. The greeting moved to the topbar's user pill (identity-chrome). */
+
+.admin-launcher-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* Vertical gap + outer padding scale with viewport but cap modestly so
+     a 4K monitor doesn't bloat the layout. Sized to feel comfortable at
+     1280-1920 and just-larger at 4K, not poster-scale. */
+  gap: clamp(24px, 2.0vw, 48px);
+  padding: clamp(24px, 1.6vw, 48px) clamp(24px, 1.8vw, 56px);
+  overflow-y: auto;
+}
+
+/* ── Narrative cell ───────────────────────────────────────────────────── */
+
+.admin-narrative {
+  width: 100%;
+  /* Grows with viewport but caps so the column stays readable at 4K
+     instead of stretching into a billboard. */
+  max-width: clamp(640px, 42vw, 980px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 0.3vw, 8px);
+  animation: adminFadeIn 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 60ms;
+}
+
+.admin-narrative-eyebrow {
+  font-size: clamp(11px, 0.62vw, 13px);
+  letter-spacing: 0.18em;
+  text-transform: lowercase;
+  color: var(--text3);
+  font-weight: 600;
+  margin: 0 0 clamp(4px, 0.3vw, 8px);
+  /* lowercase + tracked: a calm date stamp, not a screaming SECTION LABEL */
+}
+
+.admin-narrative-lead {
+  font-family: 'Playfair Display', Georgia, serif;
+  /* Headline scale: 30px on a 1280 laptop, ~40px at 1920px, capped at
+     52px on a 4K display. Workspace scale, not poster scale. */
+  font-size: clamp(30px, 2.2vw, 52px);
+  font-weight: 600;
+  color: var(--text1);
+  margin: 0;
+  letter-spacing: -0.014em;
+  line-height: 1.08;
+  font-variant-numeric: tabular-nums oldstyle-nums;
+  text-wrap: balance;
+}
+
+.admin-narrative-lead-muted {
+  color: var(--text2);
+  font-weight: 500;
+}
+
+.admin-narrative-supporting {
+  font-size: clamp(13px, 0.78vw, 17px);
+  color: var(--text2);
+  margin: clamp(4px, 0.3vw, 8px) 0 0;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-narrative-alerts {
+  list-style: none;
+  margin: clamp(8px, 0.6vw, 14px) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 0.25vw, 6px);
+}
+
+.admin-narrative-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(8px, 0.55vw, 12px);
+  padding: clamp(4px, 0.25vw, 6px) 0;
+  background: transparent;
+  border: none;
+  color: var(--red);
+  font-family: inherit;
+  font-size: clamp(13px, 0.78vw, 17px);
+  font-weight: 600;
+  letter-spacing: -0.002em;
+  cursor: pointer;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.admin-narrative-alert:hover {
+  color: #a8412c;
+  background: rgba(196, 80, 64, 0.06);
+  padding-left: 6px;
+  padding-right: 8px;
+  margin-left: -6px;
+  margin-right: -8px;
+}
+.admin-narrative-alert:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(196, 80, 64, 0.32);
+}
+.admin-narrative-alert-dot {
+  width: clamp(8px, 0.45vw, 10px);
+  height: clamp(8px, 0.45vw, 10px);
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+}
+
+.admin-narrative-secondary {
+  font-size: clamp(13px, 0.72vw, 15px);
+  color: var(--text2);
+  margin: clamp(6px, 0.35vw, 10px) 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-narrative-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(216, 205, 184, 0.30) 0%,
+    rgba(216, 205, 184, 0.55) 50%,
+    rgba(216, 205, 184, 0.30) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: adminSkeletonPulse 1800ms linear infinite;
+}
+.admin-narrative-skeleton-lead {
+  height: clamp(36px, 2.4vw, 56px);
+  width: 56%;
+}
+.admin-narrative-skeleton-sub {
+  height: clamp(16px, 0.95vw, 22px);
+  width: 42%;
+  margin-top: clamp(10px, 0.6vw, 14px);
+  border-radius: 4px;
+}
+
+.admin-narrative-retry {
+  margin-top: 12px;
+  align-self: flex-start;
+  padding: 6px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text1);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.admin-narrative-retry:hover {
+  background: rgba(201, 164, 92, 0.08);
+  border-color: rgba(201, 164, 92, 0.40);
+}
+
+/* ── Always-visible palette entry ─────────────────────────────────────── */
+
+.admin-palette-entry {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 0.6vw, 14px);
+  width: 100%;
+  max-width: clamp(520px, 32vw, 720px);
+  margin: 0 auto;
+  height: clamp(50px, 2.8vw, 60px);
+  padding: 0 clamp(16px, 1.0vw, 22px);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: clamp(10px, 0.7vw, 14px);
+  color: var(--text2);
+  font-family: inherit;
+  font-size: clamp(14px, 0.78vw, 16px);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease,
+    background 140ms ease, transform 140ms ease;
+  animation: adminFadeUp 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 120ms;
+}
+.admin-palette-entry:hover:not(:disabled) {
+  border-color: rgba(201, 164, 92, 0.45);
+  background: var(--bg2);
+  box-shadow: 0 6px 18px rgba(44, 36, 32, 0.06);
+  transform: translate3d(0, -1px, 0);
+}
+.admin-palette-entry:focus-visible {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(201, 164, 92, 0.24);
+}
+.admin-palette-entry:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.admin-palette-entry > svg {
+  width: clamp(16px, 0.95vw, 20px);
+  height: clamp(16px, 0.95vw, 20px);
+  flex-shrink: 0;
+}
+.admin-palette-entry-placeholder {
+  flex: 1;
+  color: var(--text2);
+  font-size: clamp(14px, 0.78vw, 16px);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.admin-palette-entry-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(6px, 0.4vw, 10px);
+  font-size: clamp(11px, 0.62vw, 12px);
+  color: var(--text3);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.admin-palette-entry-kbd kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: clamp(22px, 1.3vw, 26px);
+  height: clamp(22px, 1.3vw, 26px);
+  padding: 0 clamp(6px, 0.35vw, 8px);
+  border-radius: 5px;
+  background: rgba(44, 36, 32, 0.06);
+  color: var(--text2);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: clamp(11px, 0.65vw, 12px);
+  font-weight: 600;
+  border: 1px solid rgba(44, 36, 32, 0.08);
+}
+
+/* ── Section row + compact section card ───────────────────────────────── */
+
+.admin-section-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(12px, 0.8vw, 18px);
+  width: 100%;
+  /* Caps to roughly match the narrative column above. Going wider just
+     makes the cards too lonely on a 4K canvas. */
+  max-width: clamp(900px, 56vw, 1280px);
+  margin: 0 auto;
+}
+
+.admin-mini-card {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 0.7vw, 16px);
+  padding: clamp(14px, 0.9vw, 20px) clamp(14px, 0.95vw, 22px) clamp(14px, 1vw, 22px);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: clamp(10px, 0.7vw, 14px);
+  min-height: clamp(132px, 7.5vw, 170px);
+  height: 100%;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text1);
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-mini-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.admin-mini-card-icon {
+  width: clamp(36px, 2.0vw, 44px);
+  height: clamp(36px, 2.0vw, 44px);
+  border-radius: clamp(10px, 0.6vw, 12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2c2420;
+  flex-shrink: 0;
+}
+.admin-mini-card-icon > svg {
+  width: 58%;
+  height: 58%;
+}
+/* Hotkey badge: small kbd-style pill in the top-right corner of the card.
+   Matches the palette entry's kbd glyph so the keyboard convention is
+   consistent across the launcher. */
+.admin-mini-card-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: clamp(22px, 1.25vw, 26px);
+  height: clamp(22px, 1.25vw, 26px);
+  padding: 0 clamp(6px, 0.35vw, 8px);
+  border-radius: 5px;
+  background: rgba(44, 36, 32, 0.05);
+  color: var(--text3);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: clamp(11px, 0.65vw, 12px);
+  font-weight: 600;
+  border: 1px solid rgba(44, 36, 32, 0.06);
+  letter-spacing: 0;
+}
+.admin-mini-card-title {
+  font-size: clamp(11px, 0.65vw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text3);
+  line-height: 1.2;
+}
+.admin-mini-card-live {
+  font-size: clamp(12px, 0.72vw, 14px);
+  color: var(--text2);
+  line-height: 1.35;
+  /* Live signal is the visual lead now; pin to bottom so cards align. */
+  margin-top: auto;
+}
+/* Bigger live-signal headline + dot inside the mini card, scaled. */
+.admin-mini-card-live .liveBlock,
+.admin-mini-card-live > span {
+  width: 100%;
+}
+
+/* Narrow viewports (rare on a POS terminal): stack the section row.
+   Below 720px the cards drop to 2 columns then 1; the narrative and
+   palette top out at their clamped widths and sit cleanly. */
+@media (max-width: 720px) {
+  .admin-launcher-root {
+    gap: 22px;
+    padding: 20px 16px 24px;
+  }
+  .admin-section-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 420px) {
+  .admin-section-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Tile interactions — :hover for mouse, :focus-visible for keyboard.
+   The lift + ring is what makes the launcher feel "alive". */
+.admin-tile {
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.admin-tile:hover:not(:disabled) {
+  transform: translate3d(0, -2px, 0);
+  border-color: rgba(201, 164, 92, 0.55);
+  box-shadow: 0 12px 28px rgba(44, 36, 32, 0.10);
+}
+
+.admin-tile:focus-visible,
+.admin-tile.is-focused {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow:
+    0 0 0 3px rgba(201, 164, 92, 0.28),
+    0 12px 28px rgba(44, 36, 32, 0.10);
+  transform: translate3d(0, -2px, 0);
+}
+
+.admin-tile:active:not(:disabled) {
+  transform: translate3d(0, 0, 0);
+  transition-duration: 80ms;
+}
+
+.admin-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* CTA variant — used for the Operations card when no shift is open.
+   Gold-tinted border with a soft warm wash so the card reads as the
+   primary call to action without shouting. Hover / focus deepen the
+   gold rather than competing with it. */
+.admin-tile-cta {
+  border-color: rgba(201, 164, 92, 0.55);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(201, 164, 92, 0.07) 0%,
+      rgba(201, 164, 92, 0.02) 100%
+    ),
+    var(--bg2);
+  box-shadow:
+    0 1px 0 rgba(44, 36, 32, 0.02),
+    0 6px 20px rgba(201, 164, 92, 0.10);
+}
+.admin-tile-cta:hover:not(:disabled) {
+  border-color: var(--gold);
+  box-shadow:
+    0 12px 30px rgba(201, 164, 92, 0.18),
+    0 1px 0 rgba(44, 36, 32, 0.02);
+}
+.admin-tile-cta:focus-visible {
+  border-color: var(--gold);
+  box-shadow:
+    0 0 0 3px rgba(201, 164, 92, 0.32),
+    0 12px 30px rgba(201, 164, 92, 0.18);
+}
+
+/* Skeleton shimmer for the live-signal block while data is loading.
+   Slow and warm so it reads as "loading", not "alarming". */
+@keyframes adminSkeletonPulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.admin-live-skeleton-line {
+  animation: adminSkeletonPulse 1800ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-live-skeleton-line {
+    animation: none !important;
+  }
+}
+
+/* Command palette row — analogous focus treatment, plain background. */
+.admin-palette-row {
+  transition: background 90ms ease, color 90ms ease;
+}
+.admin-palette-row.is-active {
+  background: var(--gold-soft);
+  color: var(--text1);
+}
+
+.admin-hint-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: rgba(44, 36, 32, 0.08);
+  color: var(--text1);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  border: 1px solid rgba(44, 36, 32, 0.08);
+  box-shadow: 0 1px 0 rgba(44, 36, 32, 0.05);
+}
+
+/* ── Shift Audit ledger row ──────────────────────────────────────────── */
+
+/* Day header — clickable region that toggles the day-group open / closed.
+   Holds its own base background so the inline style doesn't fight :hover. */
+.admin-day-head {
+  background: rgba(201, 164, 92, 0.07);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.admin-day-head:hover {
+  background: rgba(201, 164, 92, 0.11);
+}
+.admin-day-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--gold);
+}
+/* A collapsed day has no rows below, so the head sits flush against the
+   box's bottom edge: drop its bottom border so the box border owns it. */
+.admin-day-head.is-collapsed {
+  border-bottom-color: transparent;
+}
+
+/* Day-group rows: hairline divider between adjacent rows; the box edge
+   replaces the top/bottom border on the first / last row. */
+.admin-shift-row-wrapper + .admin-shift-row-wrapper {
+  border-top: 1px solid var(--border);
+}
+
+.admin-shift-row {
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.admin-shift-row:hover {
+  background: rgba(201, 164, 92, 0.05);
+}
+.admin-shift-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--gold);
+  background: rgba(201, 164, 92, 0.06);
+}
+
+/* KPI tile interactive variants — used by the clickable "flagged" KPI. */
+.admin-kpi-tile {
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.admin-kpi-tile.is-clickable {
+  cursor: pointer;
+}
+.admin-kpi-tile.is-clickable:hover {
+  border-color: rgba(196, 80, 64, 0.45);
+  background: rgba(196, 80, 64, 0.04);
+}
+.admin-kpi-tile.is-clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--gold);
+}
+
+.admin-shift-chevron {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              color 120ms ease;
+  color: var(--text3);
+}
+.admin-shift-row:hover .admin-shift-chevron {
+  color: var(--text2);
+}
+.admin-shift-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+@keyframes adminLiveDot {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.86); }
+}
+.admin-shift-status-dot.is-live {
+  animation: adminLiveDot 1800ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes adminExpandReveal {
+  from { opacity: 0; transform: translate3d(0, -4px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.admin-shift-expand {
+  animation: adminExpandReveal 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-mount-fade,
+  .admin-mount-up,
+  .admin-mount-pop,
+  .admin-view-enter,
+  .admin-shift-expand,
+  .admin-narrative,
+  .admin-palette-entry,
+  .admin-narrative-skeleton {
+    animation: none !important;
+  }
+  .admin-tile,
+  .admin-palette-row,
+  .admin-shift-row,
+  .admin-shift-chevron,
+  .admin-kpi-tile,
+  .admin-day-head,
+  .admin-palette-entry,
+  .admin-narrative-alert,
+  .admin-narrative-retry {
+    transition: none !important;
+  }
+  .admin-shift-status-dot.is-live {
+    animation: none !important;
+  }
+}

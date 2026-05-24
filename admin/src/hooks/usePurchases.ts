@@ -95,6 +95,9 @@ export function useConfirmPurchase() {
       qc.invalidateQueries({ queryKey: ['supplies'] });
       qc.invalidateQueries({ queryKey: ['supply'] });
       qc.invalidateQueries({ queryKey: ['movements'] });
+      // Purchase confirm receives stock → topbar bell + dashboard widget
+      // should drop the alert immediately.
+      qc.invalidateQueries({ queryKey: ['alerts', 'low-stock'] });
     },
   });
 }

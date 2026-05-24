@@ -48,8 +48,6 @@ describe('DailyReport lifecycle — two shifts → close → consolidated report
     expect(day.closed_by_id).toBe(admin.id);
     expect(day.notes).toBe('EOD A+B');
     expect(day.total_shifts).toBe(2);
-    expect(day.provisional_shifts).toBe(0);
-    expect(day.unverified_provisionals).toBe(0);
 
     // Compare the consolidated row directly against the sum of underlying
     // ShiftReports. If aggregation drifts, this catches it.

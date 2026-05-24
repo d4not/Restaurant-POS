@@ -172,7 +172,27 @@ export function DashboardPage() {
 
   /* ── Low-stock list ───────────────────────────────────── */
 
+  // Sort low-stock alerts so the most urgent (out, then biggest shortfall)
+  // surface at the top of the dashboard card.
+  const sortedLowStock = [...lowStock].sort((a, b) => {
+    const aOut = Number.parseFloat(a.quantity) <= 0;
+    const bOut = Number.parseFloat(b.quantity) <= 0;
+    if (aOut !== bOut) return aOut ? -1 : 1;
+    return Number.parseFloat(b.shortfall) - Number.parseFloat(a.shortfall);
+  });
+
   const alertColumns: TableColumn<LowStockAlert>[] = [
+    {
+      key: 'severity',
+      header: '',
+      width: '70px',
+      render: (a) => {
+        const isOut = Number.parseFloat(a.quantity) <= 0;
+        const label = isOut ? t('stock.severity.out') : t('stock.severity.low');
+        const cls = isOut ? 'badge badge-red' : 'badge badge-gold';
+        return <span className={cls}>{label}</span>;
+      },
+    },
     {
       key: 'supply',
       header: t('nav.supplies'),
@@ -187,30 +207,38 @@ export function DashboardPage() {
     {
       key: 'stock',
       header: t('supplies.colStock'),
-      width: '110px',
-      render: (a) => (
-        <span className="fs-13">
-          {formatNumber(a.quantity, 2)} <span className="text-muted fs-11">{a.base_unit.toLowerCase()}</span>
-        </span>
-      ),
-    },
-    {
-      key: 'min',
-      header: t('supplies.minStock'),
-      width: '100px',
-      render: (a) => (
-        <span className="fs-12 text-muted">{formatNumber(a.min_stock, 2)}</span>
-      ),
+      width: '120px',
+      render: (a) => {
+        const qty = Number.parseFloat(a.quantity);
+        const min = Number.parseFloat(a.min_stock);
+        const ratio = min > 0 ? Math.max(0, Math.min(1, qty / min)) : 0;
+        const isOut = qty <= 0;
+        const fillClass = isOut ? 'low' : 'warn';
+        return (
+          <div>
+            <div className="fs-13">
+              {formatNumber(a.quantity, 2)}{' '}
+              <span className="text-muted fs-11">/ {formatNumber(a.min_stock, 2)}</span>
+            </div>
+            <div className="stock-track mt-4">
+              <div className={`stock-fill ${fillClass}`} style={{ width: `${ratio * 100}%` }} />
+            </div>
+          </div>
+        );
+      },
     },
     {
       key: 'short',
       header: t('supplies.lowStock'),
-      width: '110px',
-      render: (a) => (
-        <span className="fw-600 fs-13 text-red">
-          −{formatNumber(a.shortfall, 2)}
-        </span>
-      ),
+      width: '90px',
+      render: (a) => {
+        const isOut = Number.parseFloat(a.quantity) <= 0;
+        return (
+          <span className={`fw-600 fs-13 ${isOut ? 'text-red' : 'text-gold'}`}>
+            −{formatNumber(a.shortfall, 2)}
+          </span>
+        );
+      },
     },
   ];
 
@@ -287,7 +315,7 @@ export function DashboardPage() {
           ) : (
             <Table
               columns={alertColumns}
-              rows={lowStock.slice(0, 8)}
+              rows={sortedLowStock.slice(0, 8)}
               getRowKey={(a) => `${a.supply_id}|${a.storage_id}`}
               onRowClick={(a) => navigate(`/inventory/supplies/${a.supply_id}`)}
             />

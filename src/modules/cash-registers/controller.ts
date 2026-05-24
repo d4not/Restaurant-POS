@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import { CashRegisterKind } from '@prisma/client';
 import { UnauthorizedError } from '../../lib/errors.js';
 import * as service from './service.js';
 import type {
@@ -8,6 +7,8 @@ import type {
   ListCashMovementQuery,
   ListRegisterQuery,
   OpenRegisterInput,
+  UpdateCashMovementInput,
+  VerifyProvisionalInput,
 } from './schema.js';
 
 function currentUser(req: Request): { id: string; role: import('@prisma/client').UserRole } {
@@ -17,11 +18,7 @@ function currentUser(req: Request): { id: string; role: import('@prisma/client')
 
 export async function open(req: Request, res: Response): Promise<void> {
   const user = currentUser(req);
-  const register = await service.openRegister(
-    user.id,
-    req.body as OpenRegisterInput,
-    { kind: CashRegisterKind.NORMAL },
-  );
+  const register = await service.openRegister(user.id, req.body as OpenRegisterInput);
   res.status(201).json({ success: true, data: register });
 }
 
@@ -31,6 +28,16 @@ export async function close(req: Request, res: Response): Promise<void> {
     req.params.id as string,
     req.body as CloseRegisterInput,
     { closingUserId: user.id, closingUserRole: user.role },
+  );
+  res.json({ success: true, data: register });
+}
+
+export async function verifyProvisional(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
+  const register = await service.verifyProvisional(
+    req.params.id as string,
+    req.body as VerifyProvisionalInput,
+    { verifyingUserId: user.id, verifyingUserRole: user.role },
   );
   res.json({ success: true, data: register });
 }
@@ -53,12 +60,34 @@ export async function current(_req: Request, res: Response): Promise<void> {
 }
 
 export async function addCashMovement(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
   const movement = await service.addCashMovement(
     req.params.id as string,
-    currentUser(req).id,
+    { userId: user.id, userRole: user.role },
     req.body as CreateCashMovementInput,
   );
   res.status(201).json({ success: true, data: movement });
+}
+
+export async function updateCashMovement(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
+  const movement = await service.updateCashMovement(
+    req.params.id as string,
+    req.params.movementId as string,
+    { userId: user.id, userRole: user.role },
+    req.body as UpdateCashMovementInput,
+  );
+  res.json({ success: true, data: movement });
+}
+
+export async function deleteCashMovement(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
+  await service.deleteCashMovement(
+    req.params.id as string,
+    req.params.movementId as string,
+    { userId: user.id, userRole: user.role },
+  );
+  res.status(204).end();
 }
 
 export async function listCashMovements(req: Request, res: Response): Promise<void> {

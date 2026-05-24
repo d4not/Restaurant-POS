@@ -1,6 +1,5 @@
 import {
   ModifierGroupType,
-  ModifierOverrideType,
   Prisma,
   ProductType,
   StockMovementType,
@@ -8,10 +7,20 @@ import {
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, NotFoundError } from '../../lib/errors.js';
 import { Decimal } from '../../lib/decimal.js';
+import { convertRecipeQuantityToBase } from '../recipes/cost-engine.js';
 import {
-  convertRecipeQuantityToBase,
-  computePreparationFactor,
-} from '../recipes/cost-engine.js';
+  addDraw,
+  walkRecipeRequirements,
+  type Aggregate,
+  type OverrideRow,
+  type RecipeItemRow,
+  type ResolvedModifier,
+  type WalkError,
+} from '../recipes/recipe-walker.js';
+import {
+  resolveRuleStorage,
+  resolveStorageFromLastPurchase,
+} from '../deduction-rules/service.js';
 
 type Tx = Prisma.TransactionClient;
 type PrismaLike = Tx | typeof prisma;
@@ -47,80 +56,6 @@ export interface DeductSaleOptions {
   client?: Tx;
 }
 
-type RecipeItemRow = {
-  supply_id: string | null;
-  preparation_id: string | null;
-  modifier_group_id: string | null;
-  quantity: Prisma.Decimal;
-  unit: string;
-  waste_pct: Prisma.Decimal;
-};
-
-// Aggregate supply draws keyed by "supplyId|storageId" so a single SALE
-// movement covers every recipe line / modifier / line-repeat that hits the
-// same supply at the same storage.
-type Aggregate = Map<string, Decimal>;
-const key = (supplyId: string, storageId: string): string => `${supplyId}|${storageId}`;
-
-function addDraw(agg: Aggregate, supplyId: string, storageId: string, qty: Decimal): void {
-  const k = key(supplyId, storageId);
-  agg.set(k, (agg.get(k) ?? new Decimal(0)).add(qty));
-}
-
-// Pick the most specific DeductionRule. Order: (station + register) → station
-// → register → default (both null). Returns null if no rule exists — callers
-// then fall back to per-supply last-received storage.
-async function resolveRuleStorage(
-  client: PrismaLike,
-  stationId: string | null | undefined,
-  posRegisterId: string | null | undefined,
-): Promise<string | null> {
-  if (stationId && posRegisterId) {
-    const both = await client.deductionRule.findFirst({
-      where: { station_id: stationId, pos_register_id: posRegisterId },
-      select: { storage_id: true },
-    });
-    if (both) return both.storage_id;
-  }
-  if (stationId) {
-    const byStation = await client.deductionRule.findFirst({
-      where: { station_id: stationId, pos_register_id: null },
-      select: { storage_id: true },
-    });
-    if (byStation) return byStation.storage_id;
-  }
-  if (posRegisterId) {
-    const byRegister = await client.deductionRule.findFirst({
-      where: { station_id: null, pos_register_id: posRegisterId },
-      select: { storage_id: true },
-    });
-    if (byRegister) return byRegister.storage_id;
-  }
-  const fallback = await client.deductionRule.findFirst({
-    where: { station_id: null, pos_register_id: null },
-    select: { storage_id: true },
-  });
-  return fallback?.storage_id ?? null;
-}
-
-// Per-supply fallback: where did this supply last arrive?
-async function resolveStorageFromLastPurchase(
-  client: PrismaLike,
-  supplyId: string,
-): Promise<string> {
-  const last = await client.stockMovement.findFirst({
-    where: { supply_id: supplyId, type: StockMovementType.PURCHASE },
-    orderBy: { created_at: 'desc' },
-    select: { storage_id: true },
-  });
-  if (!last) {
-    throw new BadRequestError(
-      `No deduction rule matched and supply ${supplyId} has no purchase history — cannot determine storage to deduct from`,
-    );
-  }
-  return last.storage_id;
-}
-
 async function resolveRecipeForLine(
   client: PrismaLike,
   productId: string,
@@ -138,28 +73,6 @@ async function resolveRecipeForLine(
   }
   return { items: recipe.items };
 }
-
-// Materialized view of a selected modifier — resolved against its group so
-// SWAP / ADD behavior is decided once per line.
-type ResolvedModifier = {
-  id: string;
-  group_id: string;
-  group_type: ModifierGroupType;
-  supply_id: string | null;
-  supply_quantity: Prisma.Decimal | null;
-  supply_unit: string | null;
-  ratio: Prisma.Decimal;
-  is_default: boolean;
-};
-
-type OverrideRow = {
-  product_id: string;
-  modifier_id: string;
-  override_type: ModifierOverrideType;
-  override_ratio: Prisma.Decimal | null;
-  override_quantity: Prisma.Decimal | null;
-  override_unit: string | null;
-};
 
 async function loadModifiersForLine(
   client: PrismaLike,
@@ -213,231 +126,19 @@ async function loadOverridesForLine(
   return byModifierId;
 }
 
-// Look up the is_default modifier for a given SWAP group — used as fallback
-// when a recipe line references a group but the customer didn't pick anything.
-async function loadDefaultModifier(
-  client: PrismaLike,
-  groupId: string,
-): Promise<ResolvedModifier | null> {
-  const row = await client.modifier.findFirst({
-    where: { group_id: groupId, is_default: true, active: true },
-    select: {
-      id: true,
-      group_id: true,
-      supply_id: true,
-      supply_quantity: true,
-      supply_unit: true,
-      ratio: true,
-      is_default: true,
-      group: { select: { type: true } },
-    },
-  });
-  if (!row) return null;
-  return {
-    id: row.id,
-    group_id: row.group_id,
-    group_type: row.group.type,
-    supply_id: row.supply_id,
-    supply_quantity: row.supply_quantity,
-    supply_unit: row.supply_unit,
-    ratio: row.ratio,
-    is_default: row.is_default,
-  };
+// Sales walks recipes through the same primitive used by the availability
+// engine. Soft errors from the walker (missing default, unknown supply, bad
+// config) are fatal at deduction time — surface the first one as a 400 so the
+// caller can fix the configuration before they retry the sale.
+function throwOnWalkErrors(errors: WalkError[]): void {
+  if (errors.length === 0) return;
+  throw new BadRequestError(errors[0].message);
 }
 
-// Deduct for one SWAP modifier filling a recipe slot. Shared by the "customer
-// selected" path and the "default fallback" path so the two stay in lockstep.
-async function deductSwapSlot(
-  client: PrismaLike,
-  modifier: ResolvedModifier,
-  override: OverrideRow | undefined,
-  recipeQty: Decimal,
-  recipeUnit: string,
-  recipeWastePct: Decimal,
-  lineQty: Decimal,
-  storageResolver: (supplyId: string) => Promise<string>,
-  agg: Aggregate,
-  productId: string,
-): Promise<void> {
-  if (!modifier.supply_id) {
-    // Informational SWAP ("No milk") — intentionally deducts nothing. The
-    // recipe slot is skipped and the customer gets the dish without it.
-    return;
-  }
-  const supply = await client.supply.findUnique({
-    where: { id: modifier.supply_id },
-    select: { content_per_unit: true, content_unit: true, deleted_at: true },
-  });
-  if (!supply || supply.deleted_at) {
-    throw new BadRequestError(
-      `Modifier ${modifier.id} references unknown supply ${modifier.supply_id}`,
-    );
-  }
-
-  if (override && override.override_type === ModifierOverrideType.FIXED_QTY) {
-    if (override.override_quantity == null || override.override_unit == null) {
-      throw new BadRequestError(
-        `Override for product ${productId} + modifier ${modifier.id} is FIXED_QTY but missing quantity/unit`,
-      );
-    }
-    const base = convertRecipeQuantityToBase(
-      new Decimal(override.override_quantity).mul(lineQty),
-      override.override_unit,
-      0,
-      supply,
-    );
-    const storageId = await storageResolver(modifier.supply_id);
-    addDraw(agg, modifier.supply_id, storageId, base);
-    return;
-  }
-
-  // RATIO path: per-product override ratio wins over the modifier's default.
-  // recipeQty is already scaled by lineQty at the caller.
-  const ratio =
-    override && override.override_type === ModifierOverrideType.RATIO && override.override_ratio != null
-      ? new Decimal(override.override_ratio)
-      : new Decimal(modifier.ratio);
-  const base = convertRecipeQuantityToBase(
-    recipeQty.mul(ratio),
-    recipeUnit,
-    recipeWastePct,
-    supply,
-  );
-  const storageId = await storageResolver(modifier.supply_id);
-  addDraw(agg, modifier.supply_id, storageId, base);
-}
-
-// Walk a recipe and add each supply draw (scaled by `multiplier`) to `agg`.
-// Preparations recurse with their own factor (requested qty / yield qty).
-//
-// `slotContext` is set only at the top level — nested preparations don't
-// support SWAP slots (preparations are stable sub-recipes, not
-// customer-customized).
-async function accumulateRecipe(
-  client: PrismaLike,
-  items: RecipeItemRow[],
-  multiplier: Decimal,
-  storageResolver: (supplyId: string) => Promise<string>,
-  agg: Aggregate,
-  visited: Set<string>,
-  slotContext: {
-    productId: string;
-    lineQty: Decimal;
-    selectedByGroupId: Map<string, ResolvedModifier>;
-    overrides: Map<string, OverrideRow>;
-    consumedGroupIds: Set<string>;
-  } | null,
-): Promise<void> {
-  for (const item of items) {
-    if (item.modifier_group_id) {
-      if (!slotContext) {
-        throw new BadRequestError(
-          'Modifier-group recipe lines are only supported at the top level of a DISH recipe',
-        );
-      }
-      // Find which modifier fills this slot: customer selection wins; fall
-      // back to the group's is_default when nothing was picked.
-      let modifier = slotContext.selectedByGroupId.get(item.modifier_group_id);
-      if (!modifier) {
-        const fallback = await loadDefaultModifier(client, item.modifier_group_id);
-        if (!fallback) {
-          throw new BadRequestError(
-            `Modifier group ${item.modifier_group_id} has no is_default modifier and the customer didn't pick one — cannot deduct for this recipe line`,
-          );
-        }
-        modifier = fallback;
-      } else {
-        slotContext.consumedGroupIds.add(item.modifier_group_id);
-      }
-      const override = slotContext.overrides.get(modifier.id);
-      const scaledRecipeQty = new Decimal(item.quantity).mul(multiplier);
-      await deductSwapSlot(
-        client,
-        modifier,
-        override,
-        scaledRecipeQty,
-        item.unit,
-        new Decimal(item.waste_pct),
-        slotContext.lineQty,
-        storageResolver,
-        agg,
-        slotContext.productId,
-      );
-      continue;
-    }
-
-    if (item.supply_id) {
-      const supply = await client.supply.findUnique({
-        where: { id: item.supply_id },
-        select: { content_per_unit: true, content_unit: true, deleted_at: true },
-      });
-      if (!supply || supply.deleted_at) {
-        throw new BadRequestError(`Recipe references unknown supply ${item.supply_id}`);
-      }
-      const base = convertRecipeQuantityToBase(
-        new Decimal(item.quantity).mul(multiplier),
-        item.unit,
-        item.waste_pct,
-        supply,
-      );
-      const storageId = await storageResolver(item.supply_id);
-      addDraw(agg, item.supply_id, storageId, base);
-      continue;
-    }
-    if (item.preparation_id) {
-      if (visited.has(item.preparation_id)) {
-        throw new BadRequestError(
-          `Preparation cycle detected via ${item.preparation_id}`,
-        );
-      }
-      const prep = await client.product.findUnique({
-        where: { id: item.preparation_id },
-        select: {
-          id: true,
-          type: true,
-          recipe: {
-            select: {
-              yield_quantity: true,
-              yield_unit: true,
-              items: true,
-            },
-          },
-        },
-      });
-      if (!prep || prep.type !== ProductType.PREPARATION) {
-        throw new BadRequestError(
-          `preparation_id ${item.preparation_id} does not reference a PREPARATION product`,
-        );
-      }
-      if (!prep.recipe) {
-        throw new BadRequestError(
-          `Preparation ${item.preparation_id} has no recipe`,
-        );
-      }
-      const factor = computePreparationFactor(
-        new Decimal(item.quantity).mul(multiplier),
-        item.unit,
-        item.waste_pct,
-        prep.recipe,
-      );
-      visited.add(item.preparation_id);
-      // SWAP only applies at the top-level recipe — pass null slotContext so
-      // sub-recipes can't accidentally host a slot.
-      await accumulateRecipe(
-        client,
-        prep.recipe.items,
-        factor,
-        storageResolver,
-        agg,
-        visited,
-        null,
-      );
-      visited.delete(item.preparation_id);
-      continue;
-    }
-    throw new BadRequestError(
-      'Recipe item must reference exactly one of supply_id, preparation_id, or modifier_group_id',
-    );
+function mergeAggregate(target: Aggregate, source: Aggregate): void {
+  for (const [k, qty] of source) {
+    const existing = target.get(k);
+    target.set(k, existing ? existing.add(qty) : qty);
   }
 }
 
@@ -476,9 +177,11 @@ export async function deductSaleFromInventory(
       options.pos_register_id,
     );
 
-    // Per-supply storage fallbacks are expensive — memoize.
+    // Per-supply storage fallbacks are expensive — memoize. resolveStorageFromLastPurchase
+    // throws when no purchase exists, which propagates out of the walker — sales
+    // must NOT silently swallow that case.
     const fallbackCache = new Map<string, string>();
-    const storageResolver = async (supplyId: string): Promise<string> => {
+    const storageResolver = async (supplyId: string): Promise<string | null> => {
       if (ruleStorageId) return ruleStorageId;
       const cached = fallbackCache.get(supplyId);
       if (cached) return cached;
@@ -518,6 +221,11 @@ export async function deductSaleFromInventory(
           );
         }
         const storageId = await storageResolver(product.supply_id);
+        if (!storageId) {
+          throw new BadRequestError(
+            `No storage resolved for supply ${product.supply_id}`,
+          );
+        }
         addDraw(agg, product.supply_id, storageId, lineQty);
 
         // PRODUCT lines don't honor modifiers for inventory deduction (they're
@@ -550,21 +258,24 @@ export async function deductSaleFromInventory(
 
       const consumedGroupIds = new Set<string>();
 
-      await accumulateRecipe(
-        tx,
+      const { aggregate: lineAgg, errors: walkErrors } = await walkRecipeRequirements(
         recipe.items,
         lineQty,
-        storageResolver,
-        agg,
-        new Set(),
         {
-          productId: line.product_id,
-          lineQty,
-          selectedByGroupId,
-          overrides,
-          consumedGroupIds,
+          client: tx,
+          storageResolver,
+          visited: new Set(),
+          slotContext: {
+            productId: line.product_id,
+            lineQty,
+            selectedByGroupId,
+            overrides,
+            consumedGroupIds,
+          },
         },
       );
+      throwOnWalkErrors(walkErrors);
+      mergeAggregate(agg, lineAgg);
 
       // Every SWAP modifier picked by the customer must correspond to a
       // recipe slot (a RecipeItem with matching modifier_group_id). Otherwise
@@ -603,6 +314,11 @@ export async function deductSaleFromInventory(
           supply,
         );
         const storageId = await storageResolver(modifier.supply_id);
+        if (!storageId) {
+          throw new BadRequestError(
+            `No storage resolved for supply ${modifier.supply_id}`,
+          );
+        }
         addDraw(agg, modifier.supply_id, storageId, base);
       }
     }

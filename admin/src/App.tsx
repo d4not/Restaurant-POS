@@ -19,6 +19,7 @@ import { PurchaseOrderDetail } from './pages/inventory/PurchaseOrderDetail';
 import { ProductsPage } from './pages/menu/ProductsPage';
 import { ProductDetail } from './pages/menu/ProductDetail';
 import { CategoriesPage } from './pages/menu/CategoriesPage';
+import { EmployeeProductsPage } from './pages/menu/EmployeeProductsPage';
 import { OrdersPage } from './pages/orders/OrdersPage';
 import { CashRegistersPage } from './pages/staff/CashRegistersPage';
 import { ShiftDetail } from './pages/staff/ShiftDetail';
@@ -115,6 +116,7 @@ export default function App() {
               <Route path="modifier-groups"    element={<ModifierGroupsPage />} />
               <Route path="modifier-groups/:id" element={<ModifierGroupDetail />} />
               <Route path="categories"         element={<CategoriesPage />} />
+              <Route path="employee-products"  element={<EmployeeProductsPage />} />
             </Route>
 
             {/* Orders */}

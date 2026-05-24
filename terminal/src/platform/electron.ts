@@ -77,4 +77,9 @@ export const electronBridge: PlatformBridge = {
       };
     },
   },
+  app: {
+    async openAdmin(token, userId) {
+      await ensureBridge().app.openAdmin({ token, userId });
+    },
+  },
 };

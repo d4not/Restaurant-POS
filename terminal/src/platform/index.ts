@@ -42,6 +42,18 @@ export function getBridge(): PlatformBridge {
     storage: electronBridge.storage,
     haptics: electronBridge.haptics,
     network: electronBridge.network,
+    app: {
+      async openAdmin(token, userId) {
+        // No native shell here — pop the admin into a new tab against whatever
+        // host this build is running under. The admin's Login page picks up
+        // the token/uid query params and signs the operator in automatically.
+        const base = typeof window !== 'undefined' ? window.location.origin : '';
+        const url = `${base}/admin/login?token=${encodeURIComponent(token)}&uid=${encodeURIComponent(userId)}`;
+        if (typeof window !== 'undefined') {
+          window.open(url, '_blank', 'noopener');
+        }
+      },
+    },
   };
 }
 

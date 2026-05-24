@@ -206,8 +206,10 @@ export async function buildReceipt(orderId: string): Promise<ReceiptInput> {
     method: p.method as 'CASH' | 'CARD' | 'TRANSFER',
     amount_centavos: Number(p.amount),
     change_centavos: Number(p.change_amount),
+    tip_centavos: Number(p.tip_amount),
     reference: p.reference,
   }));
+  const tipTotal = payments.reduce((sum, p) => sum + p.tip_centavos, 0);
 
   return {
     business_name: config.businessName,
@@ -222,6 +224,7 @@ export async function buildReceipt(orderId: string): Promise<ReceiptInput> {
     tax_centavos: Number(order.tax_amount),
     discount_centavos: Number(order.discount_amount),
     total_centavos: Number(order.total),
+    tip_centavos: tipTotal,
     payments,
     width: paperWidthChars(config.paperWidthMm),
   };

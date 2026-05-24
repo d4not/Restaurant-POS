@@ -6,6 +6,9 @@ import type {
   ProductVariant,
 } from '../api/products';
 import { formatMoney } from '../utils/format';
+import { useTranslation, t as tStatic } from '../i18n';
+import type { ModifierAvailability } from '../api/stock';
+import { StockBadge } from './StockBadge';
 
 // Modal launched when the cashier taps a product card. Walks two optional
 // steps:
@@ -37,6 +40,10 @@ interface Props {
     notes: string | null;
   };
   mode?: 'add' | 'edit';
+  // Optional availability map keyed by modifier_id. When provided, OUT options
+  // render disabled (pointer-events: none, strikethrough) and LOW options get
+  // a small `!` badge. Omitted → all options behave as available.
+  modifierAvailability?: Map<string, ModifierAvailability>;
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -235,11 +242,17 @@ const checkmarkStyle = (active: boolean): React.CSSProperties => ({
 function describeGroup(group: ModifierGroup): string {
   const min = group.min_selection;
   const max = group.max_selection;
-  if (group.type === 'SWAP') return 'Pick one';
-  if (max === 1) return min > 0 ? 'Required · pick 1' : 'Optional · pick 1';
-  if (min === 0) return `Optional · up to ${max}`;
-  if (min === max) return `Pick ${min}`;
-  return `Pick ${min}–${max}`;
+  if (group.type === 'SWAP') return tStatic('picker.groupPickOne');
+  if (max === 1) {
+    return min > 0
+      ? tStatic('picker.groupRequiredPick1')
+      : tStatic('picker.groupOptionalPick1');
+  }
+  if (min === 0) return tStatic('picker.groupOptionalUpTo').replace('{n}', String(max));
+  if (min === max) return tStatic('picker.groupPickN').replace('{n}', String(min));
+  return tStatic('picker.groupPickRange')
+    .replace('{min}', String(min))
+    .replace('{max}', String(max));
 }
 
 // Determine the group's initial selection. SWAP groups always start with the
@@ -262,7 +275,9 @@ export function ProductPicker({
   busy,
   initial,
   mode = 'add',
+  modifierAvailability,
 }: Props) {
+  const { t } = useTranslation();
   const variants = useMemo(
     () => product.variants.filter((v) => v.active),
     [product.variants],
@@ -389,10 +404,10 @@ export function ProductPicker({
           <div>
             <h2 style={styles.title}>{product.name}</h2>
             <div style={styles.sub}>
-              {variants.length > 0 ? 'Pick a size and any modifiers.' : 'Confirm modifiers to add to the order.'}
+              {variants.length > 0 ? t('picker.pickSize') : t('picker.confirmMods')}
             </div>
           </div>
-          <button type="button" style={styles.closeBtn} onClick={onClose} aria-label="Close">
+          <button type="button" style={styles.closeBtn} onClick={onClose} aria-label={t('common.close')}>
             ×
           </button>
         </div>
@@ -401,8 +416,8 @@ export function ProductPicker({
           {variants.length > 0 && (
             <>
               <div style={styles.groupHeader}>
-                <span style={styles.groupName}>Size</span>
-                <span style={styles.groupHint}>Required</span>
+                <span style={styles.groupName}>{t('picker.size')}</span>
+                <span style={styles.groupHint}>{t('common.required')}</span>
               </div>
               <div style={styles.variantBig}>
                 {variants.map((v: ProductVariant) => {
@@ -451,32 +466,69 @@ export function ProductPicker({
                     .map((m: Modifier) => {
                       const active = current.includes(m.id);
                       const extra = Number(m.extra_price);
+                      const availability = modifierAvailability?.get(m.id);
+                      const status = availability?.status ?? 'available';
+                      const isOut = status === 'out' || status === 'unknown';
+                      const isLow = status === 'low';
+                      const baseStyle = modBtnStyle(active);
                       return (
                         <button
                           key={m.id}
                           type="button"
-                          style={modBtnStyle(active)}
-                          onClick={() => toggleModifier(g, m.id)}
+                          disabled={isOut}
+                          aria-disabled={isOut}
+                          style={{
+                            ...baseStyle,
+                            opacity: isOut ? 0.5 : 1,
+                            cursor: isOut ? 'not-allowed' : 'pointer',
+                            textDecoration: isOut ? 'line-through' : 'none',
+                          }}
+                          onClick={() => {
+                            if (isOut) return;
+                            toggleModifier(g, m.id);
+                          }}
                         >
                           <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <span style={checkmarkStyle(active)}>
                               {active ? (single ? '●' : '✓') : ''}
                             </span>
                             <span>{m.name}</span>
+                            {(isLow || isOut) && <StockBadge status={status} size="sm" />}
                           </span>
-                          {extra > 0 && (
-                            <span
-                              style={{
-                                fontFamily: "'Playfair Display', serif",
-                                fontVariantNumeric: 'tabular-nums',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                color: 'var(--text2)',
-                              }}
-                            >
-                              +{formatMoney(m.extra_price)}
-                            </span>
-                          )}
+                          <span
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                            }}
+                          >
+                            {isOut && (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: 'var(--red)',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.08em',
+                                }}
+                              >
+                                {tStatic('stock.outShort')}
+                              </span>
+                            )}
+                            {extra > 0 && (
+                              <span
+                                style={{
+                                  fontFamily: "'Playfair Display', serif",
+                                  fontVariantNumeric: 'tabular-nums',
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  color: 'var(--text2)',
+                                }}
+                              >
+                                +{formatMoney(m.extra_price)}
+                              </span>
+                            )}
+                          </span>
                         </button>
                       );
                     })}
@@ -486,12 +538,12 @@ export function ProductPicker({
           })}
 
           <div style={styles.groupHeader}>
-            <span style={styles.groupName}>Note</span>
-            <span style={styles.groupHint}>Optional</span>
+            <span style={styles.groupName}>{t('picker.note')}</span>
+            <span style={styles.groupHint}>{t('common.optional')}</span>
           </div>
           <textarea
             style={styles.noteInput}
-            placeholder="e.g., extra hot, no foam, allergy info…"
+            placeholder={t('picker.notePlaceholder')}
             value={notes}
             maxLength={240}
             onChange={(e) => setNotes(e.target.value)}
@@ -502,7 +554,7 @@ export function ProductPicker({
 
         <div style={styles.foot}>
           <button type="button" style={styles.cancelBtn} onClick={onClose} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -511,8 +563,8 @@ export function ProductPicker({
             disabled={!submitEnabled}
           >
             {busy
-              ? mode === 'edit' ? 'Saving…' : 'Adding…'
-              : mode === 'edit' ? 'Save changes' : 'Add to ticket'}
+              ? mode === 'edit' ? t('picker.saving') : t('picker.adding')
+              : mode === 'edit' ? t('picker.saveChanges') : t('picker.addToTicket')}
           </button>
         </div>
       </div>

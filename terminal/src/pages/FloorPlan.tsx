@@ -23,6 +23,7 @@ import { createSuggestion } from '../api/suggestions';
 import { ApiError } from '../api/client';
 import { TableNode } from '../components/TableNode';
 import { TakeoutZoneView } from '../components/TakeoutZoneView';
+import { EmployeeZoneView } from '../components/EmployeeZoneView';
 import { Spinner } from '../components/Spinner';
 import { confirmDialog } from '../components/ConfirmDialog';
 import {
@@ -30,6 +31,10 @@ import {
   FloorCanvas,
   type CanvasHandle,
 } from '../components/floor-plan/Canvas';
+
+// Virtual tab id used for the EMPLOYEE zone — no Zone row in the DB backs it,
+// the tab is synthesised inline in `zoneTabs` and routed to EmployeeZoneView.
+const EMPLOYEE_ZONE_ID = '__employee__';
 import { ZoneContainer } from '../components/floor-plan/ZoneContainer';
 import { BarCounter } from '../components/floor-plan/BarCounter';
 import { DecorPlant } from '../components/floor-plan/DecorPlant';
@@ -428,9 +433,16 @@ export function FloorPlan() {
     return zones.find((z) => z.id === zoneId) ?? null;
   }, [zones, zoneId]);
   const isTakeoutZoneSelected = selectedZone?.kind === 'TAKEOUT';
+  // EMPLOYEE is a virtual tab — no Zone row in the DB; it lives in the floor
+  // plan as an extra tab next to TAKEOUT and is identified by this sentinel.
+  const isEmployeeZoneSelected = zoneId === EMPLOYEE_ZONE_ID;
 
   const takeoutOrders = useMemo(
     () => (activeOrders ?? []).filter((o: ActiveOrder) => o.order_type === 'TAKEOUT'),
+    [activeOrders],
+  );
+  const employeeOrders = useMemo(
+    () => (activeOrders ?? []).filter((o: ActiveOrder) => o.order_type === 'EMPLOYEE'),
     [activeOrders],
   );
 
@@ -463,8 +475,15 @@ export function FloorPlan() {
         kind: takeoutZone.kind,
       });
     }
+    // Virtual Empleados tab — always shown; no DB zone backs it.
+    tabs.push({
+      id: EMPLOYEE_ZONE_ID,
+      name: t('employeeOrder.zoneName'),
+      count: employeeOrders.length,
+      kind: 'TAKEOUT' as const,
+    });
     return tabs;
-  }, [zones, takeoutOrders]);
+  }, [zones, takeoutOrders, employeeOrders, t]);
 
   // Effective zone size — the visible footprint of each zone. We grow the
   // stored width/height to encompass any tables/decor that extend past it
@@ -1172,7 +1191,7 @@ export function FloorPlan() {
           })}
         </div>
         <div style={styles.zoneActions}>
-          {(canEditTableLayout || canEditZoneDecor) && !isTakeoutZoneSelected && editing && (
+          {(canEditTableLayout || canEditZoneDecor) && !isTakeoutZoneSelected && !isEmployeeZoneSelected && editing && (
             <button
               ref={addBtnRef}
               type="button"
@@ -1189,7 +1208,7 @@ export function FloorPlan() {
               + Add
             </button>
           )}
-          {canEditTableLayout && !isTakeoutZoneSelected && (
+          {canEditTableLayout && !isTakeoutZoneSelected && !isEmployeeZoneSelected && (
             <button
               type="button"
               style={editToggleStyle(editing)}
@@ -1208,6 +1227,13 @@ export function FloorPlan() {
         <TakeoutZoneView
           zoneName={selectedZone.name}
           takeoutOrders={takeoutOrders}
+          register={registerQuery.data ?? null}
+          onRefetchRegister={() => registerQuery.refetch()}
+        />
+      ) : isEmployeeZoneSelected ? (
+        <EmployeeZoneView
+          zoneName={t('employeeOrder.zoneName')}
+          employeeOrders={employeeOrders}
           register={registerQuery.data ?? null}
           onRefetchRegister={() => registerQuery.refetch()}
         />

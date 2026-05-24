@@ -25,11 +25,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
     whiteSpace: 'nowrap',
   },
-  pillProvisional: {
-    background: 'rgba(201,164,92,0.18)',
-    border: '1px solid rgba(201,164,92,0.45)',
-    color: '#f0d9a4',
-  },
   pillDot: {
     width: 8,
     height: 8,
@@ -40,9 +35,9 @@ const styles: Record<string, React.CSSProperties> = {
 
 // ─── Top-bar pill ──────────────────────────────────────────────────────────
 // Renders the cashier's entry point to the Operations Hub. The pill keeps a
-// status dot showing shift open/closed at a glance — green = normal open,
-// gold = provisional open (cashier needs to reconcile), red = closed,
-// gray = checking — but the click target now opens the multi-feature hub.
+// status dot showing shift open/closed at a glance — green = open,
+// red = closed, gray = checking — but the click target opens the
+// multi-feature hub.
 
 export function OperationsPill({ onClick }: ShiftPillProps) {
   const { t } = useTranslation();
@@ -61,28 +56,25 @@ export function OperationsPill({ onClick }: ShiftPillProps) {
   if (!userId) return null;
 
   const isOpen = Boolean(data);
-  const isProvisional = data?.kind === 'PROVISIONAL';
   const dotColor = isLoading
     ? 'var(--text3)'
-    : isProvisional
-      ? 'var(--gold)'
-      : isOpen
-        ? 'var(--green)'
-        : 'var(--red)';
+    : isOpen
+      ? 'var(--green)'
+      : 'var(--red)';
+
+  const pillLabel = t('topbar.operations');
 
   return (
     <button
       type="button"
-      style={{
-        ...styles.pill,
-        ...(isProvisional ? styles.pillProvisional : null),
-      }}
+      className="topbar-ops-pill"
+      style={styles.pill}
       onClick={onClick}
+      title={pillLabel}
+      aria-label={pillLabel}
     >
       <span style={{ ...styles.pillDot, background: dotColor }} />
-      <span>
-        {isProvisional ? t('register.provisionalBadge') : t('topbar.operations')}
-      </span>
+      <span className="topbar-ops-label">{pillLabel}</span>
     </button>
   );
 }

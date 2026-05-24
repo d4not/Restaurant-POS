@@ -7,3 +7,4 @@ export { EmptyState } from './EmptyState';
 export { Modal } from './Modal';
 export { Table } from './Table';
 export type { TableColumn, SortState, SortDir } from './Table';
+export { CSVExportButton } from './CSVExportButton';

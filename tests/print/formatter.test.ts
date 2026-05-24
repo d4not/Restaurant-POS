@@ -72,8 +72,15 @@ function receiptInput(overrides: Partial<ReceiptInput> = {}): ReceiptInput {
     tax_centavos: 4069,
     discount_centavos: 0,
     total_centavos: 29500,
+    tip_centavos: 0,
     payments: [
-      { method: 'CASH', amount_centavos: 30000, change_centavos: 500, reference: null },
+      {
+        method: 'CASH',
+        amount_centavos: 30000,
+        change_centavos: 500,
+        tip_centavos: 0,
+        reference: null,
+      },
     ],
     width: 32,
     ...overrides,
@@ -238,7 +245,7 @@ describe('formatReceipt', () => {
     const lines = formatReceipt(
       receiptInput({
         payments: [
-          { method: 'CARD', amount_centavos: 29500, change_centavos: 0, reference: 'TXN-9001' },
+          { method: 'CARD', amount_centavos: 29500, change_centavos: 0, tip_centavos: 0, reference: 'TXN-9001' },
         ],
       }),
     );
@@ -261,5 +268,35 @@ describe('formatReceipt', () => {
     const latteLine = lines.find((l) => l.includes('Latte Grande'))!;
     expect(latteLine.length).toBe(48);
     expect(latteLine.endsWith('$150.00')).toBe(true);
+  });
+
+  it('prints a Tip line and per-payment "incl. tip" sub-line when tip > 0', () => {
+    const lines = formatReceipt(
+      receiptInput({
+        tip_centavos: 2000,
+        payments: [
+          {
+            method: 'CASH',
+            amount_centavos: 31500,
+            change_centavos: 0,
+            tip_centavos: 2000,
+            reference: null,
+          },
+        ],
+      }),
+    );
+    // Summary block: Tip lands below Total when present.
+    const totalIdx = lines.findIndex((l) => l.startsWith('Total:'));
+    const tipIdx = lines.findIndex((l) => l.startsWith('Tip:'));
+    expect(tipIdx).toBeGreaterThan(totalIdx);
+    expect(lines[tipIdx]).toMatch(/\$20\.00$/);
+    // Per-payment sub-line shows the tip portion of the tender.
+    expect(lines.some((l) => l.trim() === 'incl. tip $20.00')).toBe(true);
+  });
+
+  it('omits the Tip line when tip_centavos is 0', () => {
+    const lines = formatReceipt(receiptInput());
+    expect(lines.some((l) => l.startsWith('Tip:'))).toBe(false);
+    expect(lines.some((l) => l.trim().startsWith('incl. tip'))).toBe(false);
   });
 });

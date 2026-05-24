@@ -15,7 +15,10 @@ import {
 // can submit suggestions for the audit trail too). Approve/reject is admin-
 // only — the whole point is one-person sign-off.
 const SUGGEST_WRITERS = requireRole('CASHIER', 'MANAGER', 'ADMIN');
-const SUGGEST_REVIEWERS = requireRole('ADMIN');
+// Managers and admins can both review now — the same audience that approves
+// order-scoped suggestions from Admin Mode. The service layer still requires
+// a fresh PIN as a second factor.
+const SUGGEST_REVIEWERS = requireRole('MANAGER', 'ADMIN');
 
 export const suggestionRouter = Router();
 

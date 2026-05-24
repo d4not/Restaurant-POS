@@ -117,9 +117,12 @@ export async function verifyPin(
   callerId: string,
   input: VerifyPinInput,
 ): Promise<{ ok: true; approver: AuthUser }> {
-  if (input.mode === 'cashier') {
+  if (input.mode === 'cashier' || input.mode === 'manager') {
+    const roles = input.mode === 'manager'
+      ? (['MANAGER', 'ADMIN'] as const)
+      : (['CASHIER', 'MANAGER', 'ADMIN'] as const);
     const matches = await prisma.user.findMany({
-      where: { pin: input.pin, active: true, role: { in: ['CASHIER', 'MANAGER', 'ADMIN'] } },
+      where: { pin: input.pin, active: true, role: { in: roles as unknown as UserRole[] } },
       take: 2,
     });
     if (matches.length === 0) {

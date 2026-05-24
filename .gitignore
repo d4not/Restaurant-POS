@@ -23,5 +23,20 @@ uploads/
 .DS_Store
 Thumbs.db
 
-# Claude Code internal worktrees — local-only, never commit.
-.claude/
+# Claude Code — ignore worktrees & local config, but track shared agent/command configs
+.claude/*
+!.claude/agents/
+!.claude/commands/
+
+# Claude Code local config (explicit, even though .claude/* already covers it)
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Per-session task queue (lessons.md IS tracked)
+tasks/todo.md
+
+# Personal / production seed data — not part of the public repo.
+prisma/seed-local*.ts
+
+# Local skill outputs (impeccable design critiques, etc.)
+.impeccable/

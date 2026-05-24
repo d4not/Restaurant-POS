@@ -48,6 +48,9 @@ export interface ReceiptPayment {
   method: 'CASH' | 'CARD' | 'TRANSFER';
   amount_centavos: number;
   change_centavos: number;
+  // Tip portion of `amount` — surfaced as a sub-line under each payment so
+  // the customer sees what they actually contributed to the tip jar.
+  tip_centavos: number;
   reference: string | null;
 }
 
@@ -64,6 +67,10 @@ export interface ReceiptInput {
   tax_centavos: number;
   discount_centavos: number;
   total_centavos: number;
+  // Total tip across all payments on this order. Rendered as a single Tip
+  // line in the summary block when > 0 — separate from the Total so the
+  // customer can see "$80 sale + $20 tip = $100 paid".
+  tip_centavos: number;
   payments: ReceiptPayment[];
   width: number;
 }
@@ -239,12 +246,18 @@ export function formatReceipt(input: ReceiptInput): string[] {
     lines.push(leftRight('Discount:', `-${formatMoney(input.discount_centavos)}`, W));
   }
   lines.push(leftRight('Total:', formatMoney(input.total_centavos), W));
+  if (input.tip_centavos > 0) {
+    lines.push(leftRight('Tip:', formatMoney(input.tip_centavos), W));
+  }
 
   if (input.payments.length > 0) {
     lines.push(dash);
     for (const p of input.payments) {
       const label = p.method.charAt(0) + p.method.slice(1).toLowerCase() + ':';
       lines.push(leftRight(label, formatMoney(p.amount_centavos), W));
+      if (p.tip_centavos > 0) {
+        lines.push(`   incl. tip ${formatMoney(p.tip_centavos)}`);
+      }
       if (p.method === 'CASH' && p.change_centavos > 0) {
         lines.push(leftRight('Change:', formatMoney(p.change_centavos), W));
       }

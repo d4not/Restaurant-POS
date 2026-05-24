@@ -317,6 +317,8 @@ const navBtnStyle = (active: boolean): React.CSSProperties => ({
 
 // Roles allowed into the Order History screen — waiters never see the tab.
 const HISTORY_ROLES: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
+// Admin Mode is manager+ only — cashiers stay on the Operations Hub.
+const ADMIN_MODE_ROLES: ReadonlySet<string> = new Set(['MANAGER', 'ADMIN']);
 
 export function TopBar() {
   const { t } = useTranslation();
@@ -327,6 +329,7 @@ export function TopBar() {
   const toggleMenu = useUi((s) => s.toggleMenu);
   const closeMenu = useUi((s) => s.closeMenu);
   const openSettings = useUi((s) => s.openSettings);
+  const openAdmin = useUi((s) => s.openAdmin);
   const openOrderDetail = useUi((s) => s.openOrderDetail);
   const closeOrderDetail = useUi((s) => s.closeOrderDetail);
   const detailOrderId = useUi((s) => s.detailOrderId);
@@ -341,6 +344,7 @@ export function TopBar() {
 
   const role = user?.role ?? 'WAITER';
   const canSeeHistory = HISTORY_ROLES.has(role);
+  const canEnterAdminMode = ADMIN_MODE_ROLES.has(role);
 
   const now = useClock(15_000);
   const queryClient = useQueryClient();
@@ -486,13 +490,14 @@ export function TopBar() {
         <div style={styles.left}>
           <div className="topbar-brand-wrap" style={styles.brandWrap}>
             <div style={styles.brand}>R</div>
-            <div style={styles.brandText}>
+            <div className="topbar-brand-text" style={styles.brandText}>
               <span style={styles.brandName}>Restaurant POS</span>
               <span className="topbar-brand-sub" style={styles.brandSub}>Terminal</span>
             </div>
           </div>
           <button
             type="button"
+            className="topbar-new-order-btn"
             style={{
               ...styles.newOrderBtn,
               ...(takeoutMutation.isPending ? styles.newOrderBtnDisabled : null),
@@ -520,7 +525,7 @@ export function TopBar() {
           {detailSub && <span style={styles.detailSub}>{detailSub}</span>}
         </div>
       ) : (
-        <nav style={styles.navList}>
+        <nav className="topbar-nav" style={styles.navList}>
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const active = view === tab.view;
@@ -528,11 +533,14 @@ export function TopBar() {
               <button
                 key={tab.view}
                 type="button"
+                className="topbar-tab"
                 style={navBtnStyle(active)}
                 onClick={() => handleTabClick(tab)}
+                title={t(tab.labelKey)}
+                aria-label={t(tab.labelKey)}
               >
                 <Icon style={{ fontSize: 18 }} />
-                <span>{t(tab.labelKey)}</span>
+                <span className="topbar-tab-label">{t(tab.labelKey)}</span>
               </button>
             );
           })}
@@ -541,7 +549,7 @@ export function TopBar() {
 
       <div className="topbar-right" style={styles.right}>
         <OperationsPill onClick={() => setHubOpen(true)} />
-        <div style={styles.clockGroup}>
+        <div className="topbar-clock" style={styles.clockGroup}>
           <span style={styles.clockTime}>{formatTime(now)}</span>
           <span className="topbar-clock-date" style={styles.clockDate}>{formatDate(now)}</span>
         </div>
@@ -551,8 +559,8 @@ export function TopBar() {
             {user ? getInitials(user.name) : '·'}
           </div>
           <div className="topbar-user-text" style={styles.userText}>
-            <span style={styles.userName}>{user?.name ?? t('nav.signOut')}</span>
-            <span style={styles.userMeta}>{user?.role ?? '—'}</span>
+            <span className="topbar-user-name" style={styles.userName}>{user?.name ?? t('nav.signOut')}</span>
+            <span className="topbar-user-meta" style={styles.userMeta}>{user?.role ?? '—'}</span>
           </div>
         </div>
 
@@ -597,6 +605,19 @@ export function TopBar() {
           <div style={styles.scrim} onClick={closeMenu} />
           <div ref={drawerRef} style={styles.drawer} role="menu">
             <div style={styles.drawerSection}>{t('login.signedInAs')}</div>
+            {canEnterAdminMode && (
+              <button
+                type="button"
+                style={styles.drawerItem}
+                onClick={() => {
+                  closeMenu();
+                  openAdmin();
+                }}
+              >
+                <IconGrid />
+                <span>{t('admin.openFromMenu')}</span>
+              </button>
+            )}
             <button type="button" style={styles.drawerItem} onClick={openSettings}>
               <IconSettings />
               <span>{t('nav.settings')}</span>

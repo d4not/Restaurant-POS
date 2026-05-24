@@ -5,6 +5,8 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/async-handler.js';
 import { uuidParamSchema } from '../../lib/schemas.js';
 import * as controller from './controller.js';
+import * as suggestionController from '../order-suggestions/controller.js';
+import { createOrderSuggestionValidator } from '../order-suggestions/routes.js';
 import {
   addOrderItemSchema,
   cancelOrderSchema,
@@ -12,15 +14,23 @@ import {
   createPaymentSchema,
   listOrderQuerySchema,
   removeOrderItemSchema,
+  reopenOrderSchema,
   requestAttentionSchema,
   restoreOrderItemSchema,
+  softDeleteOrderSchema,
   updateOrderItemSchema,
   updateOrderSchema,
+  updatePaymentMethodSchema,
 } from './schema.js';
 
 const itemParamSchema = z.object({
   id: z.string().uuid(),
   itemId: z.string().uuid(),
+});
+
+const paymentParamSchema = z.object({
+  id: z.string().uuid(),
+  paymentId: z.string().uuid(),
 });
 
 // Roles that CAN build / modify a ticket (but not necessarily cash it out).
@@ -31,6 +41,12 @@ const ORDER_WRITERS = requireRole('WAITER', 'BARISTA', 'CASHIER', 'MANAGER', 'AD
 // Cashier-grade actions: delete items, cancel, payment, clear-attention,
 // discount. Manager + Admin share this ring.
 const CASHIER_ACTIONS = requireRole('CASHIER', 'MANAGER', 'ADMIN');
+
+// Post-close history actions: reopen a paid ticket, soft-delete from history,
+// change a recorded payment method. Cashiers cannot do these — only Managers
+// and Admins. The service layer ALSO demands a manager PIN so the route gate
+// is paired with a re-auth.
+const MANAGER_ACTIONS = requireRole('MANAGER', 'ADMIN');
 
 export const orderRouter = Router();
 
@@ -142,4 +158,42 @@ orderRouter.get(
   '/:id/ingredients',
   validate(uuidParamSchema, 'params'),
   asyncHandler(controller.ingredients),
+);
+
+// Manager-only history edits. Each carries a MANAGER PIN that the service
+// layer validates via authorizeManagerPin — the route gate keeps cashiers off
+// the endpoint entirely so curl probing also returns 403.
+orderRouter.post(
+  '/:id/reopen',
+  MANAGER_ACTIONS,
+  validate(uuidParamSchema, 'params'),
+  validate(reopenOrderSchema),
+  asyncHandler(controller.reopen),
+);
+orderRouter.post(
+  '/:id/soft-delete',
+  MANAGER_ACTIONS,
+  validate(uuidParamSchema, 'params'),
+  validate(softDeleteOrderSchema),
+  asyncHandler(controller.softDelete),
+);
+orderRouter.patch(
+  '/:id/payments/:paymentId/method',
+  MANAGER_ACTIONS,
+  validate(paymentParamSchema, 'params'),
+  validate(updatePaymentMethodSchema),
+  asyncHandler(controller.updatePaymentMethod),
+);
+
+// Cashier-side suggestion creation. Sits on /orders/:id/suggestions so the
+// cashier can propose a reopen / delete / change-method without ever touching
+// the manager-gated endpoints above. The matching approve/reject pair lives
+// on /api/v1/order-suggestions/:id/* and is mounted in app.ts. Cashier+ only
+// — waiters/baristas don't see Order History, so they can't reach this.
+orderRouter.post(
+  '/:id/suggestions',
+  CASHIER_ACTIONS,
+  validate(uuidParamSchema, 'params'),
+  createOrderSuggestionValidator,
+  asyncHandler(suggestionController.create),
 );

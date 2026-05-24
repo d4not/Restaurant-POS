@@ -1,9 +1,18 @@
-import { AttendanceStatus, PayrollStatus, Prisma } from '@prisma/client';
+import {
+  AttendanceStatus,
+  OrderType,
+  PayrollAdjustmentType,
+  PayrollStatus,
+  PaymentMethod,
+  Prisma,
+} from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import { Decimal } from '../../lib/decimal.js';
+import { countActiveDays } from '../schedule/service.js';
 import type {
+  CreateAdjustmentInput,
   GeneratePayrollInput,
   ListPayrollQuery,
   UpdatePayrollInput,
@@ -61,37 +70,112 @@ function countAttendance(rows: Array<{ status: AttendanceStatus; is_paid: boolea
 }
 
 interface PayrollMath {
-  gross_pay: Decimal;
+  // Itemized breakdown (Phase 11):
+  absence_deductions: Decimal;
+  // Aggregate mirrors maintained for API back-compat:
   deductions: Decimal;
+  bonuses: Decimal;
+  gross_pay: Decimal;
   net_pay: Decimal;
 }
 
+interface ComputeArgs {
+  weeklySalary: Decimal;
+  daysExpected: number;
+  unpaidAbsences: number;
+  tabDeductions?: Decimal;
+  adjustmentBonuses?: Decimal;
+  adjustmentDeductions?: Decimal;
+  tipsAmount?: Decimal;
+}
+
 /**
- * Payroll formula from SPEC.md §8.4:
- *   daily_rate = weekly_salary / days_expected
- *   deductions = unpaid_absences * daily_rate
- *   net_pay    = weekly_salary - deductions + bonuses
+ * Itemized payroll formula (Phase 11):
+ *   daily_rate            = weekly_salary / days_expected
+ *   absence_deductions    = round(daily_rate * unpaid_absences)
+ *   net_pay               = weekly_salary
+ *                         - absence_deductions
+ *                         - tab_deductions
+ *                         - adjustment_deductions
+ *                         + adjustment_bonuses
+ *                         + tips_amount
  *
- * Decimal everywhere — centavos are integers in the DB but intermediate
- * daily_rate may have a fractional part, so we keep it in Decimal until the
- * last moment. Rounded on write to satisfy the Decimal(14, 0) column.
+ * Mirrors for back-compat:
+ *   deductions = absence_deductions + adjustment_deductions
+ *   bonuses    = adjustment_bonuses + tips_amount
+ *
+ * Old callers reading `deductions` and `bonuses` see the same numeric shape
+ * as before; the legacy formula (gross - deductions - tab + bonuses) yields
+ * the same net.
  */
-export function computePayroll(
-  weeklySalary: Decimal,
-  daysExpected: number,
-  unpaidAbsences: number,
-  bonuses: Decimal,
-): PayrollMath {
-  const dailyRate = weeklySalary.div(daysExpected);
-  const deductions = dailyRate.mul(unpaidAbsences).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  const gross = weeklySalary;
-  const net = gross.sub(deductions).add(bonuses);
-  return { gross_pay: gross, deductions, net_pay: net };
+export function computePayroll(args: ComputeArgs): PayrollMath {
+  const tabDeductions = args.tabDeductions ?? new Decimal(0);
+  const adjustmentBonuses = args.adjustmentBonuses ?? new Decimal(0);
+  const adjustmentDeductions = args.adjustmentDeductions ?? new Decimal(0);
+  const tipsAmount = args.tipsAmount ?? new Decimal(0);
+
+  const dailyRate = args.weeklySalary.div(args.daysExpected);
+  const absenceDeductions = dailyRate
+    .mul(args.unpaidAbsences)
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+
+  const deductionsMirror = absenceDeductions.add(adjustmentDeductions);
+  const bonusesMirror = adjustmentBonuses.add(tipsAmount);
+
+  const gross = args.weeklySalary;
+  const net = gross
+    .sub(absenceDeductions)
+    .sub(tabDeductions)
+    .sub(adjustmentDeductions)
+    .add(adjustmentBonuses)
+    .add(tipsAmount);
+
+  return {
+    absence_deductions: absenceDeductions,
+    deductions: deductionsMirror,
+    bonuses: bonusesMirror,
+    gross_pay: gross,
+    net_pay: net,
+  };
+}
+
+/**
+ * Sum PAYROLL_DEDUCT payments on this employee's EMPLOYEE orders settled
+ * during [start, end] (inclusive). Caller is responsible for the tx scope.
+ */
+async function sumTabDeductions(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  start: Date,
+  end: Date,
+): Promise<Decimal> {
+  const agg = await tx.payment.aggregate({
+    where: {
+      method: PaymentMethod.PAYROLL_DEDUCT,
+      created_at: { gte: start, lte: end },
+      order: {
+        order_type: OrderType.EMPLOYEE,
+        employee_user_id: userId,
+      },
+    },
+    _sum: { amount: true },
+  });
+  return new Decimal(agg._sum.amount ?? 0);
 }
 
 const payrollInclude = {
   user: { select: { id: true, name: true, email: true, position: true } },
   approver: { select: { id: true, name: true } },
+} satisfies Prisma.PayrollPeriodInclude;
+
+const payrollDetailInclude = {
+  ...payrollInclude,
+  adjustments: {
+    orderBy: { created_at: 'asc' as const },
+    include: {
+      creator: { select: { id: true, name: true } },
+    },
+  },
 } satisfies Prisma.PayrollPeriodInclude;
 
 export async function generatePayroll(input: GeneratePayrollInput) {
@@ -124,6 +208,13 @@ export async function generatePayroll(input: GeneratePayrollInput) {
         continue;
       }
 
+      // days_expected derivation: prefer the employee's schedule, fall back to
+      // the API-provided default (currently 6). The fallback lets us generate
+      // payroll for employees whose schedule hasn't been set up yet without
+      // crashing — Phase 6 will tighten this and require a schedule.
+      const scheduleDays = await countActiveDays(emp.id, tx);
+      const daysExpected = scheduleDays > 0 ? scheduleDays : input.days_expected;
+
       const rows = await tx.attendance.findMany({
         where: {
           user_id: emp.id,
@@ -133,22 +224,32 @@ export async function generatePayroll(input: GeneratePayrollInput) {
       });
       const counts = countAttendance(rows);
       const weeklySalary = new Decimal(emp.weekly_salary ?? 0);
-      const bonuses = new Decimal(0);
-      const math = computePayroll(weeklySalary, input.days_expected, counts.unpaid_absences, bonuses);
+      const tabDeductions = await sumTabDeductions(tx, emp.id, weekStart, weekEnd);
+      const math = computePayroll({
+        weeklySalary,
+        daysExpected,
+        unpaidAbsences: counts.unpaid_absences,
+        tabDeductions,
+      });
 
       const created = await tx.payrollPeriod.create({
         data: {
           user_id: emp.id,
           week_start: weekStart,
           week_end: weekEnd,
-          days_expected: input.days_expected,
+          days_expected: daysExpected,
           days_worked: counts.days_worked,
           days_absent: counts.days_absent,
           paid_absences: counts.paid_absences,
           unpaid_absences: counts.unpaid_absences,
           gross_pay: math.gross_pay,
           deductions: math.deductions,
-          bonuses,
+          tab_deductions: tabDeductions,
+          bonuses: math.bonuses,
+          absence_deductions: math.absence_deductions,
+          adjustment_bonuses: new Decimal(0),
+          adjustment_deductions: new Decimal(0),
+          tips_amount: new Decimal(0),
           net_pay: math.net_pay,
           status: PayrollStatus.DRAFT,
         },
@@ -187,7 +288,7 @@ export async function listPayroll(query: ListPayrollQuery) {
 export async function getPayroll(id: string) {
   const period = await prisma.payrollPeriod.findUnique({
     where: { id },
-    include: payrollInclude,
+    include: payrollDetailInclude,
   });
   if (!period) throw new NotFoundError('PayrollPeriod');
 
@@ -232,33 +333,13 @@ export async function updatePayroll(
     const existing = await tx.payrollPeriod.findUnique({ where: { id } });
     if (!existing) throw new NotFoundError('PayrollPeriod');
 
-    // Bonuses and notes can only be edited while the payroll is still DRAFT —
-    // once approved the numbers are frozen so the paid record is auditable.
-    const mutatingFinancials = input.bonuses !== undefined;
-    if (mutatingFinancials && existing.status !== PayrollStatus.DRAFT) {
-      throw new ConflictError('bonuses can only be updated while status is DRAFT');
-    }
-
-    const nextStatus = input.status ?? existing.status;
     if (input.status !== undefined && !nextStatusAllowed(existing.status, input.status)) {
       throw new ConflictError(
         `invalid status transition ${existing.status} → ${input.status}`,
       );
     }
 
-    const bonuses =
-      input.bonuses !== undefined ? new Decimal(input.bonuses) : new Decimal(existing.bonuses);
-    const math = computePayroll(
-      new Decimal(existing.gross_pay),
-      existing.days_expected,
-      existing.unpaid_absences,
-      bonuses,
-    );
-
-    const data: Prisma.PayrollPeriodUpdateInput = {
-      bonuses,
-      net_pay: math.net_pay,
-    };
+    const data: Prisma.PayrollPeriodUpdateInput = {};
     if (input.notes !== undefined) data.notes = input.notes;
     if (input.status !== undefined) {
       data.status = input.status;
@@ -268,8 +349,134 @@ export async function updatePayroll(
         data.approver = { connect: { id: approverId } };
       }
     }
-    void nextStatus;
 
-    return tx.payrollPeriod.update({ where: { id }, data, include: payrollInclude });
+    return tx.payrollPeriod.update({
+      where: { id },
+      data,
+      include: payrollDetailInclude,
+    });
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Adjustments (itemized bonuses / deductions)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recompute the period's `adjustment_bonuses`, `adjustment_deductions`,
+ * legacy `bonuses`/`deductions` mirrors, and `net_pay` from the current
+ * adjustments + persisted absence/tip totals. Called after any adjustment
+ * mutation and after a tip pool is closed/reopened.
+ *
+ * Returns the updated period for the caller's convenience.
+ */
+export async function recalcPayroll(
+  tx: Prisma.TransactionClient,
+  periodId: string,
+) {
+  const period = await tx.payrollPeriod.findUnique({
+    where: { id: periodId },
+    include: { adjustments: true },
+  });
+  if (!period) throw new NotFoundError('PayrollPeriod');
+
+  const adjustmentBonuses = period.adjustments
+    .filter((a) => a.type === PayrollAdjustmentType.BONUS)
+    .reduce((sum, a) => sum.add(new Decimal(a.amount)), new Decimal(0))
+    // The tips_amount column already captures TIPS-sourced bonuses; subtracting
+    // them here keeps `adjustment_bonuses` purely about manual edits, otherwise
+    // the tip portion would be double-counted in the mirror.
+    .sub(
+      period.adjustments
+        .filter(
+          (a) =>
+            a.type === PayrollAdjustmentType.BONUS && a.source_kind === 'TIPS',
+        )
+        .reduce((sum, a) => sum.add(new Decimal(a.amount)), new Decimal(0)),
+    );
+
+  const adjustmentDeductions = period.adjustments
+    .filter((a) => a.type === PayrollAdjustmentType.DEDUCTION)
+    .reduce((sum, a) => sum.add(new Decimal(a.amount)), new Decimal(0));
+
+  const math = computePayroll({
+    weeklySalary: new Decimal(period.gross_pay),
+    daysExpected: period.days_expected,
+    unpaidAbsences: period.unpaid_absences,
+    tabDeductions: new Decimal(period.tab_deductions),
+    adjustmentBonuses,
+    adjustmentDeductions,
+    tipsAmount: new Decimal(period.tips_amount),
+  });
+
+  return tx.payrollPeriod.update({
+    where: { id: periodId },
+    data: {
+      absence_deductions: math.absence_deductions,
+      adjustment_bonuses: adjustmentBonuses,
+      adjustment_deductions: adjustmentDeductions,
+      bonuses: math.bonuses,
+      deductions: math.deductions,
+      net_pay: math.net_pay,
+    },
+    include: payrollDetailInclude,
+  });
+}
+
+export async function addAdjustment(
+  periodId: string,
+  createdByUserId: string,
+  input: CreateAdjustmentInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const period = await tx.payrollPeriod.findUnique({
+      where: { id: periodId },
+      select: { id: true, status: true },
+    });
+    if (!period) throw new NotFoundError('PayrollPeriod');
+    if (period.status !== PayrollStatus.DRAFT) {
+      throw new ConflictError('Adjustments can only be added while payroll is DRAFT');
+    }
+    await tx.payrollAdjustment.create({
+      data: {
+        payroll_period_id: periodId,
+        type: input.type,
+        label: input.label,
+        amount: new Decimal(input.amount),
+        source_kind: 'MANUAL',
+        created_by_user_id: createdByUserId,
+      },
+    });
+    return recalcPayroll(tx, periodId);
+  });
+}
+
+export async function removeAdjustment(periodId: string, adjustmentId: string) {
+  return prisma.$transaction(async (tx) => {
+    const period = await tx.payrollPeriod.findUnique({
+      where: { id: periodId },
+      select: { id: true, status: true },
+    });
+    if (!period) throw new NotFoundError('PayrollPeriod');
+    if (period.status !== PayrollStatus.DRAFT) {
+      throw new ConflictError('Adjustments can only be removed while payroll is DRAFT');
+    }
+    const adj = await tx.payrollAdjustment.findUnique({
+      where: { id: adjustmentId },
+      select: { id: true, payroll_period_id: true, source_kind: true },
+    });
+    if (!adj || adj.payroll_period_id !== periodId) {
+      throw new NotFoundError('PayrollAdjustment');
+    }
+    // TIPS-sourced rows are pinned read-only — they reflect a closed pool's
+    // distribution. Undoing them requires reopening the pool so the audit
+    // trail stays consistent on both sides.
+    if (adj.source_kind === 'TIPS') {
+      throw new ConflictError(
+        'Tip-pool adjustments cannot be removed directly — reopen the tip pool instead',
+      );
+    }
+    await tx.payrollAdjustment.delete({ where: { id: adjustmentId } });
+    return recalcPayroll(tx, periodId);
   });
 }

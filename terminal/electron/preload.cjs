@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('electron', {
     getConfig: () => ipcRenderer.invoke('printer:get-config'),
     setConfig: (next) => ipcRenderer.invoke('printer:set-config', next),
     testPrint: (role) => ipcRenderer.invoke('printer:test-print', role),
+    listUsb: () => ipcRenderer.invoke('printer:list-usb'),
+  },
+  app: {
+    openAdmin: (payload) => ipcRenderer.invoke('app:open-admin', payload),
   },
   platform: process.platform,
   isElectron: true,

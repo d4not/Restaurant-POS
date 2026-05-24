@@ -5,10 +5,11 @@ import { ApiError } from '../api/client';
 import type { CashRegisterRow } from '../api/registers';
 import {
   ALL_TAKEOUT_CHANNELS,
-  TAKEOUT_CHANNEL_LABEL,
   channelEnabled,
   fetchSettings,
 } from '../api/settings';
+import { useTranslation } from '../i18n';
+import { useTakeoutChannelLabel } from './TakeoutChannelPicker';
 import { useUi } from '../store/ui';
 import { formatMoney } from '../utils/format';
 import { Spinner } from './Spinner';
@@ -211,6 +212,8 @@ export function TakeoutZoneView({
   onRefetchRegister,
 }: Props) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const channelLabel = useTakeoutChannelLabel();
   const openOrderDetail = useUi((s) => s.openOrderDetail);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [filter, setFilter] = useState<ChannelFilter>('ALL');
@@ -282,10 +285,10 @@ export function TakeoutZoneView({
           disabled={newMutation.isPending}
         >
           <IconPlus />
-          <span>{newMutation.isPending ? 'Opening…' : 'New Takeout/Delivery Order'}</span>
+          <span>{newMutation.isPending ? t('takeout.opening') : t('takeout.newTitle')}</span>
         </button>
         <span style={styles.hint}>
-          {zoneName} · {sortedAll.length} active {sortedAll.length === 1 ? 'order' : 'orders'}
+          {zoneName} · {(sortedAll.length === 1 ? t('takeout.zoneActiveOne') : t('takeout.zoneActiveMany')).replace('{n}', String(sortedAll.length))}
         </span>
         {newMutation.isPending && <Spinner size={16} />}
       </div>
@@ -297,7 +300,7 @@ export function TakeoutZoneView({
             style={channelChipStyle(filter === 'ALL')}
             onClick={() => setFilter('ALL')}
           >
-            All
+            {t('common.all')}
             <span style={{ opacity: 0.6, fontSize: 11 }}>{sortedAll.length}</span>
           </button>
           {visibleChannels.map((ch) => (
@@ -315,7 +318,7 @@ export function TakeoutZoneView({
                   background: CHANNEL_DOT[ch],
                 }}
               />
-              {TAKEOUT_CHANNEL_LABEL[ch]}
+              {channelLabel(ch)}
               <span style={{ opacity: 0.6, fontSize: 11 }}>
                 {channelCounts[ch] ?? 0}
               </span>
@@ -331,7 +334,7 @@ export function TakeoutZoneView({
           newMutation.error instanceof ApiError
             ? newMutation.error.message
             : newMutation.error
-              ? 'Could not start takeout order'
+              ? t('takeout.couldNotStart')
               : null
         }
         settings={settingsQuery.data}
@@ -340,24 +343,21 @@ export function TakeoutZoneView({
       />
 
       {!register && (
-        <div style={styles.errorBox}>
-          No open shift — open one from the shift pill on the top bar before
-          creating takeout orders.
-        </div>
+        <div style={styles.errorBox}>{t('takeout.noShift')}</div>
       )}
 
       {newMutation.error && (
         <div style={styles.errorBox}>
           {newMutation.error instanceof ApiError
             ? newMutation.error.message
-            : 'Could not start takeout order'}
+            : t('takeout.couldNotStart')}
         </div>
       )}
 
       {sorted.length === 0 ? (
         <div style={styles.empty}>
           <div style={styles.emptyIcon}>📦</div>
-          <div>No takeout orders yet. Tap the button above to start one.</div>
+          <div>{t('takeout.zoneEmpty')}</div>
         </div>
       ) : (
         <div style={styles.grid}>
@@ -376,8 +376,8 @@ export function TakeoutZoneView({
                     <div style={styles.cardOrder}>#{order.order_number}</div>
                     <div style={styles.cardSub}>
                       {order.takeout_channel
-                        ? TAKEOUT_CHANNEL_LABEL[order.takeout_channel]
-                        : 'Takeout'}
+                        ? channelLabel(order.takeout_channel)
+                        : t('takeout.label')}
                     </div>
                   </div>
                   <span style={timePillStyle(variant)}>
@@ -395,7 +395,7 @@ export function TakeoutZoneView({
                         background: CHANNEL_DOT[order.takeout_channel],
                       }}
                     />
-                    {TAKEOUT_CHANNEL_LABEL[order.takeout_channel]}
+                    {channelLabel(order.takeout_channel)}
                   </span>
                 )}
                 <div style={styles.meta}>

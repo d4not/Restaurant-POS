@@ -36,3 +36,8 @@ export async function printReport(req: Request, res: Response): Promise<void> {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 }
+
+export async function reopen(req: Request, res: Response): Promise<void> {
+  await service.reopenDailyReport(req.params.id as string);
+  res.status(204).end();
+}

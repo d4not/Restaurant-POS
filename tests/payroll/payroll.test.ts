@@ -193,14 +193,17 @@ describe('PATCH /api/v1/payroll/:id — status transitions', () => {
     payrollId = gen.body.data.items[0].id as string;
   });
 
-  it('allows DRAFT → APPROVED, stamps approver, and freezes bonuses', async () => {
-    // Update bonuses while still DRAFT.
+  it('allows DRAFT → APPROVED, stamps approver, and freezes adjustments', async () => {
+    // Phase 11: bonuses are itemized adjustments, not a flat PATCH field. The
+    // legacy `bonuses` mirror still appears in responses (sum of manual BONUS
+    // adjustments + tips_amount) so existing consumers see the same shape.
     const bonusRes = await request(app)
-      .patch(`/api/v1/payroll/${payrollId}`)
+      .post(`/api/v1/payroll/${payrollId}/adjustments`)
       .set(auth)
-      .send({ bonuses: 50000 });
-    expect(bonusRes.status).toBe(200);
+      .send({ type: 'BONUS', label: 'Performance', amount: 50000 });
+    expect(bonusRes.status).toBe(201);
     expect(bonusRes.body.data.bonuses).toBe('50000');
+    expect(bonusRes.body.data.adjustment_bonuses).toBe('50000');
     expect(bonusRes.body.data.net_pay).toBe('650000');
 
     const approveRes = await request(app)
@@ -211,11 +214,11 @@ describe('PATCH /api/v1/payroll/:id — status transitions', () => {
     expect(approveRes.body.data.status).toBe('APPROVED');
     expect(approveRes.body.data.approver.id).toBe(admin.id);
 
-    // Bonuses cannot be touched once approved.
+    // Adjustments cannot be added once approved.
     const lateBonus = await request(app)
-      .patch(`/api/v1/payroll/${payrollId}`)
+      .post(`/api/v1/payroll/${payrollId}/adjustments`)
       .set(auth)
-      .send({ bonuses: 99999 });
+      .send({ type: 'BONUS', label: 'Late tip', amount: 99999 });
     expect(lateBonus.status).toBe(409);
   });
 

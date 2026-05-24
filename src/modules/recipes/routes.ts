@@ -20,9 +20,23 @@ const itemParamSchema = z.object({
 const productIdParamSchema = z.object({ productId: z.string().uuid() });
 const variantIdParamSchema = z.object({ variantId: z.string().uuid() });
 
+const ingredientsQuerySchema = z.object({
+  product_id: z.string().uuid(),
+  variant_id: z.string().uuid().optional(),
+});
+
 export const recipeRouter = Router();
 
 recipeRouter.use(requireAuth);
+
+// Returns the resolved raw-supply ingredient list for a product/variant. Used
+// by the Log Waste flow to pre-fill a waste ticket. Must be declared before
+// the `/:id` routes so Express doesn't treat "ingredients" as a UUID.
+recipeRouter.get(
+  '/ingredients',
+  validate(ingredientsQuerySchema, 'query'),
+  asyncHandler(controller.ingredients),
+);
 
 // Create/read by owner (product or variant). The scoped endpoints encode the
 // "recipe belongs to exactly one owner" invariant in the URL.

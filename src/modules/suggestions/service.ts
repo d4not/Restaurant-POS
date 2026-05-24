@@ -1,6 +1,11 @@
 import { Prisma, SuggestionStatus, SuggestionType } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.js';
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from '../../lib/errors.js';
 import { buildCursorArgs, toPageResult } from '../../lib/pagination.js';
 import * as tableService from '../tables/service.js';
 import * as productService from '../products/service.js';
@@ -29,6 +34,38 @@ const suggestionInclude = {
 // runtime always carries the resolved object — this keeps the service body
 // from drowning in `as` casts.
 type SuggestionEnvelope = CreateSuggestionInput;
+
+// Order-scoped suggestion types — these belong to the cashier→manager flow
+// in Order History and are reviewed via `/api/v1/order-suggestions/:id/*`,
+// not through this generic queue. We hide them from the admin Suggestions
+// queue and reject any attempt to approve/reject one here.
+const ORDER_SUGGESTION_TYPES: SuggestionType[] = [
+  SuggestionType.ORDER_REOPEN,
+  SuggestionType.ORDER_DELETE,
+  SuggestionType.ORDER_CHANGE_PAYMENT,
+];
+
+/**
+ * Step-up manager / admin PIN check used by the approve / reject flow. The
+ * route gate already requires a MANAGER+ JWT; this adds a second factor so a
+ * left-open terminal can't be hijacked. Returns the validated user id so the
+ * caller can record the PIN-validated reviewer on the suggestion (which may
+ * differ from the JWT user if two managers share the terminal).
+ */
+async function authorizeReviewerPin(pin: string): Promise<string> {
+  const matches = await prisma.user.findMany({
+    where: { pin, active: true, role: { in: ['MANAGER', 'ADMIN'] } },
+    take: 2,
+    select: { id: true },
+  });
+  if (matches.length === 0) throw new ForbiddenError('Manager PIN required');
+  if (matches.length > 1) {
+    throw new ConflictError(
+      'PIN is shared by multiple active users — ask an admin to assign unique PINs',
+    );
+  }
+  return matches[0].id;
+}
 
 function targetIds(input: SuggestionEnvelope): {
   target_table_id: string | null;
@@ -85,7 +122,11 @@ export async function createSuggestion(
 export async function listSuggestions(query: ListSuggestionQuery) {
   const where: Prisma.SuggestionWhereInput = {
     ...(query.status ? { status: query.status } : {}),
-    ...(query.type ? { type: query.type } : {}),
+    // Order suggestions live in a parallel review flow on Order History — keep
+    // them out of the generic admin queue so the approve action here doesn't
+    // try to re-parse them as table/product payloads (which 422s). An explicit
+    // type filter wins; otherwise we exclude every order-scoped type.
+    type: query.type ?? { notIn: ORDER_SUGGESTION_TYPES },
   };
   const rows = await prisma.suggestion.findMany({
     where,
@@ -114,14 +155,22 @@ export async function getSuggestion(id: string) {
  */
 export async function approveSuggestion(
   id: string,
-  reviewerId: string,
+  _jwtReviewerId: string,
   input: ReviewSuggestionInput,
 ) {
+  // PIN-validated reviewer wins over the JWT user — keeps the audit trail
+  // accurate when two admins share a workstation.
+  const reviewerId = await authorizeReviewerPin(input.pin);
   const current = await prisma.suggestion.findUnique({
     where: { id },
     select: { id: true, status: true, type: true, payload: true },
   });
   if (!current) throw new NotFoundError('Suggestion');
+  if (ORDER_SUGGESTION_TYPES.includes(current.type)) {
+    throw new BadRequestError(
+      'Order-scoped suggestions are reviewed from Order History, not from this queue',
+    );
+  }
   if (current.status !== SuggestionStatus.PENDING) {
     throw new ConflictError(`Suggestion is already ${current.status.toLowerCase()}`);
   }
@@ -181,14 +230,20 @@ export async function approveSuggestion(
 
 export async function rejectSuggestion(
   id: string,
-  reviewerId: string,
+  _jwtReviewerId: string,
   input: ReviewSuggestionInput,
 ) {
+  const reviewerId = await authorizeReviewerPin(input.pin);
   const current = await prisma.suggestion.findUnique({
     where: { id },
-    select: { id: true, status: true },
+    select: { id: true, status: true, type: true },
   });
   if (!current) throw new NotFoundError('Suggestion');
+  if (ORDER_SUGGESTION_TYPES.includes(current.type)) {
+    throw new BadRequestError(
+      'Order-scoped suggestions are reviewed from Order History, not from this queue',
+    );
+  }
   if (current.status !== SuggestionStatus.PENDING) {
     throw new ConflictError(`Suggestion is already ${current.status.toLowerCase()}`);
   }

@@ -16,10 +16,12 @@
     "build:linux": "npm run build:renderer && electron-builder --linux",
     "build:win": "npm run build:renderer && electron-builder --win",
     "build:mac": "npm run build:renderer && electron-builder --mac",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.2",
+    "@thiagoelg/node-printer": "^0.6.2",
     "node-thermal-printer": "^4.6.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -56,12 +58,23 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/node-thermal-printer/**/*"
+      "**/node_modules/node-thermal-printer/**/*",
+      "**/node_modules/@thiagoelg/node-printer/**/*"
     ],
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb",      "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Office",
       "synopsis": "Restaurant POS terminal",
@@ -71,7 +84,12 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png"
     },
@@ -85,7 +103,13 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.business",
       "icon": "build/icon.png"

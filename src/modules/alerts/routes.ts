@@ -22,9 +22,9 @@ alertRouter.get(
   asyncHandler(controller.lowStock),
 );
 
-// Auto-generated audit alerts (cash shortage, voids, unverified provisional…).
-// Gated to MANAGER/ADMIN per REPORTS-SPEC §3.4 — only the people who can act
-// on them get to read them.
+// Auto-generated audit alerts (cash shortage, voids, etc.). Gated to
+// MANAGER/ADMIN per REPORTS-SPEC §3.4 — only the people who can act on them
+// get to read them.
 alertRouter.get(
   '/',
   requireRole('MANAGER', 'ADMIN'),

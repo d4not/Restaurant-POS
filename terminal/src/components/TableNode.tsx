@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { FloorTable } from '../api/floors';
 import { formatElapsed, formatMoney, minutesSince } from '../utils/format';
+import { useTranslation } from '../i18n';
 
 interface Props {
   table: FloorTable;
@@ -69,6 +70,7 @@ export function TableNode({
   onPointerDown,
   onClick,
 }: Props) {
+  const { t } = useTranslation();
   const left = table.pos_x + (offset?.dx ?? 0);
   const top = table.pos_y + (offset?.dy ?? 0);
   const width = Math.max(40, table.width + (offset?.dw ?? 0));
@@ -173,7 +175,7 @@ export function TableNode({
 
       {!order && !editing && !dense && (
         <div style={{ ...subStyle, color: 'var(--text3)', letterSpacing: '0.06em' }}>
-          {table.status === 'RESERVED' ? 'Reserved' : `seats ${table.capacity}`}
+          {table.status === 'RESERVED' ? t('floor.reserved') : t('floor.seatsCount').replace('{n}', String(table.capacity))}
         </div>
       )}
 

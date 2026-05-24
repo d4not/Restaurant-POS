@@ -115,7 +115,6 @@ describe('ShiftReport — generated automatically on closeRegister()', () => {
       where: { cash_register_id: s.registerId },
     });
     expect(report.user_id).toBe(s.cashier.id);
-    expect(report.shift_type).toBe('REGULAR');
     expect(report.gross_sales).toBe(15000);
     expect(report.net_sales).toBe(15000); // no discounts
     expect(report.total_tickets).toBe(2);
@@ -187,48 +186,6 @@ describe('ShiftReport — generated automatically on closeRegister()', () => {
   });
 });
 
-describe('ShiftReport — provisional shifts', () => {
-  it('records shift_type=PROVISIONAL and the opener as user_id', async () => {
-    const cashier = await makeUser({ role: 'CASHIER' });
-    const waiter = await makeUser({ role: 'WAITER' });
-    const cashierAuth = authHeader(cashier.id, 'CASHIER');
-    const waiterAuth = authHeader(waiter.id, 'WAITER');
-
-    const parent = await request(app)
-      .post('/api/v1/registers')
-      .set(cashierAuth)
-      .send({ opening_amount: 50000 })
-      .expect(201);
-
-    const provisional = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(waiterAuth)
-      .send({ parent_shift_id: parent.body.data.id })
-      .expect(201);
-    const provisionalId = provisional.body.data.id as string;
-
-    // The arriving cashier counts and closes the provisional. No sales were
-    // processed against it, so expected_cash stays at the opening (0).
-    await request(app)
-      .post(`/api/v1/registers/${provisionalId}/close`)
-      .set(cashierAuth)
-      .send({ actual_amount: 0 })
-      .expect(200);
-
-    const report = await prisma.shiftReport.findUniqueOrThrow({
-      where: { cash_register_id: provisionalId },
-    });
-    expect(report.shift_type).toBe('PROVISIONAL');
-    expect(report.user_id).toBe(waiter.id); // the opener, not the closer
-    expect(report.opening_amount).toBe(0);
-    expect(report.expected_cash).toBe(0);
-    expect(report.actual_cash).toBe(0);
-    expect(report.cash_variance).toBe(0);
-    expect(report.gross_sales).toBe(0);
-    expect(report.total_tickets).toBe(0);
-  });
-});
-
 describe('GET /api/v1/shift-reports — list', () => {
   it('returns paginated results to MANAGER/ADMIN, ordered by closed_at desc', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
@@ -271,46 +228,6 @@ describe('GET /api/v1/shift-reports — list', () => {
     expect(res.status).toBe(403);
   });
 
-  it('filters by type=PROVISIONAL', async () => {
-    const admin = await makeUser({ role: 'ADMIN' });
-    const adminAuth = authHeader(admin.id, 'ADMIN');
-
-    // Regular shift A → closed.
-    const cashier = await makeUser({ role: 'CASHIER' });
-    const cashierAuth = authHeader(cashier.id, 'CASHIER');
-    const reg = await request(app)
-      .post('/api/v1/registers')
-      .set(cashierAuth)
-      .send({ opening_amount: 10000 })
-      .expect(201);
-
-    // Provisional B against A → closed by cashier.
-    const waiter = await makeUser({ role: 'WAITER' });
-    const prov = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(authHeader(waiter.id, 'WAITER'))
-      .send({ parent_shift_id: reg.body.data.id })
-      .expect(201);
-    await request(app)
-      .post(`/api/v1/registers/${prov.body.data.id}/close`)
-      .set(cashierAuth)
-      .send({ actual_amount: 0 })
-      .expect(200);
-
-    // Then close the parent — produces another report.
-    await request(app)
-      .post(`/api/v1/registers/${reg.body.data.id}/close`)
-      .set(cashierAuth)
-      .send({ actual_amount: 10000 })
-      .expect(200);
-
-    const onlyProvisional = await request(app)
-      .get('/api/v1/shift-reports?type=PROVISIONAL')
-      .set(adminAuth)
-      .expect(200);
-    expect(onlyProvisional.body.data.items).toHaveLength(1);
-    expect(onlyProvisional.body.data.items[0].shift_type).toBe('PROVISIONAL');
-  });
 });
 
 describe('GET /api/v1/shift-reports/:id — detail', () => {

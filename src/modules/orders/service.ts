@@ -5,7 +5,6 @@ import {
   PaymentMethod,
   Prisma,
   ProductType,
-  ShiftType,
   StockMovementType,
   TableStatus,
   TakeoutChannel,
@@ -25,10 +24,13 @@ import type {
   CreatePaymentInput,
   ListOrderQuery,
   RemoveOrderItemInput,
+  ReopenOrderInput,
   RequestAttentionInput,
   RestoreOrderItemInput,
+  SoftDeleteOrderInput,
   UpdateOrderInput,
   UpdateOrderItemInput,
+  UpdatePaymentMethodInput,
 } from './schema.js';
 import { ForbiddenError } from '../../lib/errors.js';
 
@@ -64,15 +66,47 @@ async function authorizeCashierPin(pin: string | undefined): Promise<string> {
   return matches[0].id;
 }
 
+/**
+ * Stricter sibling of authorizeCashierPin — only MANAGER and ADMIN can pass.
+ * Used to gate the post-close edit actions on history orders (reopen back to
+ * the floor, soft-delete a row, swap a payment method) where a single
+ * cashier's approval isn't enough.
+ */
+async function authorizeManagerPin(pin: string | undefined): Promise<string> {
+  if (!pin) throw new ForbiddenError('Manager PIN required');
+  const matches = await prisma.user.findMany({
+    where: {
+      pin,
+      active: true,
+      role: { in: ['MANAGER', 'ADMIN'] },
+    },
+    take: 2,
+    select: { id: true },
+  });
+  if (matches.length === 0) {
+    throw new ForbiddenError('Incorrect manager PIN');
+  }
+  if (matches.length > 1) {
+    throw new ConflictError(
+      'PIN is shared by multiple active users — ask an admin to assign unique PINs',
+    );
+  }
+  return matches[0].id;
+}
+
 type Tx = Prisma.TransactionClient;
 type PrismaLike = Tx | typeof prisma;
 
 const orderInclude = {
   register: { select: { id: true, status: true, user_id: true } },
   user: { select: { id: true, name: true } },
+  // Recipient of EMPLOYEE orders; null for DINE_IN / TAKEOUT.
+  employee: { select: { id: true, name: true, role: true } },
   // cancelled_by is null for OPEN/PAID orders. The admin timeline surfaces
   // who pulled the trigger when the order was voided.
   cancelled_by: { select: { id: true, name: true } },
+  // deleted_by names the manager who soft-deleted the row from history.
+  deleted_by: { select: { id: true, name: true } },
   table: {
     select: {
       id: true,
@@ -95,6 +129,21 @@ const orderInclude = {
     },
   },
   payments: { orderBy: { created_at: 'asc' } },
+  // Pending suggestion — the cashier-proposed reopen/delete/change-method
+  // that's waiting for a manager to approve or reject in Order History. The
+  // partial unique index guarantees at most one PENDING per order so this
+  // array has length 0 or 1.
+  suggestions: {
+    where: { status: 'PENDING' },
+    select: {
+      id: true,
+      type: true,
+      payload: true,
+      note: true,
+      created_at: true,
+      creator: { select: { id: true, name: true, role: true } },
+    },
+  },
 } satisfies Prisma.OrderInclude;
 
 /**
@@ -293,8 +342,8 @@ async function assertTakeoutChannelActive(
 }
 
 // Centralise the order_type ↔ takeout_channel rules so create/update share
-// them. For TAKEOUT, channel is required and must be active. For DINE_IN, a
-// channel is meaningless and is rejected outright.
+// them. For TAKEOUT, channel is required and must be active. For DINE_IN /
+// EMPLOYEE, a channel is meaningless and is rejected outright.
 async function validateOrderTypeAndChannel(
   tx: Prisma.TransactionClient,
   orderType: OrderType,
@@ -310,6 +359,33 @@ async function validateOrderTypeAndChannel(
   } else if (channel) {
     throw new BadRequestError(
       'takeout_channel is only valid for TAKEOUT orders',
+    );
+  }
+}
+
+// EMPLOYEE orders must point at an active user; non-EMPLOYEE orders may not
+// carry employee_user_id. Centralised so create/update share the rule.
+async function validateOrderTypeAndEmployee(
+  tx: Prisma.TransactionClient,
+  orderType: OrderType,
+  employeeUserId: string | null | undefined,
+): Promise<void> {
+  if (orderType === OrderType.EMPLOYEE) {
+    if (!employeeUserId) {
+      throw new BadRequestError(
+        'employee_user_id is required for EMPLOYEE orders',
+      );
+    }
+    const user = await tx.user.findFirst({
+      where: { id: employeeUserId, active: true },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new BadRequestError('employee_user_id is not an active user');
+    }
+  } else if (employeeUserId) {
+    throw new BadRequestError(
+      'employee_user_id is only valid for EMPLOYEE orders',
     );
   }
 }
@@ -368,6 +444,7 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
     }
 
     await validateOrderTypeAndChannel(tx, input.order_type, input.takeout_channel);
+    await validateOrderTypeAndEmployee(tx, input.order_type, input.employee_user_id);
 
     if (input.table_id) {
       await assertTableAssignable(tx, input.table_id, input.order_type);
@@ -390,6 +467,10 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
                 ? input.takeout_channel ?? null
                 : null,
             table_id: input.table_id ?? null,
+            employee_user_id:
+              input.order_type === OrderType.EMPLOYEE
+                ? input.employee_user_id ?? null
+                : null,
             notes: input.notes,
             order_number: orderNumber,
             order_date: date,
@@ -435,6 +516,25 @@ export async function listOrders(query: ListOrderQuery) {
           },
         }
       : {}),
+    // Filter by a single product appearing in any non-voided line. Used by the
+    // terminal history filter "include x product".
+    ...(query.product_id
+      ? {
+          items: {
+            some: { product_id: query.product_id, voided_at: null },
+          },
+        }
+      : {}),
+    // Filter by payment method. CARD/CASH/TRANSFER pills on the history view
+    // collapse to this — any payment on the order matching counts.
+    ...(query.payment_method
+      ? {
+          payments: { some: { method: query.payment_method } },
+        }
+      : {}),
+    // Soft-deleted rows stay in the database for audit but are hidden from the
+    // default listing. Pass include_deleted=true to surface them.
+    ...(query.include_deleted ? {} : { deleted_at: null }),
   };
   const rows = await prisma.order.findMany({
     where,
@@ -462,31 +562,29 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
         table_id: true,
         order_type: true,
         takeout_channel: true,
-        register: { select: { type: true } },
+        employee_user_id: true,
       },
     });
 
-    // Discount is the one PATCH field that's blocked on provisional shifts.
-    // Floor staff running a side-flow shouldn't be cutting prices — that
-    // decision belongs to the cashier on the parent shift. Other PATCH
-    // fields (notes, table reseat, takeout snapshots) stay open.
-    const settingDiscount =
-      input.discount_amount !== undefined || input.discount_reason !== undefined;
-    if (settingDiscount && current.register.type === ShiftType.PROVISIONAL) {
-      throw new ForbiddenError(
-        'Discounts are not allowed on a provisional shift',
-      );
-    }
     const nextOrderType = input.order_type ?? current.order_type;
     // Pick the next channel: explicit input wins, else keep the current one
-    // unless the type is flipping to DINE_IN (which forces null).
+    // unless the type is flipping away from TAKEOUT (which forces null).
     const nextChannel =
-      nextOrderType === OrderType.DINE_IN
-        ? null
-        : input.takeout_channel !== undefined
+      nextOrderType === OrderType.TAKEOUT
+        ? input.takeout_channel !== undefined
           ? input.takeout_channel
-          : current.takeout_channel;
+          : current.takeout_channel
+        : null;
+    // Resolve the next employee assignment with the same explicit-wins rule;
+    // forced to null when the order isn't EMPLOYEE.
+    const nextEmployee =
+      nextOrderType === OrderType.EMPLOYEE
+        ? input.employee_user_id !== undefined
+          ? input.employee_user_id
+          : current.employee_user_id
+        : null;
     await validateOrderTypeAndChannel(tx, nextOrderType, nextChannel);
+    await validateOrderTypeAndEmployee(tx, nextOrderType, nextEmployee);
     if (input.table_id !== undefined && input.table_id !== null) {
       await assertTableAssignable(tx, input.table_id, nextOrderType);
     }
@@ -506,6 +604,9 @@ export async function updateOrder(id: string, input: UpdateOrderInput) {
         // channel updates.
         ...(input.order_type !== undefined || input.takeout_channel !== undefined
           ? { takeout_channel: nextChannel }
+          : {}),
+        ...(input.order_type !== undefined || input.employee_user_id !== undefined
+          ? { employee_user_id: nextEmployee }
           : {}),
         ...(input.table_id !== undefined ? { table_id: input.table_id } : {}),
         ...(input.discount_amount !== undefined
@@ -566,19 +667,6 @@ export async function cancelOrder(
   let cancelReason: string | null = null;
 
   if (requiresApproval) {
-    // Voiding a sent-to-kitchen ticket on a provisional shift is off-limits —
-    // the cashier on the parent shift must do this once they take over. Floor
-    // staff can still cancel orders that haven't reached the kitchen yet (the
-    // requiresApproval=false branch below).
-    const orderRegister = await prisma.order.findUnique({
-      where: { id },
-      select: { register: { select: { type: true } } },
-    });
-    if (orderRegister?.register.type === ShiftType.PROVISIONAL) {
-      throw new ForbiddenError(
-        'Cannot cancel an order with sent items on a provisional shift',
-      );
-    }
     if (!input.reason || input.reason.trim().length < 5) {
       throw new ForbiddenError('Reason required (5+ characters)');
     }
@@ -626,17 +714,298 @@ export async function cancelOrder(
 }
 
 // ----------------------------------------------------------------------------
+// Manager actions on history orders
+// ----------------------------------------------------------------------------
+
+/**
+ * Reverse the StockMovements of type SALE that were written when `orderId` was
+ * paid. For each one we add back the absolute quantity to its storage and log a
+ * compensating ADJUSTMENT movement so the audit log still adds up to zero. No
+ * deductions exist for OPEN/CANCELLED orders, so this is a no-op in those
+ * cases.
+ */
+async function reverseOrderSaleMovements(tx: Tx, orderId: string): Promise<void> {
+  const sales = await tx.stockMovement.findMany({
+    where: {
+      reference_type: 'Order',
+      reference_id: orderId,
+      type: StockMovementType.SALE,
+    },
+    select: { id: true, supply_id: true, storage_id: true, quantity: true, unit_cost: true },
+  });
+  for (const m of sales) {
+    const restore = new Decimal(m.quantity).abs();
+    await tx.storageStock.upsert({
+      where: {
+        supply_id_storage_id: { supply_id: m.supply_id, storage_id: m.storage_id },
+      },
+      create: {
+        supply_id: m.supply_id,
+        storage_id: m.storage_id,
+        quantity: restore,
+      },
+      update: { quantity: { increment: restore } },
+    });
+    await tx.stockMovement.create({
+      data: {
+        supply_id: m.supply_id,
+        storage_id: m.storage_id,
+        type: StockMovementType.ADJUSTMENT,
+        quantity: restore,
+        reference_type: 'Order',
+        reference_id: orderId,
+        unit_cost: m.unit_cost,
+      },
+    });
+  }
+}
+
+/**
+ * Manager-authorised: take a PAID order back to OPEN so it can be edited or
+ * re-charged. Reverses the inventory deduction, deletes the payments, and
+ * subtracts the net cash that was added to the original register's expected
+ * amount. The order's items, totals, and table assignment are preserved — the
+ * cashier picks up where the previous tender left off.
+ */
+export async function reopenOrder(id: string, input: ReopenOrderInput) {
+  const approverId = await authorizeManagerPin(input.pin);
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        deleted_at: true,
+        register_id: true,
+        table_id: true,
+        payments: { select: { id: true, method: true, amount: true, change_amount: true } },
+      },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.deleted_at) {
+      throw new ConflictError('Cannot reopen a deleted order — restore it first');
+    }
+    if (order.status !== OrderStatus.PAID) {
+      throw new ConflictError(
+        order.status === OrderStatus.OPEN
+          ? 'Order is already open'
+          : 'Only PAID orders can be reopened',
+      );
+    }
+
+    // Atomic PAID→OPEN claim — prevents two reopens from racing into the same
+    // order and double-reversing inventory.
+    const claim = await tx.order.updateMany({
+      where: { id, status: OrderStatus.PAID },
+      data: { status: OrderStatus.OPEN },
+    });
+    if (claim.count === 0) {
+      throw new ConflictError('Order status changed concurrently — please retry');
+    }
+
+    // Pull cash off the original register (best-effort — if it's closed we skip
+    // since the close already snapshotted expected_amount; the manager will
+    // see the cash adjustment surface on the *next* close).
+    const cashNet = order.payments
+      .filter((p) => p.method === PaymentMethod.CASH)
+      .reduce(
+        (acc, p) => acc.add(new Decimal(p.amount)).sub(new Decimal(p.change_amount)),
+        new Decimal(0),
+      );
+    if (!cashNet.isZero()) {
+      const reg = await tx.cashRegister.findUnique({
+        where: { id: order.register_id },
+        select: { id: true, status: true },
+      });
+      if (reg && reg.status === CashRegisterStatus.OPEN) {
+        await tx.cashRegister.update({
+          where: { id: reg.id },
+          data: { expected_amount: { decrement: cashNet } },
+        });
+      }
+    }
+
+    // Reverse inventory first (still has the SALE movements pinned to orderId)
+    // then drop the payment rows. Order matters only for auditability — both
+    // touch disjoint tables.
+    await reverseOrderSaleMovements(tx, id);
+    await tx.payment.deleteMany({ where: { order_id: id } });
+
+    if (order.table_id) {
+      await syncTableStatus(tx, order.table_id);
+    }
+
+    // Reuse the cancel_reason audit field to record who reopened and why.
+    // cancelled_by_user_id is repurposed too — the timeline shows "reopened by"
+    // when status is OPEN but cancelled_at is null and cancelled_by is set.
+    await tx.order.update({
+      where: { id },
+      data: {
+        cancelled_at: null,
+        cancel_reason: input.reason?.trim() || 'Reopened from history',
+        cancelled_by_user_id: approverId,
+      },
+    });
+
+    return loadOrderOrThrow(tx, id);
+  });
+}
+
+/**
+ * Manager-authorised soft delete. The row stays in the database (reports and
+ * audits still see it) but is hidden from the default history listing. Only
+ * terminal-state orders (PAID or CANCELLED) can be deleted — to remove an OPEN
+ * order, cancel it first.
+ */
+export async function softDeleteOrder(id: string, input: SoftDeleteOrderInput) {
+  const approverId = await authorizeManagerPin(input.pin);
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id },
+      select: { id: true, status: true, deleted_at: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.deleted_at) {
+      throw new ConflictError('Order is already deleted');
+    }
+    if (order.status === OrderStatus.OPEN) {
+      throw new ConflictError('Cancel the order before deleting it from history');
+    }
+    await tx.order.update({
+      where: { id },
+      data: {
+        deleted_at: new Date(),
+        deleted_by_user_id: approverId,
+        // Stash the deletion reason next to the cancel reason — they share an
+        // intent (audit trail) and avoiding a new column keeps the migration
+        // additive-only.
+        cancel_reason: order.status === OrderStatus.CANCELLED
+          ? `${input.reason} | (was: cancelled)`
+          : input.reason,
+      },
+    });
+    return loadOrderOrThrow(tx, id);
+  });
+}
+
+/**
+ * Manager-authorised: change the method (and optionally the reference) of an
+ * existing payment without moving any money. Used to correct typos — the
+ * cashier tapped CASH when the customer actually paid by CARD, etc. When the
+ * change crosses the CASH boundary, the original register's expected_amount is
+ * adjusted so the next close reconciles correctly.
+ */
+export async function updatePaymentMethod(
+  orderId: string,
+  paymentId: string,
+  input: UpdatePaymentMethodInput,
+) {
+  const approverId = await authorizeManagerPin(input.pin);
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, status: true, register_id: true, deleted_at: true, order_type: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+    if (order.deleted_at) {
+      throw new ConflictError('Cannot edit a deleted order');
+    }
+    if (order.status !== OrderStatus.PAID) {
+      throw new ConflictError('Only PAID orders can have their payment method changed');
+    }
+
+    const payment = await tx.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true, order_id: true, method: true, amount: true, change_amount: true,
+      },
+    });
+    if (!payment || payment.order_id !== orderId) throw new NotFoundError('Payment');
+    if (payment.method === input.method) {
+      throw new BadRequestError('Payment is already using that method');
+    }
+    if (
+      input.method === PaymentMethod.PAYROLL_DEDUCT &&
+      order.order_type !== OrderType.EMPLOYEE
+    ) {
+      throw new BadRequestError('PAYROLL_DEDUCT is only valid on EMPLOYEE orders');
+    }
+
+    // Cash boundary crossing: undo or apply the cash delta on the order's
+    // register. We use the *net* (amount - change) since that's what the
+    // original payment contributed to the drawer.
+    const netCash = new Decimal(payment.amount).sub(new Decimal(payment.change_amount));
+    const wasCash = payment.method === PaymentMethod.CASH;
+    const willBeCash = input.method === PaymentMethod.CASH;
+
+    if (wasCash !== willBeCash && !netCash.isZero()) {
+      const reg = await tx.cashRegister.findUnique({
+        where: { id: order.register_id },
+        select: { id: true, status: true },
+      });
+      if (reg && reg.status === CashRegisterStatus.OPEN) {
+        await tx.cashRegister.update({
+          where: { id: reg.id },
+          data: wasCash
+            ? { expected_amount: { decrement: netCash } }
+            : { expected_amount: { increment: netCash } },
+        });
+      }
+    }
+
+    const updated = await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        method: input.method,
+        // When the new method doesn't support change (card / transfer / payroll)
+        // we zero the change_amount so the audit numbers stay coherent.
+        change_amount: willBeCash ? payment.change_amount : new Decimal(0),
+        reference: input.reference === undefined
+          ? undefined
+          : (input.reference?.trim() || null),
+        approved_by_user_id: approverId,
+      },
+    });
+
+    return { payment: updated, order: await loadOrderOrThrow(tx, orderId) };
+  });
+}
+
+// ----------------------------------------------------------------------------
 // Order items
 // ----------------------------------------------------------------------------
+
+/**
+ * On EMPLOYEE orders, products and variants with an active EmployeeProduct row
+ * sell at the configured employee_price instead of the regular sell_price.
+ * Returns null when no employee price is configured — the caller falls back
+ * to the regular price so unlisted items work at full menu price (the policy:
+ * "products without a discount cost normal price").
+ */
+async function lookupEmployeePrice(
+  tx: Tx,
+  productId: string,
+  variantId: string | null,
+): Promise<Decimal | null> {
+  const row = await tx.employeeProduct.findFirst({
+    where: { product_id: productId, variant_id: variantId, active: true },
+    select: { employee_price: true },
+  });
+  return row ? new Decimal(row.employee_price) : null;
+}
 
 /**
  * Snapshot prices at the moment of adding an item. Once persisted the line
  * doesn't chase future menu changes — a receipt printed tomorrow must match
  * a receipt printed today.
+ *
+ * `orderType` flips on employee pricing: when EMPLOYEE, we look up an active
+ * EmployeeProduct(product, variant) and use its employee_price if one exists.
  */
 async function resolveOrderLine(
   tx: Tx,
   input: AddOrderItemInput,
+  orderType: OrderType,
 ): Promise<{
   productId: string;
   variantId: string | null;
@@ -684,6 +1053,14 @@ async function resolveOrderLine(
       throw new BadRequestError('Product has no sell_price — cannot add to order');
     }
     unitPrice = new Decimal(product.sell_price);
+  }
+
+  // EMPLOYEE orders: substitute employee_price when the admin configured one
+  // for this (product, variant) pair. Items without a configured perk keep the
+  // regular price, matching the policy that unlisted items sell at full menu.
+  if (orderType === OrderType.EMPLOYEE) {
+    const empPrice = await lookupEmployeePrice(tx, product.id, variantId);
+    if (empPrice) unitPrice = empPrice;
   }
 
   // Snapshot the applicable tax rate onto the line. Precedence:
@@ -738,8 +1115,12 @@ export async function addOrderItem(
 ) {
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, orderId);
+    const orderMeta = await tx.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { order_type: true },
+    });
     const quantity = input.quantity ?? 1;
-    const resolved = await resolveOrderLine(tx, input);
+    const resolved = await resolveOrderLine(tx, input, orderMeta.order_type);
 
     // Merge into an existing UNSENT line with the exact same shape (product /
     // variant / modifier set / notes) so repeated taps of the same drink show
@@ -841,6 +1222,7 @@ async function resolveItemEdit(
   productId: string,
   variantId: string | null,
   modifierIds: string[],
+  orderType: OrderType,
 ): Promise<{
   variantId: string | null;
   unitPrice: Decimal;
@@ -873,6 +1255,10 @@ async function resolveItemEdit(
       throw new BadRequestError('Product has no sell_price — cannot reprice line');
     }
     unitPrice = new Decimal(product.sell_price);
+  }
+  if (orderType === OrderType.EMPLOYEE) {
+    const empPrice = await lookupEmployeePrice(tx, productId, variantId);
+    if (empPrice) unitPrice = empPrice;
   }
 
   const modifierRows: { modifier_id: string; name: string; extra_price: Decimal }[] = [];
@@ -933,6 +1319,10 @@ export async function updateOrderItem(
 
   return prisma.$transaction(async (tx) => {
     await assertOrderOpen(tx, orderId);
+    const orderMeta = await tx.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { order_type: true },
+    });
     const existing = await tx.orderItem.findUnique({
       where: { id: itemId },
       select: {
@@ -972,6 +1362,7 @@ export async function updateOrderItem(
         existing.product_id,
         targetVariantId,
         targetModifierIds,
+        orderMeta.order_type,
       );
       unitPrice = resolved.unitPrice;
       modifiersPrice = resolved.modifiersPrice;
@@ -1201,7 +1592,7 @@ export async function restoreOrderItem(
 export async function addPayment(
   orderId: string,
   input: CreatePaymentInput,
-  userId: string,
+  _userId: string,
   userRole: UserRole,
 ) {
   return prisma.$transaction(async (tx) => {
@@ -1213,6 +1604,7 @@ export async function addPayment(
         total: true,
         register_id: true,
         table_id: true,
+        order_type: true,
         // Voided lines are excluded from the deduction set and the empty check
         // — the customer isn't paying for them and we shouldn't draw inventory
         // for items the kitchen never made.
@@ -1238,6 +1630,17 @@ export async function addPayment(
     if (order.items.length === 0) {
       throw new BadRequestError('Cannot pay for an order with no items');
     }
+    // Payroll-deduct is a deferred settlement against an employee's next
+    // paycheck — only valid on tabs whose order_type is EMPLOYEE (otherwise
+    // there's no employee to deduct from).
+    if (
+      input.method === PaymentMethod.PAYROLL_DEDUCT &&
+      order.order_type !== OrderType.EMPLOYEE
+    ) {
+      throw new BadRequestError(
+        'PAYROLL_DEDUCT is only valid on EMPLOYEE orders',
+      );
+    }
 
     // The order may have been opened during a previous shift whose register
     // is now closed. In that case the cashier on the new shift should still
@@ -1247,17 +1650,16 @@ export async function addPayment(
     // open drawer can't be reconciled.
     const originalRegister = await tx.cashRegister.findUnique({
       where: { id: order.register_id },
-      select: { id: true, status: true, kind: true },
+      select: { id: true, status: true },
     });
     let activeRegisterId = order.register_id;
-    let activeRegisterKind = originalRegister?.kind ?? null;
     if (!originalRegister || originalRegister.status !== CashRegisterStatus.OPEN) {
       // Singleton-shift model: any open register works. The arriving cashier
       // doesn't need a personal one — they settle against whichever shift is
       // currently open.
       const fallback = await tx.cashRegister.findFirst({
         where: { status: CashRegisterStatus.OPEN },
-        select: { id: true, kind: true },
+        select: { id: true },
       });
       if (!fallback) {
         throw new ConflictError(
@@ -1265,7 +1667,6 @@ export async function addPayment(
         );
       }
       activeRegisterId = fallback.id;
-      activeRegisterKind = fallback.kind;
       // Re-anchor the order so the close-shift recomputation, sales reports,
       // and deduction rules all see the cashier who actually settled it.
       await tx.order.update({
@@ -1274,31 +1675,23 @@ export async function addPayment(
       });
     }
 
-    // Waiter/Barista emergency-shift flow: ordinarily they need a cashier+'s
-    // PIN to settle a ticket (recorded on Payment.approved_by_user_id). When
-    // the active shift is PROVISIONAL, however, there is no cashier on site
-    // by definition — that's the whole point of provisional. We waive the
-    // PIN requirement and stamp the floor staff member as the implicit
-    // approver so the audit trail still names a real person. The arriving
-    // cashier reconciles cash at close time.
+    // Waiter/Barista need a cashier+'s PIN to settle a ticket — recorded on
+    // Payment.approved_by_user_id for the audit trail.
     let approverUserId: string | null = null;
-    const isProvisional = activeRegisterKind === 'PROVISIONAL';
     if (userRole === 'WAITER' || userRole === 'BARISTA') {
-      if (isProvisional) {
-        approverUserId = userId;
-      } else {
-        approverUserId = await authorizeCashierPin(input.pin);
-      }
+      approverUserId = await authorizeCashierPin(input.pin);
     }
 
     const total = new Decimal(order.total);
+    // Aggregate prior payments using their order-side portion only —
+    // tip_amount lives outside the order ledger (Phase 11 tip jar model).
     const paidSoFar = await tx.payment.aggregate({
       where: { order_id: orderId },
-      _sum: { amount: true, change_amount: true },
+      _sum: { amount: true, change_amount: true, tip_amount: true },
     });
-    const netPaid = new Decimal(paidSoFar._sum.amount ?? 0).sub(
-      new Decimal(paidSoFar._sum.change_amount ?? 0),
-    );
+    const netPaid = new Decimal(paidSoFar._sum.amount ?? 0)
+      .sub(new Decimal(paidSoFar._sum.change_amount ?? 0))
+      .sub(new Decimal(paidSoFar._sum.tip_amount ?? 0));
     const remaining = total.sub(netPaid);
 
     if (remaining.lte(0)) {
@@ -1308,19 +1701,39 @@ export async function addPayment(
     }
 
     const amount = new Decimal(input.amount);
+    const tipAmount = new Decimal(input.tip_amount ?? 0);
+
+    // Tip routing rules (Phase 11 — frasco-aparte model):
+    //  • tip_amount is included in `amount` (the gross customer tender).
+    //  • The cashier physically separates tip cash into the tip jar; it never
+    //    enters the drawer, so expected_amount stays sales-only.
+    //  • PAYROLL_DEDUCT rejects tips — there's no jar in a deferred deduction.
+    if (input.method === PaymentMethod.PAYROLL_DEDUCT && tipAmount.gt(0)) {
+      throw new BadRequestError('PAYROLL_DEDUCT payments cannot carry a tip');
+    }
+    if (tipAmount.gt(amount)) {
+      throw new BadRequestError('tip_amount cannot exceed amount');
+    }
+
+    // orderPortion is what actually pays the bill — what the order-side
+    // change/remaining logic operates on.
+    const orderPortion = amount.sub(tipAmount);
     let changeAmount = new Decimal(0);
 
     if (input.method === PaymentMethod.CASH) {
-      // A cash tender can be partial (< remaining, no change) OR final
-      // (>= remaining, change = overpay). Both are common in splits.
-      changeAmount = amount.lt(remaining) ? new Decimal(0) : amount.sub(remaining);
+      // A cash tender's order-side portion can be partial (< remaining, no
+      // change) OR final (>= remaining, change = overpay). Both are common
+      // in splits. The tip is excluded from this math entirely.
+      changeAmount = orderPortion.lt(remaining)
+        ? new Decimal(0)
+        : orderPortion.sub(remaining);
     } else {
-      // CARD / TRANSFER per SPEC.md §7.6: "amount must equal exactly what's
-      // owed (no change)". Splits with card/transfer therefore settle the
-      // remaining balance in full — cash-first splits remain possible.
-      if (!amount.equals(remaining)) {
+      // CARD / TRANSFER must settle the remaining balance exactly on the
+      // order-side. The card processor would charge `amount` (which includes
+      // tip); we record both numbers so the receipt and tip pool match.
+      if (!orderPortion.equals(remaining)) {
         throw new BadRequestError(
-          `${input.method} payment must equal the remaining balance exactly (${remaining.toString()} centavos)`,
+          `${input.method} payment (excluding tip) must equal the remaining balance exactly (${remaining.toString()} centavos)`,
         );
       }
     }
@@ -1330,26 +1743,35 @@ export async function addPayment(
         order_id: orderId,
         method: input.method,
         amount,
+        tip_amount: tipAmount,
         change_amount: changeAmount,
         reference: input.reference ?? null,
         approved_by_user_id: approverUserId,
       },
     });
 
-    // Update the running "net paid" with this payment.
-    const newNetPaid = netPaid.add(amount).sub(changeAmount);
+    // Update the running "net paid" with this payment's order-side portion
+    // (excludes tip and change). When this hits `total`, the order is settled.
+    const newNetPaid = netPaid.add(orderPortion).sub(changeAmount);
     const fullyPaid = newNetPaid.gte(total);
 
-    // Always reflect cash tenders in the register's expected_amount, not only
-    // on checkout — the drawer is opened for each cash tender regardless.
+    // Drawer math: only the order-side cash hits expected_amount. The tip is
+    // a side ledger (informational `tips_collected`) that the pool aggregates
+    // from `payment.tip_amount` at close.
     if (input.method === PaymentMethod.CASH) {
-      const cashDelta = amount.sub(changeAmount);
+      const cashDelta = orderPortion.sub(changeAmount);
       if (!cashDelta.isZero()) {
         await tx.cashRegister.update({
           where: { id: activeRegisterId },
           data: { expected_amount: { increment: cashDelta } },
         });
       }
+    }
+    if (!tipAmount.isZero()) {
+      await tx.cashRegister.update({
+        where: { id: activeRegisterId },
+        data: { tips_collected: { increment: tipAmount } },
+      });
     }
 
     let deductionResult = null as Awaited<ReturnType<typeof deductSaleFromInventory>> | null;

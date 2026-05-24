@@ -183,73 +183,160 @@ describe('POST /api/v1/registers/:id/close — expected_amount calculation', () 
   });
 });
 
-// Provisional shifts under the report-spec contract require a parent OPEN
-// REGULAR shift; the parent stays OPEN while the side-flow runs. End-to-end
-// coverage of that flow lives in tests/shifts/provisional-shifts.test.ts.
-// These tests cover only the parts that intersect with the cash-register
-// lifecycle (close, role gate on close).
-describe('Provisional shifts — close and role gates', () => {
-  async function openProvisional(opener: { id: string; role: 'BARISTA' | 'WAITER' }) {
+describe('Cash register — close role gates', () => {
+  it('barista CAN open a shift, but it is flagged provisional', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+    const res = await request(app)
+      .post('/api/v1/registers')
+      .set(baristaAuth)
+      .send({ opening_amount: 0 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.is_provisional).toBe(true);
+  });
+
+  it('cashier-opened shift is non-provisional', async () => {
     const cashier = await makeUser({ role: 'CASHIER' });
     const cashierAuth = authHeader(cashier.id, 'CASHIER');
-    const parent = await request(app)
+    const res = await request(app)
+      .post('/api/v1/registers')
+      .set(cashierAuth)
+      .send({ opening_amount: 50000 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.is_provisional).toBe(false);
+  });
+
+  it('barista cannot close a shift', async () => {
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+    const barista = await makeUser({ role: 'BARISTA' });
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+
+    const reg = await request(app)
       .post('/api/v1/registers')
       .set(cashierAuth)
       .send({ opening_amount: 50000 })
       .expect(201);
 
-    const openerAuth = authHeader(opener.id, opener.role);
-    const provisional = await request(app)
-      .post('/api/v1/registers/provisional')
-      .set(openerAuth)
-      .send({ parent_shift_id: parent.body.data.id })
-      .expect(201);
+    const close = await request(app)
+      .post(`/api/v1/registers/${reg.body.data.id}/close`)
+      .set(baristaAuth)
+      .send({ actual_amount: 50000 });
+    expect(close.status).toBe(403);
+  });
+});
 
-    return {
-      cashier,
-      cashierAuth,
-      openerAuth,
-      parentId: parent.body.data.id as string,
-      provisionalId: provisional.body.data.id as string,
-    };
-  }
-
-  it('barista can open a provisional but not a normal shift', async () => {
+describe('Provisional shift — verify flow', () => {
+  it('blocks cash movements while provisional', async () => {
     const barista = await makeUser({ role: 'BARISTA' });
     const baristaAuth = authHeader(barista.id, 'BARISTA');
-    // Direct normal-shift open is rejected by the requireRole gate before
-    // the singleton check runs.
-    const blocked = await request(app)
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+
+    const reg = await request(app)
       .post('/api/v1/registers')
       .set(baristaAuth)
-      .send({ opening_amount: 0 });
-    expect(blocked.status).toBe(403);
+      .send({ opening_amount: 0 })
+      .expect(201);
 
-    const { provisionalId } = await openProvisional(barista);
-    expect(provisionalId).toBeTruthy();
-  });
-
-  it('cashier can close a provisional opened by a barista; closed_by reflects the cashier', async () => {
-    const barista = await makeUser({ role: 'BARISTA' });
-    const { cashier, cashierAuth, provisionalId } = await openProvisional(barista);
-
-    const close = await request(app)
-      .post(`/api/v1/registers/${provisionalId}/close`)
+    const blocked = await request(app)
+      .post(`/api/v1/registers/${reg.body.data.id}/cash-movements`)
       .set(cashierAuth)
-      .send({ actual_amount: 12000 });
-    expect(close.status).toBe(200);
-    expect(close.body.data.actual_amount).toBe('12000');
-    expect(close.body.data.closed_by_user_id).toBe(cashier.id);
+      .send({ type: 'CASH_IN', amount: 1000, reason: 'tips' });
+    expect(blocked.status).toBe(409);
   });
 
-  it('barista cannot close a shift even one they opened', async () => {
+  it('blocks close while provisional — must verify first', async () => {
     const barista = await makeUser({ role: 'BARISTA' });
-    const { openerAuth, provisionalId } = await openProvisional(barista);
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+
+    const reg = await request(app)
+      .post('/api/v1/registers')
+      .set(baristaAuth)
+      .send({ opening_amount: 0 })
+      .expect(201);
+
+    const blocked = await request(app)
+      .post(`/api/v1/registers/${reg.body.data.id}/close`)
+      .set(cashierAuth)
+      .send({ actual_amount: 0 });
+    expect(blocked.status).toBe(409);
+  });
+
+  it('cashier verifies provisional → flag flips, diff is recorded, shift continues', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+
+    const reg = await request(app)
+      .post('/api/v1/registers')
+      .set(baristaAuth)
+      .send({ opening_amount: 0 })
+      .expect(201);
+    const id = reg.body.data.id as string;
+
+    // Verify with the actual count = expected (= 0 since no orders yet).
+    const verify = await request(app)
+      .post(`/api/v1/registers/${id}/verify-provisional`)
+      .set(cashierAuth)
+      .send({ actual_amount: 0 });
+    expect(verify.status).toBe(200);
+    expect(verify.body.data.is_provisional).toBe(false);
+    expect(verify.body.data.provisional_verified_by_id).toBe(cashier.id);
+    expect(verify.body.data.provisional_expected_amount).toBe('0');
+    expect(verify.body.data.provisional_actual_amount).toBe('0');
+    expect(verify.body.data.provisional_difference).toBe('0');
+    expect(verify.body.data.status).toBe('OPEN');
+
+    // After verify, cash movements unblock and the shift can close normally.
+    await request(app)
+      .post(`/api/v1/registers/${id}/cash-movements`)
+      .set(cashierAuth)
+      .send({ type: 'CASH_IN', amount: 1000, reason: 'tips' })
+      .expect(201);
 
     const close = await request(app)
-      .post(`/api/v1/registers/${provisionalId}/close`)
-      .set(openerAuth)
+      .post(`/api/v1/registers/${id}/close`)
+      .set(cashierAuth)
+      .send({ actual_amount: 1000 });
+    expect(close.status).toBe(200);
+    expect(close.body.data.status).toBe('CLOSED');
+  });
+
+  it('refuses verify on a non-provisional register (already verified)', async () => {
+    const cashier = await makeUser({ role: 'CASHIER' });
+    const cashierAuth = authHeader(cashier.id, 'CASHIER');
+
+    const reg = await request(app)
+      .post('/api/v1/registers')
+      .set(cashierAuth)
+      .send({ opening_amount: 50000 })
+      .expect(201);
+
+    const conflict = await request(app)
+      .post(`/api/v1/registers/${reg.body.data.id}/verify-provisional`)
+      .set(cashierAuth)
+      .send({ actual_amount: 50000 });
+    expect(conflict.status).toBe(409);
+  });
+
+  it('barista cannot verify a provisional shift (role gate)', async () => {
+    const barista = await makeUser({ role: 'BARISTA' });
+    const baristaAuth = authHeader(barista.id, 'BARISTA');
+
+    const reg = await request(app)
+      .post('/api/v1/registers')
+      .set(baristaAuth)
+      .send({ opening_amount: 0 })
+      .expect(201);
+
+    const blocked = await request(app)
+      .post(`/api/v1/registers/${reg.body.data.id}/verify-provisional`)
+      .set(baristaAuth)
       .send({ actual_amount: 0 });
-    expect(close.status).toBe(403);
+    expect(blocked.status).toBe(403);
   });
 });

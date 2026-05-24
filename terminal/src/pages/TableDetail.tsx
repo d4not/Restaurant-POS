@@ -49,6 +49,13 @@ import {
   minutesSince,
 } from '../utils/format';
 import { useTranslation } from '../i18n';
+import {
+  useStockAvailability,
+  useAvailabilityIndex,
+  productVariantKey,
+} from '../hooks/useStockAvailability';
+import { StockBadge } from '../components/StockBadge';
+import { useToast } from '../components/Toast';
 
 const ALL_CATEGORIES = '__all__';
 
@@ -1062,6 +1069,16 @@ export function TableDetail() {
       invalidateOrder();
       setPickerProduct(null);
     },
+    onError: (err) => {
+      // Backend rejected: usually a stale-cache stock race. Surface the actual
+      // server message, buzz error haptics, and refetch availability so the
+      // grid updates immediately instead of waiting for the 30s poll.
+      haptics.error();
+      const message =
+        err instanceof ApiError ? err.message : t('stock.staleRejection');
+      toast.error(message);
+      queryClient.invalidateQueries({ queryKey: ['stock-availability'] });
+    },
   });
   const updateItemMutation = useMutation({
     mutationFn: ({
@@ -1175,6 +1192,14 @@ export function TableDetail() {
 
   const products = productsQuery.data ?? [];
   const categories: ProductCategory[] = categoriesQuery.data ?? [];
+
+  // Live stock availability — drives the product card states (low/out badges)
+  // and the addOrderItem pre-check. Polls every 30s + refetches on focus; the
+  // payment-success path also invalidates so the grid catches up fast after
+  // a sale just deducted stock.
+  const availabilityQuery = useStockAvailability(order?.register_id ?? null);
+  const availability = useAvailabilityIndex(availabilityQuery.data);
+  const toast = useToast();
 
   const visibleProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1357,9 +1382,11 @@ export function TableDetail() {
   const tableLabel =
     order.order_type === 'TAKEOUT'
       ? `Takeout #${order.order_number}`
-      : order.table
-        ? `Table ${order.table.number}`
-        : `Order #${order.order_number}`;
+      : order.order_type === 'EMPLOYEE'
+        ? `${t('employeeOrder.label')} · ${order.employee?.name ?? t('employeeOrder.unknown')}`
+        : order.table
+          ? `Table ${order.table.number}`
+          : `Order #${order.order_number}`;
   const elapsed = formatElapsed(minutesSince(order.created_at));
   // Ticket header counts only non-voided lines so the "X items" matches what
   // the customer is paying for (voided lines are tombstones, not active).
@@ -1390,8 +1417,41 @@ export function TableDetail() {
       ? remaining - currentTender
       : 0;
 
+  // Card-level availability — most permissive across all variants. A product
+  // with one available variant and one out variant is `available` (picker
+  // shows variant detail later); a product with every variant out is `out`.
+  function getProductCardStatus(p: PosProduct):
+    | 'available' | 'low' | 'out' | 'unknown' {
+    const activeVariants = p.variants.filter((v) => v.active);
+    const candidates: Array<'available' | 'low' | 'out' | 'unknown'> = [];
+    if (activeVariants.length === 0) {
+      const entry = availability.byProductVariant.get(productVariantKey(p.id, null));
+      candidates.push(entry?.status ?? 'available');
+    } else {
+      for (const v of activeVariants) {
+        const entry = availability.byProductVariant.get(productVariantKey(p.id, v.id));
+        candidates.push(entry?.status ?? 'available');
+      }
+    }
+    // Priority: available > low > unknown > out
+    if (candidates.includes('available')) return 'available';
+    if (candidates.includes('low')) return 'low';
+    if (candidates.includes('unknown')) return 'unknown';
+    return 'out';
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────
   function handleProductTap(p: PosProduct) {
+    // Pre-flight against the live availability snapshot. Backend will reject
+    // anyway (defense in depth), but blocking the tap saves an HTTP roundtrip
+    // and a confused half-state in the optimistic ticket.
+    const cardStatus = getProductCardStatus(p);
+    if (cardStatus === 'out' || cardStatus === 'unknown') {
+      haptics.error();
+      toast.error(t('stock.noStockOf').replace('{name}', p.name));
+      return;
+    }
+
     const hasVariants = p.variants.some((v) => v.active);
     // Only force the picker when the product has *required* mods (min>0) or
     // an explicit required flag. Optional mod groups (e.g. "Add a flavour")
@@ -1627,6 +1687,9 @@ export function TableDetail() {
       });
       invalidateOrder();
       if (result.order.status === 'PAID') {
+        // Inventory was just deducted by the backend — refresh the live
+        // availability snapshot so the grid catches up immediately.
+        queryClient.invalidateQueries({ queryKey: ['stock-availability'] });
         haptics.success();
         await finalizeSettled(result.order);
       } else {
@@ -2144,12 +2207,21 @@ export function TableDetail() {
               // resolves through: product override → category tag → gold.
               const fallbackColor = p.icon_color ?? cat?.color ?? 'var(--gold)';
               const initial = p.name.trim().charAt(0).toUpperCase() || '·';
+              const cardStatus = getProductCardStatus(p);
+              const isStockOut = cardStatus === 'out' || cardStatus === 'unknown';
+              const isStockLow = cardStatus === 'low';
               return (
                 <button
                   key={p.id}
                   type="button"
                   className="product-card"
-                  style={styles.productCard}
+                  style={{
+                    ...styles.productCard,
+                    opacity: isStockOut ? 0.5 : 1,
+                    cursor: isStockOut ? 'not-allowed' : 'pointer',
+                    filter: isStockOut ? 'grayscale(0.5)' : undefined,
+                  }}
+                  aria-disabled={isStockOut}
                   onClick={() => handleProductTap(p)}
                 >
                   <div style={styles.productImageWrap}>
@@ -2176,6 +2248,17 @@ export function TableDetail() {
                         {variants.length} sizes
                       </span>
                     )}
+                    {(isStockOut || isStockLow) && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          left: 6,
+                        }}
+                      >
+                        <StockBadge status={cardStatus} size="sm" />
+                      </span>
+                    )}
                     <span style={styles.productAddBadge} aria-hidden>＋</span>
                   </div>
                   <div style={styles.productLabel}>
@@ -2198,6 +2281,7 @@ export function TableDetail() {
         <ProductPicker
           product={pickerProduct}
           busy={addItemMutation.isPending}
+          modifierAvailability={availability.byModifier}
           onClose={() => setPickerProduct(null)}
           onSubmit={({ variantId, modifierIds, notes }) =>
             addItemMutation.mutate({
@@ -2220,6 +2304,7 @@ export function TableDetail() {
         <ProductPicker
           product={editingProduct()!}
           mode="edit"
+          modifierAvailability={availability.byModifier}
           initial={{
             variantId: editingItem.variant_id,
             modifierIds: editingItem.modifiers.map((m) => m.modifier_id),
@@ -2403,7 +2488,10 @@ export function TableDetail() {
                 </div>
 
                 <div style={styles.payMethods}>
-                  {(['CASH', 'CARD', 'TRANSFER'] as PaymentMethodType[]).map((m) => (
+                  {((order.order_type === 'EMPLOYEE'
+                    ? (['CASH', 'CARD', 'TRANSFER', 'PAYROLL_DEDUCT'] as PaymentMethodType[])
+                    : (['CASH', 'CARD', 'TRANSFER'] as PaymentMethodType[])
+                  )).map((m) => (
                     <button
                       key={m}
                       type="button"
@@ -2414,9 +2502,23 @@ export function TableDetail() {
                       }}
                     >
                       <span>
-                        {m === 'CASH' ? '💵' : m === 'CARD' ? '💳' : '⇆'}
+                        {m === 'CASH'
+                          ? '💵'
+                          : m === 'CARD'
+                            ? '💳'
+                            : m === 'TRANSFER'
+                              ? '⇆'
+                              : '🧾'}
                       </span>
-                      <span>{m === 'CASH' ? 'Cash' : m === 'CARD' ? 'Card' : 'Transfer'}</span>
+                      <span>
+                        {m === 'CASH'
+                          ? 'Cash'
+                          : m === 'CARD'
+                            ? 'Card'
+                            : m === 'TRANSFER'
+                              ? 'Transfer'
+                              : t('pay.method.payrollDeduct')}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -2430,7 +2532,9 @@ export function TableDetail() {
                             ? 'Cash'
                             : p.method === 'CARD'
                               ? 'Card'
-                              : 'Transfer'}
+                              : p.method === 'TRANSFER'
+                                ? 'Transfer'
+                                : t('pay.method.payrollDeduct')}
                         </span>
                         <span>{formatMoney(String(p.amount))}</span>
                         <button
@@ -2675,7 +2779,14 @@ function PostPaymentBody({
           <span>Total charged</span>
           <span style={styles.totalsAmt}>{formatMoney(order.total)}</span>
           {order.payments.map((p) => {
-            const label = p.method === 'CASH' ? 'Cash' : p.method === 'CARD' ? 'Card' : 'Transfer';
+            const label =
+              p.method === 'CASH'
+                ? 'Cash'
+                : p.method === 'CARD'
+                  ? 'Card'
+                  : p.method === 'TRANSFER'
+                    ? 'Transfer'
+                    : 'Payroll';
             return (
               <Fragment key={p.id}>
                 <span>{label}</span>

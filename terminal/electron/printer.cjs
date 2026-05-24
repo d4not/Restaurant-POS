@@ -22,6 +22,29 @@ const path = require('node:path');
 const { app } = require('electron');
 const { ThermalPrinter, PrinterTypes, CharacterSet } = require('node-thermal-printer');
 
+// Lazy native printer driver. Used only when the printer's interface URI is
+// "printer:NAME" (OS spooler). Most terminals talk to ESC/POS hardware over
+// TCP and never load this; the require is deferred so a missing/broken native
+// binary doesn't stop the app from booting — buildPrinter surfaces a clean
+// error instead. Cached after the first successful load so repeated prints
+// don't pay the require cost.
+let cachedSpoolDriver = null;
+let spoolDriverChecked = false;
+function loadSpoolDriver() {
+  if (spoolDriverChecked) return cachedSpoolDriver;
+  spoolDriverChecked = true;
+  try {
+    // eslint-disable-next-line global-require
+    cachedSpoolDriver = require('@thiagoelg/node-printer');
+  } catch (err) {
+    // Logged once. The renderer turns the error message into a friendly
+    // "install the OS print driver" hint when Test print fails.
+    console.warn('[printer] spool driver unavailable:', err?.message ?? err);
+    cachedSpoolDriver = null;
+  }
+  return cachedSpoolDriver;
+}
+
 const CONFIG_FILE = 'printers.json';
 
 // Default config covers a typical 80mm Epson-compatible setup over network.
@@ -105,9 +128,12 @@ function saveConfig(next) {
   return merged;
 }
 
-// node-thermal-printer's interface URI: file path for USB/serial, tcp:// for
-// network. We don't expose the printer:NAME / OS-driver path here because it
-// requires a separate native dependency we don't ship.
+// node-thermal-printer's interface URI:
+//   • tcp://host:port  — network
+//   • printer:NAME     — OS spooler (Windows/CUPS). Requires the native
+//                        @thiagoelg/node-printer driver, passed as `driver`
+//                        on the ThermalPrinter config.
+//   • <path>           — raw device file (e.g. /dev/usb/lp0)
 function buildInterfaceUri(roleConfig) {
   if (roleConfig.connection === 'network') {
     const addr = roleConfig.address.trim();
@@ -123,14 +149,28 @@ function buildPrinter(roleConfig) {
   if (!interfaceUri) {
     throw new Error('Printer address is not configured');
   }
-  return new ThermalPrinter({
+  const config = {
     type: roleConfig.type,
     interface: interfaceUri,
     width: roleConfig.width,
     characterSet: roleConfig.characterSet,
     removeSpecialCharacters: false,
     options: { timeout: 4000 },
-  });
+  };
+  // Hand the spooler driver to node-thermal-printer only when the operator
+  // actually picked an OS-printer target. For tcp:// or raw paths the driver
+  // is unused, and we'd rather fail loud at print time on the spool path than
+  // silently when the driver couldn't load.
+  if (interfaceUri.startsWith('printer:')) {
+    const driver = loadSpoolDriver();
+    if (!driver) {
+      throw new Error(
+        'OS print driver not available — install @thiagoelg/node-printer or pick a /dev/usb/lpN device path / network address instead.',
+      );
+    }
+    config.driver = driver;
+  }
+  return new ThermalPrinter(config);
 }
 
 async function probeStatus(roleConfig) {

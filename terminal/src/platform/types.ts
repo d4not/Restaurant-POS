@@ -46,6 +46,13 @@ export interface PlatformBridge {
     isConnected(): Promise<boolean>;
     onStatusChange(cb: (connected: boolean) => void): () => void;
   };
+  // Launches the admin panel for a MANAGER/ADMIN operator. On desktop this
+  // opens a second Electron window pointed at the admin URL (with the existing
+  // JWT pre-filled via query string so the operator skips the email/password
+  // form). On web/mobile builds it opens a new tab against the same backend.
+  app: {
+    openAdmin(token: string, userId: string): Promise<void>;
+  };
 }
 
 export type PlatformId = 'electron' | 'capacitor' | 'web';
