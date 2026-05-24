@@ -637,12 +637,35 @@ async function testPrint(role) {
   return tryPrintWithFallback(role, renderTest);
 }
 
+async function printToAddress(config, lines) {
+  const roleConfig = {
+    enabled: true,
+    type: config.printer_model || 'epson',
+    connection: config.connection_type === 'USB' ? 'usb' : 'network',
+    address: config.address || '',
+    width: config.paper_width || 48,
+    characterSet: config.character_set || 'PC850_MULTILINGUAL',
+  };
+  try {
+    const printer = buildPrinter(roleConfig);
+    for (const line of lines) {
+      printer.println(line);
+    }
+    printer.cut();
+    const result = await printer.execute();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
 module.exports = {
   loadConfig,
   saveConfig,
   getStatus,
   printKitchen,
   printReceipt,
+  printToAddress,
   testPrint,
   // Exposed so main.cjs's IPC layer can keep its lastWorking map in sync —
   // single source of truth lives here in the printer service.

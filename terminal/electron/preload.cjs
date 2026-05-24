@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('electron', {
     resolve: () => ipcRenderer.invoke('printer:resolve'),
     applyCandidate: (payload) => ipcRenderer.invoke('printer:apply-candidate', payload),
     markWorking: (payload) => ipcRenderer.invoke('printer:mark-working', payload),
+    printToAddress: (config, lines) => ipcRenderer.invoke('printer:print-to-address', { config, lines }),
   },
   app: {
     openAdmin: (payload) => ipcRenderer.invoke('app:open-admin', payload),

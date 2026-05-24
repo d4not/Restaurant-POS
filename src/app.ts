@@ -44,6 +44,7 @@ import { floorDecorRouter } from './modules/floor-decor/routes.js';
 import { suggestionRouter } from './modules/suggestions/routes.js';
 import { orderSuggestionReviewRouter } from './modules/order-suggestions/routes.js';
 import { printRouter } from './modules/print/routes.js';
+import { printerProfileRouter } from './modules/printer-profiles/routes.js';
 import { uploadRouter, uploadRoot } from './modules/uploads/routes.js';
 import {
   employeeProductRouter,
@@ -157,6 +158,7 @@ export function createApp(): Express {
   app.use('/api/v1/suggestions', suggestionRouter);
   app.use('/api/v1/order-suggestions', orderSuggestionReviewRouter);
   app.use('/api/v1/print', printRouter);
+  app.use('/api/v1/printer-profiles', printerProfileRouter);
   app.use('/api/v1/uploads', uploadRouter);
   app.use('/api/v1/employee-products', employeeProductRouter);
   app.use('/api/v1/employee-sales', employeeSaleRouter);

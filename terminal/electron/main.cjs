@@ -79,6 +79,8 @@ ipcMain.handle('printer:print-receipt', (_event, data) => printerService.printRe
 ipcMain.handle('printer:get-config', () => printerService.loadConfig());
 ipcMain.handle('printer:set-config', (_event, next) => printerService.saveConfig(next));
 ipcMain.handle('printer:test-print', (_event, role) => printerService.testPrint(role));
+ipcMain.handle('printer:print-to-address', (_event, { config, lines }) =>
+  printerService.printToAddress(config, lines));
 
 // Enumerate USB / OS-spooler printers on demand. Settings → Printers calls
 // this from the renderer when the operator taps "Detect". Needs a valid

@@ -24,6 +24,7 @@ const TRUNCATE_TABLES = [
   'write_offs',
   'stock_movements',
   'deduction_rules',
+  'printer_profiles',
   'product_categories',
   'products',
   'product_variants',

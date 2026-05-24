@@ -250,6 +250,11 @@ enum TakeoutChannel {
   DELIVERY_APP
 }
 
+enum PrinterConnectionType {
+  NETWORK
+  USB
+}
+
 // ============================================================================
 // Phase 6 — referenced throughout; declared first
 // ============================================================================
@@ -723,27 +728,50 @@ model DeductionRule {
   @@map("deduction_rules")
 }
 
+model PrinterProfile {
+  id              String                @id @default(uuid()) @db.Uuid
+  name            String
+  connection_type PrinterConnectionType @default(NETWORK)
+  address         String                @default("")
+  paper_width     Int                   @default(48)
+  printer_model   String                @default("epson")
+  character_set   String                @default("PC850_MULTILINGUAL")
+  prints_comandas Boolean               @default(true)
+  prints_receipts Boolean               @default(false)
+  display_order   Int                   @default(0)
+  active          Boolean               @default(true)
+  created_at      DateTime              @default(now())
+  updated_at      DateTime              @updatedAt
+
+  categories ProductCategory[] @relation("PrinterProfileCategories")
+
+  @@map("printer_profiles")
+}
+
 // ============================================================================
 // Phase 3 — Products Module
 // ============================================================================
 
 model ProductCategory {
-  id             String   @id @default(uuid()) @db.Uuid
-  name           String
-  description    String?
-  image_url      String?
-  color          String?
-  display_order  Int      @default(0)
-  visible_in_pos Boolean  @default(true)
-  parent_id      String?  @db.Uuid
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  description        String?
+  image_url          String?
+  color              String?
+  display_order      Int      @default(0)
+  visible_in_pos     Boolean  @default(true)
+  parent_id          String?  @db.Uuid
+  printer_profile_id String?  @db.Uuid
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
-  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
-  children ProductCategory[] @relation("CategoryHierarchy")
-  products Product[]
+  parent          ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children        ProductCategory[] @relation("CategoryHierarchy")
+  products        Product[]
+  printer_profile PrinterProfile?   @relation("PrinterProfileCategories", fields: [printer_profile_id], references: [id], onDelete: SetNull)
 
   @@index([parent_id])
+  @@index([printer_profile_id])
   @@map("product_categories")
 }
 

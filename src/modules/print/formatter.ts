@@ -16,6 +16,7 @@ export interface ComandaItem {
   modifiers: string[];
   notes: string | null;
   is_new: boolean;
+  category_id?: string | null;
 }
 
 export interface ComandaVoidedItem {
@@ -23,6 +24,7 @@ export interface ComandaVoidedItem {
   product_name: string;
   variant_name: string | null;
   void_reason: string | null;
+  category_id?: string | null;
 }
 
 export interface ComandaInput {

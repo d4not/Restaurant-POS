@@ -14,6 +14,14 @@ interface ImportMeta {
 type PrinterRole = 'receipt' | 'kitchen';
 type PrinterConnection = 'usb' | 'network';
 
+interface ProfileHardwareConfig {
+  connection_type: 'NETWORK' | 'USB';
+  address: string;
+  paper_width: number;
+  printer_model: string;
+  character_set: string;
+}
+
 interface PrinterRoleConfig {
   enabled: boolean;
   type: 'epson' | 'star' | 'tanca' | 'daruma' | 'brother' | 'custom';
@@ -125,6 +133,7 @@ interface ElectronBridge {
     resolve: () => Promise<PrinterResolveResult>;
     applyCandidate: (payload: { role: PrinterRole; candidate: DetectedPrinter }) => Promise<{ ok: boolean; config?: PrinterConfig; error?: string }>;
     markWorking: (payload: { role: PrinterRole; address: string }) => Promise<{ ok: boolean }>;
+    printToAddress: (config: ProfileHardwareConfig, lines: string[]) => Promise<{ ok: boolean; error?: string }>;
   };
   app: {
     openAdmin: (payload: { token: string; userId: string }) => Promise<{ ok: boolean; error?: string }>;

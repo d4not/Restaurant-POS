@@ -20,8 +20,6 @@ import { CashMovementModal } from './CashMovementModal';
 // cash / supply actions here.
 import { TransferModal } from './TransferModal';
 import { ErrandModal } from './ErrandModal';
-import { PrinterCheckPanel } from './PrinterCheckPanel';
-import { PrinterAutoSetupPanel } from './PrinterAutoSetupPanel';
 import { formatTime } from '../../utils/clock';
 import { useUi } from '../../store/ui';
 
@@ -36,9 +34,7 @@ type SubFlow =
   | 'expense'
   | 'income'
   | 'transfer'
-  | 'errand'
-  | 'printerCheck'
-  | 'printerAuto';
+  | 'errand';
 
 // Cash + reporting actions are limited to roles that handle money. Floor
 // staff (waiter/barista) still see transfer + printer check.
@@ -51,6 +47,7 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
   const isCashier = CASHIER_ROLES.has(role);
   const [subFlow, setSubFlow] = useState<SubFlow>(null);
   const openWaste = useUi((s) => s.openWaste);
+  const openSettings = useUi((s) => s.openSettings);
 
   // Reset the open child whenever the hub closes — opening it again should
   // start at the grid view, not whichever sub-flow was last in front.
@@ -168,18 +165,10 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
               title={t('hub.action.printerCheck')}
               hint={t('hub.action.printerCheckHint')}
               accent="neutral"
-              onClick={() => setSubFlow('printerCheck')}
-            />
-            {/* Desktop-only auto-setup. The card stays mounted in non-Electron
-                contexts so cashiers see it during demos — the panel itself
-                renders an "only in desktop terminal" hint when window.electron
-                isn't around. */}
-            <OperationsHubCard
-              Icon={IconPrinter}
-              title="Auto-detect printer"
-              hint="One-click USB / OS printer setup"
-              accent="gold"
-              onClick={() => setSubFlow('printerAuto')}
+              onClick={() => {
+                onClose();
+                openSettings('printers');
+              }}
             />
           </div>
         </div>
@@ -198,8 +187,6 @@ export function OperationsHubModal({ open, onClose }: OperationsHubModalProps) {
         registerId={reg?.id ?? null}
         onClose={() => setSubFlow(null)}
       />
-      <PrinterCheckPanel open={subFlow === 'printerCheck'} onClose={() => setSubFlow(null)} />
-      <PrinterAutoSetupPanel open={subFlow === 'printerAuto'} onClose={() => setSubFlow(null)} />
     </>
   );
 }

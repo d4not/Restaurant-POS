@@ -19,6 +19,7 @@ interface UiState {
   pendingPaymentForOrderId: string | null;
   menuOpen: boolean;
   settingsOpen: boolean;
+  settingsInitialSection: string | null;
   // Sticky session flag set the first time a cashier+ unlocks Order History
   // with their PIN. Cleared on PIN-screen lock / sign-out via signOutUi().
   historyUnlocked: boolean;
@@ -33,7 +34,7 @@ interface UiState {
   closeWaste: () => void;
   toggleMenu: () => void;
   closeMenu: () => void;
-  openSettings: () => void;
+  openSettings: (section?: string) => void;
   closeSettings: () => void;
   unlockHistory: () => void;
   openAdmin: () => void;
@@ -47,6 +48,7 @@ export const useUi = create<UiState>((set, get) => ({
   pendingPaymentForOrderId: null,
   menuOpen: false,
   settingsOpen: false,
+  settingsInitialSection: null,
   historyUnlocked: false,
   adminReturnView: 'orders',
   setView: (view) => set({ view, menuOpen: false }),
@@ -63,8 +65,8 @@ export const useUi = create<UiState>((set, get) => ({
   closeWaste: () => set({ view: 'orders', menuOpen: false }),
   toggleMenu: () => set((s) => ({ menuOpen: !s.menuOpen })),
   closeMenu: () => set({ menuOpen: false }),
-  openSettings: () => set({ settingsOpen: true, menuOpen: false }),
-  closeSettings: () => set({ settingsOpen: false }),
+  openSettings: (section?: string) => set({ settingsOpen: true, menuOpen: false, settingsInitialSection: section ?? null }),
+  closeSettings: () => set({ settingsOpen: false, settingsInitialSection: null }),
   unlockHistory: () => set({ historyUnlocked: true }),
   openAdmin: () => {
     // Remember where we came from so Esc lands the operator back on the same
@@ -85,6 +87,7 @@ export const useUi = create<UiState>((set, get) => ({
       pendingPaymentForOrderId: null,
       menuOpen: false,
       settingsOpen: false,
+      settingsInitialSection: null,
       historyUnlocked: false,
       adminReturnView: 'orders',
     }),

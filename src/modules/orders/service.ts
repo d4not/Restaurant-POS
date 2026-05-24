@@ -1975,7 +1975,7 @@ export async function sendToKitchen(orderId: string): Promise<SendToKitchenResul
       notes: true,
       sent_at: true,
       product: {
-        select: { id: true, name: true, type: true, station_id: true },
+        select: { id: true, name: true, type: true, station_id: true, category_id: true },
       },
       variant: { select: { id: true, name: true } },
       modifiers: { select: { id: true, name: true } },

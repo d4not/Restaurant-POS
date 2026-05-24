@@ -33,6 +33,10 @@ import {
   type PrinterTarget,
 } from './printer.js';
 import { scanForPrinters, type DiscoveredPrinter } from './discovery.js';
+import {
+  getProfilesForPrinting,
+  getRoutingMap,
+} from '../printer-profiles/service.js';
 
 export interface PrinterStatus {
   kitchen: { configured: boolean; connected: boolean; ip: string; port: number };
@@ -124,12 +128,14 @@ export async function buildKitchenComanda(orderId: string): Promise<{
     is_new:
       it.sent_at != null &&
       it.sent_at.getTime() === sendResult.printed_at.getTime(),
+    category_id: (it.product as { category_id?: string | null }).category_id ?? null,
   }));
   const voided_items = sendResult.voided_items.map((v) => ({
     quantity: v.quantity,
     product_name: v.product.name,
     variant_name: v.variant?.name ?? null,
     void_reason: v.void_reason,
+    category_id: (v.product as { category_id?: string | null }).category_id ?? null,
   }));
 
   const order = sendResult.order;
@@ -230,34 +236,173 @@ export async function buildReceipt(orderId: string): Promise<ReceiptInput> {
   };
 }
 
+export interface ProfilePrintResult {
+  profile_id: string;
+  profile_name: string;
+  ok: boolean;
+  error?: string;
+}
+
 export interface PrintKitchenResponse extends PrintResult {
   printed_count: number;
   is_correction: boolean;
-  /** Lines that were sent (or would have been sent) to the printer. */
   lines: string[];
+  profile_results?: ProfilePrintResult[];
+}
+
+function profileToTarget(profile: { address: string; paper_width: number }): PrinterTarget {
+  const [ip, portStr] = profile.address.split(':');
+  return {
+    ip: ip || '',
+    port: Number(portStr) || 9100,
+    width: profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80,
+  };
 }
 
 export async function printKitchen(orderId: string): Promise<PrintKitchenResponse> {
-  const config = await loadPrinterConfig();
   const { input, printed_count, is_correction } = await buildKitchenComanda(orderId);
-  const lines = formatKitchenComanda(input);
-  // Skip the actual TCP send when there's nothing new on the order. We still
-  // ran sendToKitchen above so its no-op contract holds.
+
   if (printed_count === 0) {
-    return { ok: true, printed_count, is_correction, lines };
+    return { ok: true, printed_count, is_correction, lines: [] };
   }
+
+  // Try profile-based routing first
+  const profiles = await getProfilesForPrinting('comandas');
+  if (profiles.length > 0) {
+    return printKitchenMultiProfile(input, printed_count, is_correction, profiles);
+  }
+
+  // Fallback to legacy single-printer path
+  const config = await loadPrinterConfig();
+  const lines = formatKitchenComanda(input);
   const result = await sendLines(config.kitchen, lines);
   return { ...result, printed_count, is_correction, lines };
 }
 
+async function printKitchenMultiProfile(
+  input: ComandaInput,
+  printed_count: number,
+  is_correction: boolean,
+  profiles: Awaited<ReturnType<typeof getProfilesForPrinting>>,
+): Promise<PrintKitchenResponse> {
+  const routingMap = await getRoutingMap();
+
+  // Build a map: profileId → profile (for fast lookup)
+  const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+  // Group items by destination profile
+  const grouped = new Map<string, typeof input.items>();
+  const voidedGrouped = new Map<string, typeof input.voided_items>();
+
+  for (const item of input.items) {
+    const profileId = item.category_id ? routingMap[item.category_id] : undefined;
+    if (!profileId || !profileMap.has(profileId)) continue;
+    const list = grouped.get(profileId) ?? [];
+    list.push(item);
+    grouped.set(profileId, list);
+  }
+
+  for (const voided of input.voided_items) {
+    const profileId = voided.category_id ? routingMap[voided.category_id] : undefined;
+    if (!profileId || !profileMap.has(profileId)) continue;
+    const list = voidedGrouped.get(profileId) ?? [];
+    list.push(voided);
+    voidedGrouped.set(profileId, list);
+  }
+
+  const profileResults: ProfilePrintResult[] = [];
+  const allLines: string[] = [];
+
+  for (const [profileId, items] of grouped) {
+    const profile = profileMap.get(profileId)!;
+    if (!profile.address) continue;
+
+    const profileInput: ComandaInput = {
+      ...input,
+      items,
+      voided_items: voidedGrouped.get(profileId) ?? [],
+      width: paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80),
+    };
+    const lines = formatKitchenComanda(profileInput);
+    allLines.push(...lines);
+
+    const target = profileToTarget(profile);
+    const result = await sendLines(target, lines);
+    profileResults.push({
+      profile_id: profileId,
+      profile_name: profile.name,
+      ok: result.ok,
+      error: result.error,
+    });
+  }
+
+  // Also send voided items to profiles that aren't receiving new items
+  for (const [profileId, voidedItems] of voidedGrouped) {
+    if (grouped.has(profileId)) continue;
+    const profile = profileMap.get(profileId)!;
+    if (!profile.address) continue;
+
+    const profileInput: ComandaInput = {
+      ...input,
+      items: [],
+      voided_items: voidedItems,
+      width: paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80),
+    };
+    const lines = formatKitchenComanda(profileInput);
+    allLines.push(...lines);
+
+    const target = profileToTarget(profile);
+    const result = await sendLines(target, lines);
+    profileResults.push({
+      profile_id: profileId,
+      profile_name: profile.name,
+      ok: result.ok,
+      error: result.error,
+    });
+  }
+
+  return {
+    ok: profileResults.length === 0 || profileResults.every((r) => r.ok),
+    printed_count,
+    is_correction,
+    lines: allLines,
+    profile_results: profileResults,
+  };
+}
+
 export interface PrintReceiptResponse extends PrintResult {
   lines: string[];
+  profile_results?: ProfilePrintResult[];
 }
 
 export async function printReceipt(orderId: string): Promise<PrintReceiptResponse> {
-  const config = await loadPrinterConfig();
   const input = await buildReceipt(orderId);
   const lines = formatReceipt(input);
+
+  // Try profile-based routing first
+  const profiles = await getProfilesForPrinting('receipts');
+  if (profiles.length > 0) {
+    const results: ProfilePrintResult[] = [];
+    for (const profile of profiles) {
+      if (!profile.address) continue;
+      const target = profileToTarget(profile);
+      const result = await sendLines(target, lines);
+      results.push({
+        profile_id: profile.id,
+        profile_name: profile.name,
+        ok: result.ok,
+        error: result.error,
+      });
+    }
+    return {
+      ok: results.length === 0 || results.every((r) => r.ok),
+      lines,
+      profile_results: results,
+    };
+  }
+
+  // Fallback to legacy single-printer path
+  const config = await loadPrinterConfig();
   const result = await sendLines(config.receipt, lines);
   return { ...result, lines };
 }
