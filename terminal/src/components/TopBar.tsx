@@ -620,7 +620,7 @@ export function TopBar() {
                 <span>{t('admin.openFromMenu')}</span>
               </button>
             )}
-            <button type="button" style={styles.drawerItem} onClick={openSettings}>
+            <button type="button" style={styles.drawerItem} onClick={() => openSettings()}>
               <IconSettings />
               <span>{t('nav.settings')}</span>
             </button>

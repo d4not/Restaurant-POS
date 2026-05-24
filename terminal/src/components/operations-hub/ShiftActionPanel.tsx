@@ -5,11 +5,17 @@ import {
   fetchCurrentRegister,
   openRegister,
 } from '../../api/registers';
+import { fetchSettings, type SettingsMap } from '../../api/settings';
 import { ApiError } from '../../api/client';
 import { useSession } from '../../store/session';
 import { Spinner } from '../Spinner';
 import { formatMoney } from '../../utils/format';
 import { useTranslation } from '../../i18n';
+import { CashCounter } from '../cash-count';
+import { ShortageAnalyzer } from '../cash-count/ShortageAnalyzer';
+import { useCashCounter } from '../../hooks/useCashCounter';
+import { analyzeShortage } from '../../utils/shortage-analysis';
+import type { CashBreakdown } from '../../utils/cashCount';
 import { hubStyles } from './styles';
 
 interface ShiftActionPanelProps {
@@ -17,10 +23,6 @@ interface ShiftActionPanelProps {
   onClose: () => void;
 }
 
-// Closing a normal shift is allowed in the POS for mid-day cashier swaps.
-// "End the day" (DailyReport close) is intentionally NOT exposed here — it
-// lives only in Admin Mode → Shifts so the night cut happens off the
-// counter, where the operator can audit the full day's payment breakdown.
 const ROLES_WITH_REGISTER: ReadonlySet<string> = new Set(['CASHIER', 'MANAGER', 'ADMIN']);
 
 const localStyles: Record<string, React.CSSProperties> = {
@@ -53,15 +55,9 @@ const localStyles: Record<string, React.CSSProperties> = {
     fontVariantNumeric: 'tabular-nums',
     textAlign: 'right',
   },
-  // Blind close colour mapping:
-  //   green  → balanced (diff = 0)
-  //   amber  → surplus (diff > 0)
-  //   red    → shortage (diff < 0)
   diffZero: { color: 'var(--green)' },
   diffPos: { color: 'var(--gold)' },
   diffNeg: { color: 'var(--red)' },
-  // Footer note pointing the operator to Admin Mode for the day cut. Quiet
-  // visual weight — the cashier is closing their shift, not closing the day.
   endDayNote: {
     marginTop: 18,
     padding: '10px 12px',
@@ -74,55 +70,53 @@ const localStyles: Record<string, React.CSSProperties> = {
   },
 };
 
-function parseAmount(input: string): number | null {
-  const cleaned = input.replace(/[^0-9.,]/g, '').replace(/,/g, '.');
-  const parts = cleaned.split('.');
-  if (parts.length > 2) return null;
-  const value = Number(cleaned);
-  if (!Number.isFinite(value) || value < 0) return null;
-  return Math.round(value * 100);
+function settingBool(settings: SettingsMap | undefined, key: string, fallback: boolean): boolean {
+  if (!settings || !(key in settings)) return fallback;
+  return settings[key] !== 'false';
 }
 
 interface CloseResult {
   submittedAmount: number;
   expectedAmount: string;
   difference: string;
+  breakdown?: CashBreakdown;
 }
 
-// Sub-modal for opening/closing the cash register. Mounted as a child of the
-// Operations Hub at zIndex 80. Replaces the previous standalone
-// ShiftManagerModal — same logic, no scrim/modal of its own (the panel manages
-// its own scrim so it can stack above the hub).
-//
-// Close flow follows the blind-close model from REPORTS-SPEC §4.4: the
-// cashier sees ONLY the count prompt before submitting. expected_amount and
-// difference are revealed once the backend response lands, in a results
-// screen that survives until the cashier dismisses it.
 export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const { t } = useTranslation();
   const role = useSession((s) => s.user?.role ?? 'WAITER');
   const canManage = ROLES_WITH_REGISTER.has(role);
   const queryClient = useQueryClient();
 
-  // Singleton shift lookup — the hub manages whichever shift is currently
-  // open, even if it belongs to a different user.
   const registerQuery = useQuery({
     queryKey: ['register', 'current'],
     queryFn: fetchCurrentRegister,
     enabled: open && canManage,
   });
 
-  const [openingInput, setOpeningInput] = useState('');
-  const [actualInput, setActualInput] = useState('');
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
+
+  const currency = settingsQuery.data?.currency ?? 'MXN';
+  const hideSubunits = settingBool(settingsQuery.data, 'cash_count_hide_subunits', true);
+
+  const openCounter = useCashCounter({ currency, hideSubunits });
+  const closeCounter = useCashCounter({ currency, hideSubunits });
+
   const [error, setError] = useState<string | null>(null);
   const [closeResult, setCloseResult] = useState<CloseResult | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setOpeningInput('');
-    setActualInput('');
+    openCounter.reset();
+    closeCounter.reset();
     setError(null);
     setCloseResult(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function invalidateRegisterQueries() {
@@ -130,7 +124,13 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   }
 
   const openMutation = useMutation({
-    mutationFn: (amountCentavos: number) => openRegister({ opening_amount: amountCentavos }),
+    mutationFn: (input: { amount: number; breakdown: CashBreakdown }) =>
+      openRegister({
+        opening_amount: input.amount,
+        denomination_breakdown: Object.keys(input.breakdown).length > 0
+          ? input.breakdown
+          : undefined,
+      }),
     onSuccess: (reg) => {
       queryClient.setQueryData(['register', 'current'], reg);
       invalidateRegisterQueries();
@@ -139,43 +139,25 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotOpen')),
   });
 
-  // Blind close: the cashier counts the drawer without seeing the expected
-  // value, the backend computes it, and we reveal both numbers on the
-  // results screen. The day cut (closing the DailyReport) deliberately does
-  // NOT live here — that action moved to Admin Mode → Shifts.
-  //
-  // We do NOT call onClose() on success: the response is the first time the
-  // cashier sees expected_amount/difference, so we hold the panel open and
-  // render the results screen until they dismiss it.
-  //
-  // The cache invalidation is also deferred to dismiss time: if we cleared
-  // ['register','current'] here, App.tsx's singleton-shift gate would flip to
-  // null mid-flight and unmount the whole TopBar → Operations Hub → this
-  // panel, dropping the cashier on NoActiveShiftScreen before they ever see
-  // whether the drawer balanced. See handleDismiss() below.
   const closeMutation = useMutation({
-    mutationFn: ({
-      id,
-      amountCentavos,
-    }: {
-      id: string;
-      amountCentavos: number;
-    }) => closeRegister(id, { actual_amount: amountCentavos }),
+    mutationFn: (input: { id: string; amount: number; breakdown: CashBreakdown }) =>
+      closeRegister(input.id, {
+        actual_amount: input.amount,
+        denomination_breakdown: Object.keys(input.breakdown).length > 0
+          ? input.breakdown
+          : undefined,
+      }),
     onSuccess: (closed, variables) => {
       setCloseResult({
-        submittedAmount: variables.amountCentavos,
+        submittedAmount: variables.amount,
         expectedAmount: closed.expected_amount,
         difference: closed.difference ?? '0',
+        breakdown: variables.breakdown,
       });
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotClose')),
   });
 
-  // Wraps the parent onClose so dismissing the results screen is the moment
-  // we tell the rest of the app the shift is gone. Before that, the singleton
-  // register cache still points at the (now-closed-on-the-server) shift, but
-  // that's fine — the panel is the only interactive surface while results
-  // are up, and the next refetch / invalidation pass will reconcile.
   function handleDismiss() {
     if (closeResult) {
       queryClient.setQueryData(['register', 'current'], null);
@@ -184,11 +166,6 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     onClose();
   }
 
-  // Esc/Enter only fires when this panel is the topmost modal (zIndex 80) —
-  // listener removed on close so the hub's own listener doesn't get
-  // double-fired when this panel unmounts.
-  //
-  // While the results screen is up, both Esc and Enter just dismiss it.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -198,19 +175,15 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
         handleDismiss();
         return;
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && closeResult) {
         e.preventDefault();
-        if (closeResult) {
-          handleDismiss();
-        } else {
-          submit();
-        }
+        handleDismiss();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, openingInput, actualInput, registerQuery.data, closeResult]);
+  }, [open, closeResult]);
 
   if (!open) return null;
 
@@ -239,29 +212,24 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     if (registerQuery.isLoading) return;
     if (closeResult) return;
     if (reg) {
-      // Provisional shifts must be verified via the banner — closing them
-      // here would lose the partial-cut audit trail. The backend also
-      // refuses, but catching it client-side gives a clearer message.
       if (reg.is_provisional) {
         setError(t('provisional.closeBlocked'));
         return;
       }
-      const amt = parseAmount(actualInput);
-      if (amt == null) {
+      if (closeCounter.total === 0) {
         setError(t('register.enterCounted'));
         return;
       }
       closeMutation.mutate({
         id: reg.id,
-        amountCentavos: amt,
+        amount: closeCounter.total,
+        breakdown: closeCounter.breakdown,
       });
     } else {
-      const amt = parseAmount(openingInput);
-      if (amt == null) {
-        setError(t('register.enterStarting'));
-        return;
-      }
-      openMutation.mutate(amt);
+      openMutation.mutate({
+        amount: openCounter.total,
+        breakdown: openCounter.breakdown,
+      });
     }
   }
 
@@ -274,10 +242,10 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
     subtitle = t('register.resultsSubNormal');
   } else if (reg) {
     title = t('register.closeShift');
-    subtitle = t('register.closeShiftSub');
+    subtitle = t('register.countByDenominationHint');
   } else {
     title = t('register.openShift');
-    subtitle = t('register.openShiftSub');
+    subtitle = t('register.countByDenominationHint');
   }
 
   let primaryLabel: string;
@@ -296,9 +264,11 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const showCancel = !isResults;
   const showSpinner = !isResults && (openMutation.isPending || closeMutation.isPending);
 
+  const modalStyle = isResults ? hubStyles.childModal : hubStyles.wideChildModal;
+
   return (
     <div style={hubStyles.childScrim} onClick={handleDismiss}>
-      <div style={hubStyles.childModal} onClick={(e) => e.stopPropagation()} role="dialog">
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()} role="dialog">
         <div style={hubStyles.head}>
           <h2 style={hubStyles.title}>{title}</h2>
           <div style={hubStyles.sub}>{subtitle}</div>
@@ -310,14 +280,25 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
               <Spinner size={16} /> {t('register.checkingState')}
             </div>
           ) : isResults ? (
-            <CloseResultsBody result={closeResult!} />
+            <CloseResultsBody result={closeResult!} currency={currency} />
           ) : reg ? (
-            <BlindCountBody
-              actualInput={actualInput}
-              setActualInput={setActualInput}
-            />
+            <>
+              <CashCounter
+                currency={currency}
+                value={closeCounter.breakdown}
+                onChange={closeCounter.applyBreakdown}
+                blind
+                hideSubunits={hideSubunits}
+              />
+              <div style={localStyles.endDayNote}>{t('register.endDayInAdmin')}</div>
+            </>
           ) : (
-            <OpenShiftBody openingInput={openingInput} setOpeningInput={setOpeningInput} />
+            <CashCounter
+              currency={currency}
+              value={openCounter.breakdown}
+              onChange={openCounter.applyBreakdown}
+              hideSubunits={hideSubunits}
+            />
           )}
           {error && !isResults && <div style={hubStyles.errBanner}>{error}</div>}
         </div>
@@ -343,67 +324,12 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   );
 }
 
-interface OpenBodyProps {
-  openingInput: string;
-  setOpeningInput: (value: string) => void;
-}
-
-function OpenShiftBody({ openingInput, setOpeningInput }: OpenBodyProps) {
-  const { t } = useTranslation();
-  return (
-    <div style={hubStyles.field}>
-      <label style={hubStyles.label}>{t('register.openingCash')} (MXN)</label>
-      <input
-        autoFocus
-        inputMode="decimal"
-        style={hubStyles.input}
-        placeholder="500.00"
-        value={openingInput}
-        onChange={(e) => setOpeningInput(e.target.value)}
-      />
-      <span style={hubStyles.hint}>{t('register.openingHint')}</span>
-    </div>
-  );
-}
-
-interface BlindCountBodyProps {
-  actualInput: string;
-  setActualInput: (value: string) => void;
-}
-
-// Blind count: no opening cash, no expected total, no live diff. The
-// cashier counts the drawer, the backend response then reveals expected and
-// difference together in CloseResultsBody. Ending the day is intentionally
-// not surfaced here — it lives in Admin Mode → Shifts (the night cut).
-function BlindCountBody({
-  actualInput,
-  setActualInput,
-}: BlindCountBodyProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <div style={hubStyles.field}>
-        <label style={hubStyles.label}>{t('register.blindCountPrompt')} (MXN)</label>
-        <input
-          autoFocus
-          inputMode="decimal"
-          style={hubStyles.input}
-          placeholder="0.00"
-          value={actualInput}
-          onChange={(e) => setActualInput(e.target.value)}
-        />
-        <span style={hubStyles.hint}>{t('register.blindCountHint')}</span>
-      </div>
-      <div style={localStyles.endDayNote}>{t('register.endDayInAdmin')}</div>
-    </>
-  );
-}
-
 interface CloseResultsBodyProps {
   result: CloseResult;
+  currency: string;
 }
 
-function CloseResultsBody({ result }: CloseResultsBodyProps) {
+function CloseResultsBody({ result, currency }: CloseResultsBodyProps) {
   const { t } = useTranslation();
   const diffNum = Number(result.difference);
   const diffSign: 'pos' | 'neg' | 'zero' =
@@ -415,6 +341,10 @@ function CloseResultsBody({ result }: CloseResultsBodyProps) {
         ? localStyles.diffPos
         : localStyles.diffNeg;
   const diffPrefix = diffNum > 0 ? '+' : '';
+
+  const hints = diffNum !== 0
+    ? analyzeShortage({ diffCentavos: diffNum, currency })
+    : [];
 
   return (
     <>
@@ -436,6 +366,11 @@ function CloseResultsBody({ result }: CloseResultsBodyProps) {
           {diffNum === 0 ? formatMoney(0) : diffPrefix + formatMoney(result.difference)}
         </span>
       </div>
+      {hints.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <ShortageAnalyzer hints={hints} currency={currency} />
+        </div>
+      )}
     </>
   );
 }
