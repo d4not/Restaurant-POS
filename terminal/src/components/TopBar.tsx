@@ -486,13 +486,14 @@ export function TopBar() {
         <div style={styles.left}>
           <div className="topbar-brand-wrap" style={styles.brandWrap}>
             <div style={styles.brand}>R</div>
-            <div style={styles.brandText}>
+            <div className="topbar-brand-text" style={styles.brandText}>
               <span style={styles.brandName}>Restaurant POS</span>
               <span className="topbar-brand-sub" style={styles.brandSub}>Terminal</span>
             </div>
           </div>
           <button
             type="button"
+            className="topbar-new-order-btn"
             style={{
               ...styles.newOrderBtn,
               ...(takeoutMutation.isPending ? styles.newOrderBtnDisabled : null),
@@ -520,7 +521,7 @@ export function TopBar() {
           {detailSub && <span style={styles.detailSub}>{detailSub}</span>}
         </div>
       ) : (
-        <nav style={styles.navList}>
+        <nav className="topbar-nav" style={styles.navList}>
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const active = view === tab.view;
@@ -528,11 +529,14 @@ export function TopBar() {
               <button
                 key={tab.view}
                 type="button"
+                className="topbar-tab"
                 style={navBtnStyle(active)}
                 onClick={() => handleTabClick(tab)}
+                title={t(tab.labelKey)}
+                aria-label={t(tab.labelKey)}
               >
                 <Icon style={{ fontSize: 18 }} />
-                <span>{t(tab.labelKey)}</span>
+                <span className="topbar-tab-label">{t(tab.labelKey)}</span>
               </button>
             );
           })}
@@ -541,7 +545,7 @@ export function TopBar() {
 
       <div className="topbar-right" style={styles.right}>
         <OperationsPill onClick={() => setHubOpen(true)} />
-        <div style={styles.clockGroup}>
+        <div className="topbar-clock" style={styles.clockGroup}>
           <span style={styles.clockTime}>{formatTime(now)}</span>
           <span className="topbar-clock-date" style={styles.clockDate}>{formatDate(now)}</span>
         </div>
@@ -551,8 +555,8 @@ export function TopBar() {
             {user ? getInitials(user.name) : '·'}
           </div>
           <div className="topbar-user-text" style={styles.userText}>
-            <span style={styles.userName}>{user?.name ?? t('nav.signOut')}</span>
-            <span style={styles.userMeta}>{user?.role ?? '—'}</span>
+            <span className="topbar-user-name" style={styles.userName}>{user?.name ?? t('nav.signOut')}</span>
+            <span className="topbar-user-meta" style={styles.userMeta}>{user?.role ?? '—'}</span>
           </div>
         </div>
 

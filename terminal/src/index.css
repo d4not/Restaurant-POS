@@ -112,3 +112,44 @@ input, textarea, [contenteditable] { user-select: text; }
 
 /* Tap highlight off; touch targets get their own active states. */
 * { -webkit-tap-highlight-color: transparent; }
+
+/* ── Responsive TopBar ───────────────────────────────────────────────────
+ * The header is a `1fr auto 1fr` grid (left brand+actions / center nav /
+ * right pill+clock+user+menu). On narrower viewports the right column's
+ * natural width exceeds its track and overflows into the centered nav,
+ * which is what causes the visual "Operations" / "Order History" overlap.
+ * Strategy: progressively strip secondary TEXT so icons survive. Every
+ * control stays reachable — icons + status dot + avatar are enough to
+ * communicate shift state, current user, and tab selection. */
+.topbar-root {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+}
+.topbar-right { flex-wrap: nowrap; }
+
+/* ≤ 1500px — first squeeze: drop the smallest decorative labels. */
+@media (max-width: 1500px) {
+  .topbar-brand-sub { display: none !important; }
+  .topbar-clock-date { display: none !important; }
+  .topbar-user-meta { display: none !important; }
+  .topbar-ops-label { display: none !important; }
+  .topbar-root { gap: 12px !important; padding: 0 12px !important; }
+}
+
+/* ≤ 1300px — collapse text inside CTAs and identity blocks.
+ * Plus icon, dot, brand square and avatar remain. */
+@media (max-width: 1300px) {
+  .topbar-brand-text { display: none !important; }
+  .topbar-brand-wrap { padding-right: 10px !important; }
+  .topbar-takeout-label { display: none !important; }
+  .topbar-user-text { display: none !important; }
+  .topbar-user { padding-left: 10px !important; gap: 0 !important; }
+  .topbar-right { gap: 10px !important; }
+}
+
+/* ≤ 1100px — drop the clock and shrink tabs to icon-only.
+ * Tab labels are preserved via `title` + `aria-label`. */
+@media (max-width: 1100px) {
+  .topbar-clock { display: none !important; }
+  .topbar-tab-label { display: none !important; }
+  .topbar-tab { padding: 8px 10px !important; }
+}

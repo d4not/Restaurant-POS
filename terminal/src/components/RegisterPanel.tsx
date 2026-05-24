@@ -70,19 +70,22 @@ export function OperationsPill({ onClick }: ShiftPillProps) {
         ? 'var(--green)'
         : 'var(--red)';
 
+  const pillLabel = isProvisional ? t('register.provisionalBadge') : t('topbar.operations');
+
   return (
     <button
       type="button"
+      className="topbar-ops-pill"
       style={{
         ...styles.pill,
         ...(isProvisional ? styles.pillProvisional : null),
       }}
       onClick={onClick}
+      title={pillLabel}
+      aria-label={pillLabel}
     >
       <span style={{ ...styles.pillDot, background: dotColor }} />
-      <span>
-        {isProvisional ? t('register.provisionalBadge') : t('topbar.operations')}
-      </span>
+      <span className="topbar-ops-label">{pillLabel}</span>
     </button>
   );
 }
