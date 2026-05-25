@@ -28,3 +28,42 @@ export async function fetchLowStockAlerts(params: { storage_id?: string } = {}):
   );
   return items;
 }
+
+export interface AlertRow {
+  id: string;
+  type: string;
+  severity: string;
+  message: string;
+  resolved: boolean;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  resolution: string | null;
+  user_id: string | null;
+  shift_report_id: string | null;
+  created_at: string;
+  data: Record<string, unknown>;
+}
+
+export interface ResolveAlertInput {
+  resolution: string;
+  resolution_type?: 'no_action' | 'resolved' | 'charge_to_payroll';
+  charge_amount?: number;
+}
+
+export async function fetchAlerts(params: {
+  shift_report_id?: string;
+  resolved?: boolean;
+}): Promise<AlertRow[]> {
+  const sp = new URLSearchParams();
+  if (params.shift_report_id) sp.set('shift_report_id', params.shift_report_id);
+  if (params.resolved !== undefined) sp.set('resolved', String(params.resolved));
+  const qs = sp.toString();
+  const { items } = await api.get<{ items: AlertRow[] }>(
+    `/alerts${qs ? `?${qs}` : ''}`,
+  );
+  return items;
+}
+
+export async function resolveAlert(id: string, body: ResolveAlertInput): Promise<AlertRow> {
+  return api.patch<AlertRow>(`/alerts/${id}/resolve`, body);
+}

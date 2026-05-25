@@ -83,6 +83,7 @@ export async function listAlerts(query: ListAlertQuery) {
     ...(query.type ? { type: query.type } : {}),
     ...(query.severity ? { severity: query.severity } : {}),
     ...(query.resolved !== undefined ? { resolved: query.resolved } : {}),
+    ...(query.shift_report_id ? { shift_report_id: query.shift_report_id } : {}),
     ...(query.from || query.to
       ? {
           created_at: {
@@ -105,6 +106,9 @@ export async function listAlerts(query: ListAlertQuery) {
  * Mark an alert as resolved. Idempotent only by id — re-resolving an already
  * resolved alert is rejected so the audit fields (resolved_by_id / resolved_at /
  * resolution) stay write-once.
+ *
+ * When resolution_type is 'charge_to_payroll', the cashier's DRAFT payroll
+ * period for the shift's week gets its deductions incremented.
  */
 export async function resolveAlert(
   id: string,
@@ -114,12 +118,47 @@ export async function resolveAlert(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.alert.findUnique({
       where: { id },
-      select: { id: true, resolved: true },
+      select: { id: true, resolved: true, user_id: true, shift_report_id: true },
     });
     if (!existing) throw new NotFoundError('Alert');
     if (existing.resolved) {
       throw new ConflictError('Alert is already resolved');
     }
+
+    if (input.resolution_type === 'charge_to_payroll' && input.charge_amount) {
+      if (!existing.user_id) {
+        throw new ConflictError('Alert has no associated user for payroll deduction');
+      }
+      const shiftClosedAt = existing.shift_report_id
+        ? await tx.shiftReport.findUnique({
+            where: { id: existing.shift_report_id },
+            select: { cash_register: { select: { closed_at: true } } },
+          }).then((r) => r?.cash_register?.closed_at)
+        : null;
+
+      const weekStart = getWeekStart(shiftClosedAt ?? new Date());
+      const payroll = await tx.payrollPeriod.findFirst({
+        where: { user_id: existing.user_id, week_start: weekStart, status: 'DRAFT' },
+      });
+      if (!payroll) {
+        throw new ConflictError(
+          'No DRAFT payroll period found for the cashier in this week. Generate payroll first.',
+        );
+      }
+      const newDeductions = new Decimal(payroll.deductions).add(input.charge_amount);
+      const newNet = new Decimal(payroll.gross_pay).sub(newDeductions).add(payroll.bonuses);
+      await tx.payrollPeriod.update({
+        where: { id: payroll.id },
+        data: {
+          deductions: newDeductions.toFixed(0),
+          net_pay: newNet.toFixed(0),
+          notes: payroll.notes
+            ? `${payroll.notes}\nCash shortage deduction: $${(input.charge_amount / 100).toFixed(2)}`
+            : `Cash shortage deduction: $${(input.charge_amount / 100).toFixed(2)}`,
+        },
+      });
+    }
+
     await tx.alert.update({
       where: { id },
       data: {
@@ -131,4 +170,13 @@ export async function resolveAlert(
     });
     return tx.alert.findUniqueOrThrow({ where: { id }, include: alertInclude });
   });
+}
+
+function getWeekStart(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }

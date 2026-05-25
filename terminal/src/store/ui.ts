@@ -25,6 +25,10 @@ interface UiState {
   historyUnlocked: boolean;
   // Where admin mode returns to on Esc / Back. Captured on openAdmin().
   adminReturnView: AdminReturnView;
+  // True while the shift close results screen is displayed. Prevents App.tsx
+  // from navigating to NoActiveShiftScreen before the cashier acknowledges.
+  shiftCloseInProgress: boolean;
+  setShiftCloseInProgress: (v: boolean) => void;
   setView: (view: TerminalView) => void;
   openOrderDetail: (orderId: string) => void;
   openOrderPayment: (orderId: string) => void;
@@ -51,6 +55,8 @@ export const useUi = create<UiState>((set, get) => ({
   settingsInitialSection: null,
   historyUnlocked: false,
   adminReturnView: 'orders',
+  shiftCloseInProgress: false,
+  setShiftCloseInProgress: (v) => set({ shiftCloseInProgress: v }),
   setView: (view) => set({ view, menuOpen: false }),
   openOrderDetail: (orderId) =>
     set({ view: 'detail', detailOrderId: orderId, pendingPaymentForOrderId: null, menuOpen: false }),

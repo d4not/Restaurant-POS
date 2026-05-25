@@ -25,6 +25,12 @@ import {
   type CashRegisterDetail,
 } from '../../../api/registers';
 import {
+  fetchAlerts,
+  resolveAlert as resolveAlertApi,
+  type AlertRow,
+  type ResolveAlertInput,
+} from '../../../api/alerts';
+import {
   closeDailyReport,
   fetchTodayDailyReport,
   listDailyReports,
@@ -1025,6 +1031,7 @@ function ShiftDetail({ row }: { row: CashRegisterDetail }) {
   const movements = row.cash_movements ?? [];
   const provisionalDiff = row.provisional_difference;
   const provisionalActual = row.provisional_actual_amount;
+  const hasDiff = row.difference !== null && row.difference !== undefined && Number(row.difference) !== 0;
 
   return (
     <div style={detailStyle.root}>
@@ -1092,6 +1099,13 @@ function ShiftDetail({ row }: { row: CashRegisterDetail }) {
           </div>
         )}
 
+      {hasDiff && row.shift_report?.id && (
+        <DiscrepancyResolutionPanel
+          shiftReportId={row.shift_report.id}
+          difference={row.difference!}
+        />
+      )}
+
       {movements.length > 0 && (
         <div style={detailStyle.movementsSection}>
           <div style={detailStyle.movementsTitle}>
@@ -1124,6 +1138,360 @@ function ShiftDetail({ row }: { row: CashRegisterDetail }) {
     </div>
   );
 }
+
+// Resolution panel for shifts with cash discrepancies. Fetches unresolved
+// alerts and provides manager actions: no action, resolved, charge to payroll.
+function DiscrepancyResolutionPanel({
+  shiftReportId,
+  difference,
+}: {
+  shiftReportId: string;
+  difference: string;
+}) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const role = useSession((s) => s.user?.role ?? 'WAITER');
+  const canResolve = role === 'MANAGER' || role === 'ADMIN';
+
+  const alertsQuery = useQuery({
+    queryKey: ['alerts', 'shift', shiftReportId],
+    queryFn: () => fetchAlerts({ shift_report_id: shiftReportId, resolved: false }),
+    staleTime: 30_000,
+  });
+
+  const resolvedQuery = useQuery({
+    queryKey: ['alerts', 'shift', shiftReportId, 'resolved'],
+    queryFn: () => fetchAlerts({ shift_report_id: shiftReportId, resolved: true }),
+    staleTime: 30_000,
+  });
+
+  const [mode, setMode] = useState<'idle' | 'resolve_text' | 'charge'>('idle');
+  const [resolutionText, setResolutionText] = useState('');
+  const [chargeAmount, setChargeAmount] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const resolveMutation = useMutation({
+    mutationFn: ({ alertId, body }: { alertId: string; body: ResolveAlertInput }) =>
+      resolveAlertApi(alertId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts', 'shift', shiftReportId] });
+      setMode('idle');
+      setResolutionText('');
+      setChargeAmount('');
+      setError(null);
+    },
+    onError: (err) => {
+      setError(err instanceof ApiError ? err.message : t('common.error'));
+    },
+  });
+
+  const unresolvedAlert = alertsQuery.data?.[0] ?? null;
+  const resolvedAlert = resolvedQuery.data?.[0] ?? null;
+
+  if (alertsQuery.isLoading) return null;
+
+  // Already resolved — show the resolution
+  if (!unresolvedAlert && resolvedAlert) {
+    return (
+      <div style={resPanel.root}>
+        <div style={resPanel.header}>
+          <span style={resPanel.badge.resolved}>{t('admin.shiftAudit.resolution.resolved')}</span>
+        </div>
+        <div style={resPanel.resolutionText}>{resolvedAlert.resolution}</div>
+      </div>
+    );
+  }
+
+  // No alert at all (discrepancy below threshold and not flagged)
+  if (!unresolvedAlert) return null;
+
+  const absDiff = Math.abs(Number(difference));
+  const defaultCharge = String((absDiff / 100).toFixed(2));
+
+  function handleNoAction() {
+    if (!unresolvedAlert) return;
+    resolveMutation.mutate({
+      alertId: unresolvedAlert.id,
+      body: { resolution: t('admin.shiftAudit.resolution.noActionText'), resolution_type: 'no_action' },
+    });
+  }
+
+  function handleResolveSubmit() {
+    if (!unresolvedAlert || !resolutionText.trim()) return;
+    resolveMutation.mutate({
+      alertId: unresolvedAlert.id,
+      body: { resolution: resolutionText.trim(), resolution_type: 'resolved' },
+    });
+  }
+
+  function handleChargeSubmit() {
+    if (!unresolvedAlert) return;
+    const cents = Math.round(parseFloat(chargeAmount || defaultCharge) * 100);
+    if (!cents || cents <= 0) {
+      setError(t('admin.shiftAudit.resolution.invalidAmount'));
+      return;
+    }
+    resolveMutation.mutate({
+      alertId: unresolvedAlert.id,
+      body: {
+        resolution: `Charged $${(cents / 100).toFixed(2)} to cashier payroll`,
+        resolution_type: 'charge_to_payroll',
+        charge_amount: cents,
+      },
+    });
+  }
+
+  if (!canResolve) {
+    return (
+      <div style={resPanel.root}>
+        <div style={resPanel.header}>
+          <span style={resPanel.badge.pending}>{t('admin.shiftAudit.resolution.pendingReview')}</span>
+          <span style={resPanel.alertMsg}>{unresolvedAlert.message}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={resPanel.root}>
+      <div style={resPanel.header}>
+        <span style={resPanel.badge.pending}>{t('admin.shiftAudit.resolution.title')}</span>
+        <span style={resPanel.alertMsg}>{unresolvedAlert.message}</span>
+      </div>
+
+      {mode === 'idle' && (
+        <div style={resPanel.actions}>
+          <button type="button" style={resPanel.actionBtn} onClick={handleNoAction} disabled={resolveMutation.isPending}>
+            {resolveMutation.isPending && <Spinner size={10} />}
+            {t('admin.shiftAudit.resolution.noAction')}
+          </button>
+          <button type="button" style={resPanel.actionBtn} onClick={() => setMode('resolve_text')}>
+            {t('admin.shiftAudit.resolution.markResolved')}
+          </button>
+          <button type="button" style={{ ...resPanel.actionBtn, ...resPanel.actionBtnDanger }} onClick={() => { setChargeAmount(defaultCharge); setMode('charge'); }}>
+            {t('admin.shiftAudit.resolution.chargeToPayroll')}
+          </button>
+        </div>
+      )}
+
+      {mode === 'resolve_text' && (
+        <div style={resPanel.form}>
+          <textarea
+            style={resPanel.textarea}
+            placeholder={t('admin.shiftAudit.resolution.explainPlaceholder')}
+            value={resolutionText}
+            onChange={(e) => setResolutionText(e.target.value)}
+            rows={2}
+          />
+          <div style={resPanel.formActions}>
+            <button type="button" style={resPanel.cancelBtn} onClick={() => setMode('idle')}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              style={resPanel.confirmBtn}
+              onClick={handleResolveSubmit}
+              disabled={!resolutionText.trim() || resolveMutation.isPending}
+            >
+              {resolveMutation.isPending && <Spinner size={10} />}
+              {t('common.confirm')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === 'charge' && (
+        <div style={resPanel.form}>
+          <div style={resPanel.chargeRow}>
+            <span style={resPanel.chargeLabel}>{t('admin.shiftAudit.resolution.chargeAmount')}</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              style={resPanel.chargeInput}
+              value={chargeAmount}
+              onChange={(e) => setChargeAmount(e.target.value)}
+            />
+          </div>
+          <div style={resPanel.formActions}>
+            <button type="button" style={resPanel.cancelBtn} onClick={() => setMode('idle')}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              style={{ ...resPanel.confirmBtn, background: 'var(--red)', borderColor: 'var(--red)' }}
+              onClick={handleChargeSubmit}
+              disabled={resolveMutation.isPending}
+            >
+              {resolveMutation.isPending && <Spinner size={10} />}
+              {t('admin.shiftAudit.resolution.confirmCharge')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <div style={resPanel.error}>{error}</div>}
+    </div>
+  );
+}
+
+const resPanel = {
+  root: {
+    marginTop: 14,
+    padding: '12px 14px',
+    borderRadius: 8,
+    border: '1px solid rgba(201,164,92,0.4)',
+    background: 'rgba(201,164,92,0.06)',
+  } as CSSProperties,
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  } as CSSProperties,
+  badge: {
+    pending: {
+      display: 'inline-flex',
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: '0.06em',
+      textTransform: 'uppercase',
+      background: 'rgba(201,164,92,0.18)',
+      color: '#8a6d2a',
+      border: '1px solid rgba(201,164,92,0.45)',
+    } as CSSProperties,
+    resolved: {
+      display: 'inline-flex',
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: '0.06em',
+      textTransform: 'uppercase',
+      background: 'rgba(74,140,92,0.12)',
+      color: 'var(--green)',
+      border: '1px solid rgba(74,140,92,0.4)',
+    } as CSSProperties,
+  },
+  alertMsg: {
+    fontSize: 12,
+    color: 'var(--text2)',
+  } as CSSProperties,
+  resolutionText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: 'var(--text2)',
+    fontStyle: 'italic',
+    lineHeight: 1.4,
+  } as CSSProperties,
+  actions: {
+    display: 'flex',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  } as CSSProperties,
+  actionBtn: {
+    padding: '7px 12px',
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 600,
+    border: '1px solid var(--border)',
+    background: 'var(--bg2)',
+    color: 'var(--text1)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 32,
+  } as CSSProperties,
+  actionBtnDanger: {
+    borderColor: 'rgba(196,80,64,0.4)',
+    color: 'var(--red)',
+    background: 'rgba(196,80,64,0.06)',
+  } as CSSProperties,
+  form: {
+    marginTop: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  } as CSSProperties,
+  textarea: {
+    width: '100%',
+    minHeight: 48,
+    padding: '8px 10px',
+    borderRadius: 6,
+    border: '1px solid var(--border)',
+    background: 'var(--bg2)',
+    fontSize: 12,
+    fontFamily: 'inherit',
+    color: 'var(--text1)',
+    resize: 'vertical',
+  } as CSSProperties,
+  chargeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  } as CSSProperties,
+  chargeLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'var(--text2)',
+  } as CSSProperties,
+  chargeInput: {
+    width: 100,
+    height: 32,
+    padding: '0 8px',
+    borderRadius: 6,
+    border: '1px solid var(--border)',
+    background: 'var(--bg2)',
+    fontSize: 13,
+    fontFamily: 'inherit',
+    color: 'var(--text1)',
+    fontVariantNumeric: 'tabular-nums',
+  } as CSSProperties,
+  formActions: {
+    display: 'flex',
+    gap: 8,
+    justifyContent: 'flex-end',
+  } as CSSProperties,
+  cancelBtn: {
+    padding: '6px 12px',
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 500,
+    border: '1px solid var(--border)',
+    background: 'var(--bg2)',
+    color: 'var(--text2)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 30,
+  } as CSSProperties,
+  confirmBtn: {
+    padding: '6px 12px',
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 600,
+    border: '1px solid var(--text1)',
+    background: 'var(--text1)',
+    color: '#fff',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 30,
+  } as CSSProperties,
+  error: {
+    marginTop: 8,
+    fontSize: 11,
+    color: 'var(--red)',
+    padding: '4px 8px',
+    borderRadius: 4,
+    background: 'rgba(196,80,64,0.08)',
+  } as CSSProperties,
+};
 
 function DetailRow({
   label,

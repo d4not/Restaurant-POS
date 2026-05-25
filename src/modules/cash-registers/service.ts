@@ -1,4 +1,6 @@
 import {
+  AlertSeverity,
+  AlertType,
   CashMovementType,
   CashRegisterStatus,
   DailyReportStatus,
@@ -34,6 +36,7 @@ const registerInclude = {
   closed_by: { select: { id: true, name: true } },
   provisional_verified_by: { select: { id: true, name: true } },
   cash_movements: { orderBy: { created_at: 'asc' } },
+  shift_report: { select: { id: true } },
 } satisfies Prisma.CashRegisterInclude;
 
 // Per-shift cash + payment aggregates. Returned alongside every register
@@ -569,6 +572,56 @@ export async function getRegister(id: string) {
   if (!row) throw new NotFoundError('CashRegister');
   const [hydrated] = await attachRegisterTotals(prisma, [row]);
   return hydrated;
+}
+
+export async function flagRegisterForReview(registerId: string, userId: string): Promise<void> {
+  const reg = await prisma.cashRegister.findUnique({
+    where: { id: registerId },
+    select: {
+      status: true,
+      difference: true,
+      user_id: true,
+      user: { select: { name: true } },
+      shift_report: { select: { id: true } },
+    },
+  });
+  if (!reg) throw new NotFoundError('CashRegister');
+  if (reg.status !== CashRegisterStatus.CLOSED) {
+    throw new BadRequestError('Register must be closed before flagging for review');
+  }
+  if (!reg.shift_report) {
+    throw new BadRequestError('No shift report found for this register');
+  }
+
+  const diff = Number(reg.difference ?? 0);
+  if (diff === 0) {
+    throw new BadRequestError('Cannot flag a balanced register for review');
+  }
+
+  const existing = await prisma.alert.findFirst({
+    where: {
+      shift_report_id: reg.shift_report.id,
+      type: { in: [AlertType.CASH_SHORTAGE, AlertType.CASH_SURPLUS] },
+      resolved: false,
+    },
+  });
+  if (existing) return;
+
+  const alertType = diff < 0 ? AlertType.CASH_SHORTAGE : AlertType.CASH_SURPLUS;
+  const absDiff = Math.abs(diff);
+  const severity = absDiff > 5000 ? AlertSeverity.HIGH : AlertSeverity.MEDIUM;
+  const label = diff < 0 ? 'shortage' : 'surplus';
+
+  await prisma.alert.create({
+    data: {
+      type: alertType,
+      severity,
+      message: `Cash ${label} of $${(absDiff / 100).toFixed(2)} flagged by cashier for review`,
+      data: { flagged_by_cashier: true, variance: diff, flagged_by: userId },
+      user_id: reg.user_id,
+      shift_report_id: reg.shift_report.id,
+    },
+  });
 }
 
 export async function listRegisters(query: ListRegisterQuery) {

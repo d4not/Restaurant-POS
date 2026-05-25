@@ -48,6 +48,7 @@ export function App() {
   const user = useSession((s) => s.user);
   const locked = useSession((s) => s.locked);
   const view = useUi((s) => s.view);
+  const shiftCloseInProgress = useUi((s) => s.shiftCloseInProgress);
 
   // Validate the persisted token on cold start. /auth/me bounces on 401 and
   // the api client wipes the session — that round-trip is what routes the
@@ -112,9 +113,11 @@ export function App() {
   }, [authed, role, view, openAdmin]);
 
   // Idle auto-lock: only counts down while the user is fully authed and the
-  // screen isn't already locked. The hook itself no-ops when `active` is false
-  // so unmounting around the PinLogin early-return isn't required.
-  useAutoLock(authed);
+  // screen isn't already locked. Paused when the cashier is actively serving
+  // (order workspace open) or reading shift close results — these are "eyes
+  // on screen, hands off" moments that shouldn't trigger the PIN screen.
+  const suppressAutoLock = shiftCloseInProgress || view === 'detail';
+  useAutoLock(authed && !suppressAutoLock);
 
   // Mirror the platform bridge's network status into TanStack Query so it
   // pauses requests while offline and refetches on reconnection.
@@ -209,7 +212,7 @@ export function App() {
     );
   }
 
-  if (!currentRegister) {
+  if (!currentRegister && !shiftCloseInProgress) {
     return (
       <div style={shellStyle}>
         <OfflineBanner />

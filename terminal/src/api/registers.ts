@@ -68,6 +68,7 @@ export interface CashRegisterRow {
 export interface CashRegisterDetail extends CashRegisterRow {
   cash_movements: CashMovementRow[];
   totals: RegisterTotals;
+  shift_report?: { id: string } | null;
 }
 
 // Find the OPEN register for the signed-in user. Used by the cashier-only
@@ -187,4 +188,8 @@ export function verifyProvisionalRegister(
     `/registers/${registerId}/verify-provisional`,
     input,
   );
+}
+
+export function flagShiftForReview(registerId: string): Promise<void> {
+  return api.post(`/registers/${registerId}/flag-review`);
 }

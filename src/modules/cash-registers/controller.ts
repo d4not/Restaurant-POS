@@ -42,6 +42,12 @@ export async function verifyProvisional(req: Request, res: Response): Promise<vo
   res.json({ success: true, data: register });
 }
 
+export async function flagForReview(req: Request, res: Response): Promise<void> {
+  const user = currentUser(req);
+  await service.flagRegisterForReview(req.params.id as string, user.id);
+  res.json({ success: true });
+}
+
 export async function getById(req: Request, res: Response): Promise<void> {
   const register = await service.getRegister(req.params.id as string);
   res.json({ success: true, data: register });

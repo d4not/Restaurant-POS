@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   closeRegister,
   fetchCurrentRegister,
+  flagShiftForReview,
   openRegister,
 } from '../../api/registers';
 import { fetchSettings, type SettingsMap } from '../../api/settings';
 import { ApiError } from '../../api/client';
 import { useSession } from '../../store/session';
+import { useUi } from '../../store/ui';
 import { Spinner } from '../Spinner';
 import { formatMoney } from '../../utils/format';
 import { useTranslation } from '../../i18n';
@@ -111,7 +113,11 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const [closeResult, setCloseResult] = useState<CloseResult | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Clear the flag if the panel is closed externally (safety net)
+      useUi.getState().setShiftCloseInProgress(false);
+      return;
+    }
     openCounter.reset();
     closeCounter.reset();
     setError(null);
@@ -154,11 +160,16 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
         difference: closed.difference ?? '0',
         breakdown: variables.breakdown,
       });
+      // Tell App.tsx not to navigate to NoActiveShiftScreen while the
+      // results are displayed. Without this, the 30s refetchInterval
+      // fetches null (no OPEN register) and unmounts our modal tree.
+      useUi.getState().setShiftCloseInProgress(true);
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : t('register.couldNotClose')),
   });
 
   function handleDismiss() {
+    useUi.getState().setShiftCloseInProgress(false);
     if (closeResult) {
       queryClient.setQueryData(['register', 'current'], null);
       invalidateRegisterQueries();
@@ -169,14 +180,19 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      // When results are showing, block all keyboard dismissal — the user
+      // must interact with the explicit action button (Acknowledged or
+      // Send for admin review).
+      if (closeResult) {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        handleDismiss();
-        return;
-      }
-      if (e.key === 'Enter' && closeResult) {
-        e.preventDefault();
         handleDismiss();
       }
     };
@@ -267,7 +283,10 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
   const modalStyle = isResults ? hubStyles.childModal : hubStyles.wideChildModal;
 
   return (
-    <div style={hubStyles.childScrim} onClick={handleDismiss}>
+    <div
+      style={hubStyles.childScrim}
+      onClick={isResults ? (e: React.MouseEvent) => e.stopPropagation() : handleDismiss}
+    >
       <div style={modalStyle} onClick={(e) => e.stopPropagation()} role="dialog">
         <div style={hubStyles.head}>
           <h2 style={hubStyles.title}>{title}</h2>
@@ -280,7 +299,12 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
               <Spinner size={16} /> {t('register.checkingState')}
             </div>
           ) : isResults ? (
-            <CloseResultsBody result={closeResult!} currency={currency} />
+            <CloseResultsBody
+              result={closeResult!}
+              currency={currency}
+              registerId={reg?.id ?? null}
+              onDismiss={handleDismiss}
+            />
           ) : reg ? (
             <>
               <CashCounter
@@ -303,22 +327,24 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
           {error && !isResults && <div style={hubStyles.errBanner}>{error}</div>}
         </div>
 
-        <div style={hubStyles.actions}>
-          {showCancel && (
-            <button type="button" style={hubStyles.cancelBtn} onClick={handleDismiss}>
-              {t('common.cancel')}
+        {!isResults && (
+          <div style={hubStyles.actions}>
+            {showCancel && (
+              <button type="button" style={hubStyles.cancelBtn} onClick={handleDismiss}>
+                {t('common.cancel')}
+              </button>
+            )}
+            <button
+              type="button"
+              style={hubStyles.primaryBtn}
+              onClick={primaryAction}
+              disabled={primaryDisabled}
+            >
+              {showSpinner && <Spinner size={12} />}
+              {primaryLabel}
             </button>
-          )}
-          <button
-            type="button"
-            style={hubStyles.primaryBtn}
-            onClick={primaryAction}
-            disabled={primaryDisabled}
-          >
-            {showSpinner && <Spinner size={12} />}
-            {primaryLabel}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -327,50 +353,265 @@ export function ShiftActionPanel({ open, onClose }: ShiftActionPanelProps) {
 interface CloseResultsBodyProps {
   result: CloseResult;
   currency: string;
+  registerId: string | null;
+  onDismiss: () => void;
 }
 
-function CloseResultsBody({ result, currency }: CloseResultsBodyProps) {
+function CloseResultsBody({ result, currency, registerId, onDismiss }: CloseResultsBodyProps) {
   const { t } = useTranslation();
   const diffNum = Number(result.difference);
-  const diffSign: 'pos' | 'neg' | 'zero' =
-    diffNum > 0 ? 'pos' : diffNum < 0 ? 'neg' : 'zero';
-  const diffStyle =
-    diffSign === 'zero'
-      ? localStyles.diffZero
-      : diffSign === 'pos'
-        ? localStyles.diffPos
-        : localStyles.diffNeg;
-  const diffPrefix = diffNum > 0 ? '+' : '';
+  const isBalanced = diffNum === 0;
 
-  const hints = diffNum !== 0
-    ? analyzeShortage({ diffCentavos: diffNum, currency })
-    : [];
-
+  if (isBalanced) {
+    return <BalancedResultScreen result={result} onDismiss={onDismiss} />;
+  }
   return (
-    <>
-      <div style={localStyles.resultsGrid}>
+    <DiscrepancyResultScreen
+      result={result}
+      currency={currency}
+      registerId={registerId}
+      onDismiss={onDismiss}
+    />
+  );
+}
+
+function BalancedResultScreen({
+  result,
+  onDismiss,
+}: {
+  result: CloseResult;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div style={resultStyles.container}>
+      <div style={resultStyles.iconWrap}>
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <circle cx="28" cy="28" r="28" fill="rgba(74,140,92,0.12)" />
+          <path
+            d="M18 28.5L25 35.5L38 22.5"
+            stroke="var(--green)"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+      <h3 style={resultStyles.titleGreen}>{t('register.allGood')}</h3>
+      <p style={resultStyles.subtitle}>{t('register.allGoodSub')}</p>
+
+      <div style={{ ...localStyles.resultsGrid, marginTop: 20 }}>
         <span>{t('register.expected')}</span>
         <span style={localStyles.resultsAmt}>{formatMoney(result.expectedAmount)}</span>
         <span>{t('register.counted')}</span>
         <span style={localStyles.resultsAmt}>{formatMoney(result.submittedAmount)}</span>
       </div>
-      <div
-        style={{
-          ...localStyles.resultsGrid,
-          ...localStyles.diffRow,
-          ...diffStyle,
-        }}
-      >
+      <div style={{ ...localStyles.resultsGrid, ...localStyles.diffRow, ...localStyles.diffZero }}>
+        <span>{t('register.difference')}</span>
+        <span style={{ ...localStyles.diffAmt, color: 'inherit' }}>{formatMoney(0)}</span>
+      </div>
+
+      <button type="button" style={resultStyles.greenBtn} onClick={onDismiss}>
+        {t('register.acknowledged')}
+      </button>
+    </div>
+  );
+}
+
+function DiscrepancyResultScreen({
+  result,
+  currency,
+  registerId,
+  onDismiss,
+}: {
+  result: CloseResult;
+  currency: string;
+  registerId: string | null;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  const [flagging, setFlagging] = useState(false);
+  const [flagError, setFlagError] = useState<string | null>(null);
+
+  const diffNum = Number(result.difference);
+  const isShortage = diffNum < 0;
+  const diffStyle = isShortage ? localStyles.diffNeg : localStyles.diffPos;
+  const diffPrefix = diffNum > 0 ? '+' : '';
+
+  const hints = analyzeShortage({ diffCentavos: diffNum, currency });
+
+  async function handleFlagForReview() {
+    if (!registerId) {
+      onDismiss();
+      return;
+    }
+    setFlagging(true);
+    setFlagError(null);
+    try {
+      await flagShiftForReview(registerId);
+      onDismiss();
+    } catch (err) {
+      setFlagError(err instanceof ApiError ? err.message : t('register.flaggingError'));
+      setFlagging(false);
+    }
+  }
+
+  return (
+    <div style={resultStyles.container}>
+      <div style={resultStyles.iconWrap}>
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <circle
+            cx="28"
+            cy="28"
+            r="28"
+            fill={isShortage ? 'rgba(196,80,64,0.12)' : 'rgba(201,164,92,0.14)'}
+          />
+          <path
+            d="M28 18V32M28 36V38"
+            stroke={isShortage ? 'var(--red)' : 'var(--gold)'}
+            strokeWidth="3.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+      <h3 style={isShortage ? resultStyles.titleRed : resultStyles.titleGold}>
+        {t('register.discrepancyDetected')}
+      </h3>
+      <p style={resultStyles.subtitle}>{t('register.discrepancySub')}</p>
+
+      <div style={{ ...localStyles.resultsGrid, marginTop: 20 }}>
+        <span>{t('register.expected')}</span>
+        <span style={localStyles.resultsAmt}>{formatMoney(result.expectedAmount)}</span>
+        <span>{t('register.counted')}</span>
+        <span style={localStyles.resultsAmt}>{formatMoney(result.submittedAmount)}</span>
+      </div>
+      <div style={{ ...localStyles.resultsGrid, ...localStyles.diffRow, ...diffStyle }}>
         <span>{t('register.difference')}</span>
         <span style={{ ...localStyles.diffAmt, color: 'inherit' }}>
-          {diffNum === 0 ? formatMoney(0) : diffPrefix + formatMoney(result.difference)}
+          {diffPrefix + formatMoney(result.difference)}
         </span>
       </div>
+
       {hints.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <ShortageAnalyzer hints={hints} currency={currency} />
         </div>
       )}
-    </>
+
+      {flagError && <div style={resultStyles.errBanner}>{flagError}</div>}
+
+      <button
+        type="button"
+        style={isShortage ? resultStyles.redBtn : resultStyles.goldBtn}
+        onClick={handleFlagForReview}
+        disabled={flagging}
+      >
+        {flagging && <Spinner size={12} />}
+        {t('register.sendForReview')}
+      </button>
+    </div>
   );
 }
+
+const resultStyles: Record<string, React.CSSProperties> = {
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  iconWrap: {
+    marginBottom: 14,
+  },
+  titleGreen: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 20,
+    fontWeight: 700,
+    color: 'var(--green)',
+    margin: 0,
+  },
+  titleRed: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 20,
+    fontWeight: 700,
+    color: 'var(--red)',
+    margin: 0,
+  },
+  titleGold: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 20,
+    fontWeight: 700,
+    color: 'var(--gold)',
+    margin: 0,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: 'var(--text2)',
+    marginTop: 4,
+    textAlign: 'center',
+    lineHeight: 1.4,
+  },
+  greenBtn: {
+    marginTop: 22,
+    width: '100%',
+    padding: '14px 18px',
+    borderRadius: 10,
+    background: 'var(--green)',
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    cursor: 'pointer',
+    border: 'none',
+    fontFamily: 'inherit',
+    minHeight: 52,
+  },
+  redBtn: {
+    marginTop: 22,
+    width: '100%',
+    padding: '14px 18px',
+    borderRadius: 10,
+    background: 'var(--red)',
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    cursor: 'pointer',
+    border: 'none',
+    fontFamily: 'inherit',
+    minHeight: 52,
+  },
+  goldBtn: {
+    marginTop: 22,
+    width: '100%',
+    padding: '14px 18px',
+    borderRadius: 10,
+    background: 'var(--gold)',
+    color: '#2c2420',
+    fontSize: 15,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    cursor: 'pointer',
+    border: 'none',
+    fontFamily: 'inherit',
+    minHeight: 52,
+  },
+  errBanner: {
+    marginTop: 12,
+    padding: '8px 12px',
+    borderRadius: 6,
+    fontSize: 12,
+    background: 'rgba(196,80,64,0.08)',
+    color: 'var(--red)',
+    border: '1px solid rgba(196,80,64,0.25)',
+    textAlign: 'center',
+  },
+};

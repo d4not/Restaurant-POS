@@ -71,6 +71,13 @@ cashRegisterRouter.post(
 );
 
 cashRegisterRouter.post(
+  '/:id/flag-review',
+  requireRole('CASHIER', 'MANAGER', 'ADMIN'),
+  validate(uuidParamSchema, 'params'),
+  asyncHandler(controller.flagForReview),
+);
+
+cashRegisterRouter.post(
   '/:id/cash-movements',
   requireRole('CASHIER', 'MANAGER', 'ADMIN'),
   validate(uuidParamSchema, 'params'),
