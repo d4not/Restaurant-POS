@@ -235,10 +235,7 @@ export function PrinterRoleCard(props: PrinterRoleCardProps) {
         </button>
       </div>
       {scanOpen && (
-        <UnifiedScanPanel
-          role={role}
-          onSelect={handleScanSelect}
-        />
+        <UnifiedScanPanel onSelect={handleScanSelect} />
       )}
 
       {/* Actions */}

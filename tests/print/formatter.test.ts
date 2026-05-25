@@ -113,7 +113,7 @@ describe('formatKitchenComanda', () => {
     expect(lines[0]).toBe('='.repeat(32));
     expect(lines[lines.length - 1]).toBe('='.repeat(32));
     // Title is centered.
-    expect(lines[1].trim()).toBe('KITCHEN ORDER');
+    expect(lines[1].trim()).toBe('ORDER');
     // Order number + table on the same row.
     const orderLine = lines.find((l) => l.includes('Order #: 42'));
     expect(orderLine).toBeDefined();
@@ -155,7 +155,7 @@ describe('formatKitchenComanda', () => {
         ],
       }),
     );
-    expect(lines.some((l) => l.includes('KITCHEN CORRECTION'))).toBe(true);
+    expect(lines.some((l) => l.includes('CORRECTION'))).toBe(true);
     expect(lines.some((l) => l.includes('Replaces previous ticket'))).toBe(true);
     expect(lines).toContain('1x Croissant [NEW]');
     expect(lines).toContain('2x Latte Grande');

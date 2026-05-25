@@ -10,7 +10,7 @@ import { usePrinterHealth } from '../hooks/usePrinterHealth';
 import { useUi } from '../store/ui';
 
 const bannerStyle: React.CSSProperties = {
-  background: '#c45040',
+  background: 'var(--red)',
   color: '#fff',
   padding: '8px 16px',
   fontSize: 13,
@@ -26,7 +26,7 @@ const bannerStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const ROLE_LABEL: Record<PrinterRole, string> = { receipt: 'Receipt', kitchen: 'Kitchen' };
+const ROLE_LABEL: Record<PrinterRole, string> = { receipt: 'Receipt', kitchen: 'Comanda' };
 const ROOT_CAUSE: Record<PrinterRecommendation, string> = {
   'investigate-current': 'unhealthy',
   'switch-primary': 'unreachable',
@@ -46,11 +46,11 @@ function summarise(issues: Extract<ReturnType<typeof usePrinterHealth>, { kind: 
 
 export function PrinterHealthBanner() {
   const health = usePrinterHealth();
-  const openSettings = useUi((s) => s.openSettings);
+  const setView = useUi((s) => s.setView);
 
   if (health.kind !== 'unhealthy') return null;
 
-  const go = () => openSettings('printers');
+  const go = () => setView('printers');
   return (
     <div
       style={bannerStyle}

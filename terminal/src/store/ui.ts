@@ -74,7 +74,7 @@ export const useUi = create<UiState>((set, get) => ({
     // a half-built ticket would be jarring.
     const current = get().view;
     const safeReturn: AdminReturnView =
-      current === 'admin' || current === 'detail' || current === 'waste'
+      current === 'admin' || current === 'detail' || current === 'waste' || current === 'printers'
         ? 'orders'
         : current;
     set({ view: 'admin', adminReturnView: safeReturn, menuOpen: false });

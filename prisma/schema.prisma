@@ -736,12 +736,14 @@ model PrinterProfile {
   paper_width     Int                   @default(48)
   printer_model   String                @default("epson")
   character_set   String                @default("PC850_MULTILINGUAL")
-  prints_comandas Boolean               @default(true)
-  prints_receipts Boolean               @default(false)
-  display_order   Int                   @default(0)
-  active          Boolean               @default(true)
-  created_at      DateTime              @default(now())
-  updated_at      DateTime              @updatedAt
+  prints_comandas   Boolean               @default(true)
+  prints_receipts   Boolean               @default(false)
+  comanda_template  Json?                 @db.JsonB
+  receipt_template  Json?                 @db.JsonB
+  display_order     Int                   @default(0)
+  active            Boolean               @default(true)
+  created_at        DateTime              @default(now())
+  updated_at        DateTime              @updatedAt
 
   categories ProductCategory[] @relation("PrinterProfileCategories")
 

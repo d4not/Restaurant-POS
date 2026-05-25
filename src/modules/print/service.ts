@@ -23,8 +23,12 @@ import {
   formatKitchenComanda,
   formatReceipt,
   type ComandaInput,
+  type ComandaItem,
+  type ComandaVoidedItem,
   type ReceiptInput,
 } from './formatter.js';
+import type { ComandaTemplate } from './template-types.js';
+import { DEFAULT_COMANDA_TEMPLATE } from './template-types.js';
 import {
   paperWidthChars,
   probePrinter,
@@ -250,6 +254,53 @@ export interface PrintKitchenResponse extends PrintResult {
   profile_results?: ProfilePrintResult[];
 }
 
+interface PrintBatch {
+  items: ComandaItem[];
+  voided: ComandaVoidedItem[];
+}
+
+function splitByPrintMode(
+  mode: string,
+  items: ComandaItem[],
+  voided: ComandaVoidedItem[],
+): PrintBatch[] {
+  if (mode === 'per_item') {
+    const batches: PrintBatch[] = items.map((item) => ({ items: [item], voided: [] }));
+    if (voided.length > 0) {
+      if (batches.length > 0) {
+        batches[batches.length - 1].voided = voided;
+      } else {
+        batches.push({ items: [], voided });
+      }
+    }
+    return batches.length > 0 ? batches : [{ items: [], voided }];
+  }
+
+  if (mode === 'per_category') {
+    const catMap = new Map<string, ComandaItem[]>();
+    for (const item of items) {
+      const key = item.category_id ?? '__none__';
+      const list = catMap.get(key) ?? [];
+      list.push(item);
+      catMap.set(key, list);
+    }
+    const batches: PrintBatch[] = [];
+    for (const [, catItems] of catMap) {
+      batches.push({ items: catItems, voided: [] });
+    }
+    if (voided.length > 0) {
+      if (batches.length > 0) {
+        batches[batches.length - 1].voided = voided;
+      } else {
+        batches.push({ items: [], voided });
+      }
+    }
+    return batches.length > 0 ? batches : [{ items: [], voided }];
+  }
+
+  return [{ items, voided }];
+}
+
 function profileToTarget(profile: { address: string; paper_width: number }): PrinterTarget {
   const [ip, portStr] = profile.address.split(':');
   return {
@@ -317,23 +368,33 @@ async function printKitchenMultiProfile(
     const profile = profileMap.get(profileId)!;
     if (!profile.address) continue;
 
-    const profileInput: ComandaInput = {
-      ...input,
-      items,
-      voided_items: voidedGrouped.get(profileId) ?? [],
-      width: paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80),
-    };
-    const lines = formatKitchenComanda(profileInput);
-    allLines.push(...lines);
-
+    const tpl = (profile.comanda_template ?? null) as ComandaTemplate | null;
+    const printMode = tpl?.print_mode ?? DEFAULT_COMANDA_TEMPLATE.print_mode;
+    const width = paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80);
     const target = profileToTarget(profile);
-    const result = await sendLines(target, lines);
-    profileResults.push({
-      profile_id: profileId,
-      profile_name: profile.name,
-      ok: result.ok,
-      error: result.error,
-    });
+    const voidedItems = voidedGrouped.get(profileId) ?? [];
+
+    const batches = splitByPrintMode(printMode, items, voidedItems);
+
+    for (const batch of batches) {
+      const profileInput: ComandaInput = {
+        ...input,
+        items: batch.items,
+        voided_items: batch.voided,
+        width,
+        template: tpl,
+      };
+      const lines = formatKitchenComanda(profileInput);
+      allLines.push(...lines);
+
+      const result = await sendLines(target, lines);
+      profileResults.push({
+        profile_id: profileId,
+        profile_name: profile.name,
+        ok: result.ok,
+        error: result.error,
+      });
+    }
   }
 
   // Also send voided items to profiles that aren't receiving new items
@@ -342,11 +403,13 @@ async function printKitchenMultiProfile(
     const profile = profileMap.get(profileId)!;
     if (!profile.address) continue;
 
+    const tpl = (profile.comanda_template ?? null) as ComandaTemplate | null;
     const profileInput: ComandaInput = {
       ...input,
       items: [],
       voided_items: voidedItems,
       width: paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80),
+      template: tpl,
     };
     const lines = formatKitchenComanda(profileInput);
     allLines.push(...lines);
@@ -377,14 +440,17 @@ export interface PrintReceiptResponse extends PrintResult {
 
 export async function printReceipt(orderId: string): Promise<PrintReceiptResponse> {
   const input = await buildReceipt(orderId);
-  const lines = formatReceipt(input);
 
   // Try profile-based routing first
   const profiles = await getProfilesForPrinting('receipts');
   if (profiles.length > 0) {
     const results: ProfilePrintResult[] = [];
+    let firstLines: string[] = [];
     for (const profile of profiles) {
       if (!profile.address) continue;
+      const tpl = (profile.receipt_template ?? null) as import('./template-types.js').ReceiptTemplate | null;
+      const lines = formatReceipt({ ...input, template: tpl });
+      if (firstLines.length === 0) firstLines = lines;
       const target = profileToTarget(profile);
       const result = await sendLines(target, lines);
       results.push({
@@ -396,12 +462,13 @@ export async function printReceipt(orderId: string): Promise<PrintReceiptRespons
     }
     return {
       ok: results.length === 0 || results.every((r) => r.ok),
-      lines,
+      lines: firstLines,
       profile_results: results,
     };
   }
 
   // Fallback to legacy single-printer path
+  const lines = formatReceipt(input);
   const config = await loadPrinterConfig();
   const result = await sendLines(config.receipt, lines);
   return { ...result, lines };
@@ -547,7 +614,7 @@ export async function testPrint(role: 'kitchen' | 'receipt'): Promise<PrintResul
   const target = role === 'kitchen' ? config.kitchen : config.receipt;
   const lines = [
     '================================',
-    role === 'kitchen' ? '       KITCHEN TEST PRINT' : '       RECEIPT TEST PRINT',
+    role === 'kitchen' ? '       COMANDA TEST PRINT' : '       RECEIPT TEST PRINT',
     '================================',
     `Printed: ${new Date().toLocaleString()}`,
     '',

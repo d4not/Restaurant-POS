@@ -90,10 +90,9 @@ const SOURCE_BADGE_COLORS: Record<string, { bg: string; color: string }> = {
 
 interface UnifiedScanPanelProps {
   onSelect: (result: UnifiedScanResult) => void;
-  role: PrinterRole;
 }
 
-export function UnifiedScanPanel({ onSelect, role }: UnifiedScanPanelProps) {
+export function UnifiedScanPanel({ onSelect }: UnifiedScanPanelProps) {
   const { t } = useTranslation();
   const isElectron = Boolean(window.electron?.printer?.listUsb);
   const [filter, setFilter] = useState<ScanFilter>('all');
@@ -135,9 +134,7 @@ export function UnifiedScanPanel({ onSelect, role }: UnifiedScanPanelProps) {
   const usbCount = merged.filter((r) => r.source !== 'network').length;
   const netCount = merged.filter((r) => r.source === 'network').length;
 
-  const btnLabel = role === 'kitchen'
-    ? t('printers.useAsKitchen')
-    : t('printers.useAsReceipt');
+  const btnLabel = t('printers.useAsKitchen');
 
   return (
     <div style={ps.scanPanel}>

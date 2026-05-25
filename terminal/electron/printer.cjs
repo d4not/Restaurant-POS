@@ -371,9 +371,9 @@ function moneyFromCentavos(centavos) {
 // TableDetail.tsx after a successful sendOrderToKitchen.
 //
 // Two flavors of comanda are produced from the same renderer:
-//   • First print  — header reads "KITCHEN ORDER", items list shows just the
+//   • First print  — header reads "ORDER", items list shows just the
 //                    newly-added items.
-//   • Correction   — header reads "KITCHEN CORRECTION" with a clear banner
+//   • Correction   — header reads "CORRECTION" with a clear banner
 //                    "REPLACES PREVIOUS TICKET". Body holds the full current
 //                    snapshot of the order: every currently-active item plus
 //                    every voided tombstone (struck through). Items added in
@@ -394,7 +394,7 @@ function renderKitchenComanda(printer, data) {
   printer.alignCenter();
   printer.bold(true);
   printer.setTextDoubleHeight();
-  printer.println(isCorrection ? 'KITCHEN CORRECTION' : 'KITCHEN ORDER');
+  printer.println(isCorrection ? 'CORRECTION' : 'ORDER');
   printer.setTextNormal();
   if (isCorrection) {
     // The all-caps banner is the most important text on the slip — the cooks

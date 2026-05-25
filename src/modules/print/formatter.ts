@@ -7,7 +7,15 @@
  *
  * Width is in characters, not millimetres. The standard 80mm receipt printer
  * fits 48 characters per line; a 58mm printer fits 32.
+ *
+ * Both formatters accept an optional template object that controls which
+ * sections appear and customizes text. When the template is undefined or a
+ * field is missing, the formatter falls back to the defaults defined in
+ * template-types.ts — so existing callers produce identical output.
  */
+
+import type { ComandaTemplate, ReceiptTemplate } from './template-types.js';
+import { DEFAULT_COMANDA_TEMPLATE, DEFAULT_RECEIPT_TEMPLATE } from './template-types.js';
 
 export interface ComandaItem {
   quantity: number;
@@ -36,6 +44,7 @@ export interface ComandaInput {
   items: ComandaItem[];
   voided_items: ComandaVoidedItem[];
   width: number;
+  template?: ComandaTemplate | null;
 }
 
 export interface ReceiptItem {
@@ -50,8 +59,6 @@ export interface ReceiptPayment {
   method: 'CASH' | 'CARD' | 'TRANSFER';
   amount_centavos: number;
   change_centavos: number;
-  // Tip portion of `amount` — surfaced as a sub-line under each payment so
-  // the customer sees what they actually contributed to the tip jar.
   tip_centavos: number;
   reference: string | null;
 }
@@ -69,12 +76,10 @@ export interface ReceiptInput {
   tax_centavos: number;
   discount_centavos: number;
   total_centavos: number;
-  // Total tip across all payments on this order. Rendered as a single Tip
-  // line in the summary block when > 0 — separate from the Total so the
-  // customer can see "$80 sale + $20 tip = $100 paid".
   tip_centavos: number;
   payments: ReceiptPayment[];
   width: number;
+  template?: ReceiptTemplate | null;
 }
 
 function center(text: string, width: number): string {
@@ -84,8 +89,6 @@ function center(text: string, width: number): string {
 }
 
 function leftRight(left: string, right: string, width: number): string {
-  // Truncate the left side first if both can't fit — the right value (price,
-  // total, time) is the load-bearing piece.
   const maxLeft = Math.max(0, width - right.length - 1);
   const truncatedLeft = left.length > maxLeft ? left.slice(0, maxLeft) : left;
   const space = Math.max(1, width - truncatedLeft.length - right.length);
@@ -109,59 +112,65 @@ function formatDateTime(d: Date): string {
   return `${y}-${mo}-${da}  ${formatTime(d)}`;
 }
 
-/**
- * Centavos → "$1,234.50" (en-US grouping, two decimals). Negative amounts get
- * a leading minus. Bigger-than-Number values aren't a concern here — receipts
- * are bounded by daily takings.
- */
 export function formatMoney(centavos: number): string {
   const sign = centavos < 0 ? '-' : '';
   const abs = Math.abs(centavos);
   const dollars = Math.floor(abs / 100);
   const cents = abs % 100;
-  // Group thousands by inserting commas right-to-left.
   const grouped = String(dollars).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return `${sign}$${grouped}.${String(cents).padStart(2, '0')}`;
 }
 
-/**
- * Format a kitchen comanda (order ticket for the cooks). The output mirrors
- * the structure documented in docs/TERMINAL-SPEC.md §"Kitchen Printing":
- *
- *   ================================
- *           KITCHEN ORDER
- *   ================================
- *   Order #: 42        Table: 5
- *   Waiter: Carlos     14:35
- *   --------------------------------
- *   2x Latte Grande
- *      > Almond Milk
- *      > Extra Shot
- *      NOTE: Extra hot
- *   ================================
- *
- * On a CORRECTION ticket the header reads "KITCHEN CORRECTION — Replaces
- * previous ticket" and a `[NEW]` marker tags items added since the last
- * comanda. Voided lines append a "*** REMOVED" block at the bottom.
- */
+function blankLines(n: number): string[] {
+  return n > 0 ? Array(n).fill('') : [];
+}
+
 export function formatKitchenComanda(input: ComandaInput): string[] {
   const W = input.width;
+  const t = { ...DEFAULT_COMANDA_TEMPLATE, ...(input.template ?? {}) };
   const lines: string[] = [];
   const sep = rule(W, '=');
   const dash = rule(W, '-');
 
+  lines.push(...blankLines(t.margin_top));
+
   lines.push(sep);
+  const headerText = t.header_text || 'ORDER';
   if (input.is_correction) {
-    lines.push(center('KITCHEN CORRECTION', W));
+    const corrText = headerText === DEFAULT_COMANDA_TEMPLATE.header_text
+      ? 'CORRECTION'
+      : `${headerText} — CORRECTION`;
+    lines.push(center(corrText, W));
     lines.push(center('Replaces previous ticket', W));
   } else {
-    lines.push(center('KITCHEN ORDER', W));
+    lines.push(center(headerText, W));
   }
   lines.push(sep);
-  const tableLabel = input.table_label ?? '';
-  lines.push(leftRight(`Order #: ${input.order_number}`, tableLabel, W));
-  lines.push(leftRight(`Waiter: ${input.waiter_name}`, formatTime(input.printed_at), W));
-  lines.push(dash);
+
+  const metaLines: string[] = [];
+  if (t.show_order_number) {
+    const tableLabel = t.show_table ? (input.table_label ?? '') : '';
+    metaLines.push(leftRight(`Order #: ${input.order_number}`, tableLabel, W));
+  } else if (t.show_table && input.table_label) {
+    metaLines.push(input.table_label);
+  }
+
+  if (t.show_waiter || t.show_time) {
+    const waiterPart = t.show_waiter ? `Waiter: ${input.waiter_name}` : '';
+    const timePart = t.show_time ? formatTime(input.printed_at) : '';
+    if (waiterPart && timePart) {
+      metaLines.push(leftRight(waiterPart, timePart, W));
+    } else if (waiterPart) {
+      metaLines.push(waiterPart);
+    } else if (timePart) {
+      metaLines.push(timePart);
+    }
+  }
+
+  if (metaLines.length > 0) {
+    lines.push(...metaLines);
+    lines.push(dash);
+  }
 
   if (input.items.length === 0 && input.voided_items.length === 0) {
     lines.push(center('(no items)', W));
@@ -171,11 +180,13 @@ export function formatKitchenComanda(input: ComandaInput): string[] {
     const variant = item.variant_name ? ` ${item.variant_name}` : '';
     const newTag = item.is_new && input.is_correction ? ' [NEW]' : '';
     lines.push(`${item.quantity}x ${item.product_name}${variant}${newTag}`);
-    for (const mod of item.modifiers) lines.push(`   > ${mod}`);
-    if (item.notes) lines.push(`   NOTE: ${item.notes}`);
+    if (t.show_modifiers) {
+      for (const mod of item.modifiers) lines.push(`   > ${mod}`);
+    }
+    if (t.show_notes && item.notes) lines.push(`   NOTE: ${item.notes}`);
   }
 
-  if (input.voided_items.length > 0) {
+  if (t.show_voided && input.voided_items.length > 0) {
     lines.push(dash);
     lines.push(center('*** REMOVED ***', W));
     for (const v of input.voided_items) {
@@ -185,39 +196,49 @@ export function formatKitchenComanda(input: ComandaInput): string[] {
     }
   }
 
+  if (t.footer_text) {
+    lines.push(dash);
+    lines.push(center(t.footer_text, W));
+  }
+
   lines.push(sep);
+  lines.push(...blankLines(t.margin_bottom));
   return lines;
 }
 
-/**
- * Format a customer receipt. Tax is shown as a separate line even though
- * prices are tax-inclusive — that's the legal expectation in MX/most LATAM
- * jurisdictions, and matches docs/TERMINAL-SPEC.md §"Receipt format".
- *
- * Discount appears only when > 0; payment block lists every tender (split
- * payments produce one row per Payment record). For CASH the change column
- * shows the change given.
- */
 export function formatReceipt(input: ReceiptInput): string[] {
   const W = input.width;
+  const t = { ...DEFAULT_RECEIPT_TEMPLATE, ...(input.template ?? {}) };
   const lines: string[] = [];
   const sep = rule(W, '=');
   const dash = rule(W, '-');
 
+  lines.push(...blankLines(t.margin_top));
+
   lines.push(sep);
-  lines.push(center(input.business_name, W));
-  if (input.business_address) {
+  if (t.show_business_name) {
+    lines.push(center(input.business_name, W));
+  }
+  if (t.show_address && input.business_address) {
     lines.push(center(input.business_address, W));
   }
   lines.push(sep);
 
-  lines.push(`Order #: ${input.order_number}`);
-  lines.push(`Date: ${formatDateTime(input.date)}`);
-  const cashierLabel = `Cashier: ${input.cashier_name}`;
-  if (input.table_label) {
-    lines.push(leftRight(cashierLabel, input.table_label, W));
-  } else {
-    lines.push(cashierLabel);
+  if (t.show_order_number) {
+    lines.push(`Order #: ${input.order_number}`);
+  }
+  if (t.show_datetime) {
+    lines.push(`Date: ${formatDateTime(input.date)}`);
+  }
+  if (t.show_cashier) {
+    const cashierLabel = `Cashier: ${input.cashier_name}`;
+    if (t.show_table && input.table_label) {
+      lines.push(leftRight(cashierLabel, input.table_label, W));
+    } else {
+      lines.push(cashierLabel);
+    }
+  } else if (t.show_table && input.table_label) {
+    lines.push(input.table_label);
   }
   lines.push(dash);
 
@@ -226,41 +247,47 @@ export function formatReceipt(input: ReceiptInput): string[] {
     const variant = item.variant_name ? ` ${item.variant_name}` : '';
     const left = `${qty}  ${item.product_name}${variant}`;
     lines.push(leftRight(left, formatMoney(item.line_total_centavos), W));
-    for (const mod of item.modifiers) {
-      const modLeft = `   ${mod.name}`;
-      const modRight = mod.extra_price_centavos > 0
-        ? `+${formatMoney(mod.extra_price_centavos)}`
-        : '';
-      if (modRight) {
-        lines.push(leftRight(modLeft, modRight, W));
-      } else {
-        lines.push(modLeft);
+    if (t.show_modifiers) {
+      for (const mod of item.modifiers) {
+        const modLeft = `   ${mod.name}`;
+        const modRight = mod.extra_price_centavos > 0
+          ? `+${formatMoney(mod.extra_price_centavos)}`
+          : '';
+        if (modRight) {
+          lines.push(leftRight(modLeft, modRight, W));
+        } else {
+          lines.push(modLeft);
+        }
       }
     }
   }
   lines.push(dash);
 
-  lines.push(leftRight('Subtotal:', formatMoney(input.subtotal_centavos), W));
-  if (input.tax_centavos > 0) {
+  if (t.show_subtotal) {
+    lines.push(leftRight('Subtotal:', formatMoney(input.subtotal_centavos), W));
+  }
+  if (t.show_tax && input.tax_centavos > 0) {
     lines.push(leftRight(`${input.tax_label}:`, formatMoney(input.tax_centavos), W));
   }
-  if (input.discount_centavos > 0) {
+  if (t.show_discount && input.discount_centavos > 0) {
     lines.push(leftRight('Discount:', `-${formatMoney(input.discount_centavos)}`, W));
   }
-  lines.push(leftRight('Total:', formatMoney(input.total_centavos), W));
-  if (input.tip_centavos > 0) {
+  if (t.show_total) {
+    lines.push(leftRight('Total:', formatMoney(input.total_centavos), W));
+  }
+  if (t.show_tip && input.tip_centavos > 0) {
     lines.push(leftRight('Tip:', formatMoney(input.tip_centavos), W));
   }
 
-  if (input.payments.length > 0) {
+  if (t.show_payments && input.payments.length > 0) {
     lines.push(dash);
     for (const p of input.payments) {
       const label = p.method.charAt(0) + p.method.slice(1).toLowerCase() + ':';
       lines.push(leftRight(label, formatMoney(p.amount_centavos), W));
-      if (p.tip_centavos > 0) {
+      if (t.show_tip && p.tip_centavos > 0) {
         lines.push(`   incl. tip ${formatMoney(p.tip_centavos)}`);
       }
-      if (p.method === 'CASH' && p.change_centavos > 0) {
+      if (t.show_change && p.method === 'CASH' && p.change_centavos > 0) {
         lines.push(leftRight('Change:', formatMoney(p.change_centavos), W));
       }
       if (p.reference && p.method !== 'CASH') {
@@ -270,8 +297,11 @@ export function formatReceipt(input: ReceiptInput): string[] {
   }
 
   lines.push(sep);
-  // Trailing courtesy line — fits on one line at 32 chars and reads natural at 48.
-  lines.push(center('Thank you!', W));
+  const thankYou = t.thank_you_text || 'Thank you!';
+  if (thankYou) {
+    lines.push(center(thankYou, W));
+  }
   lines.push(sep);
+  lines.push(...blankLines(t.margin_bottom));
   return lines;
 }

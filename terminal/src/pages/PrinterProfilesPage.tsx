@@ -46,24 +46,33 @@ export function PrinterProfilesPage() {
   const [pageView, setPageView] = useState<View>('list');
   const [editingProfile, setEditingProfile] = useState<PrinterProfile | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const profiles = profilesQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
   const assignedCatIds = new Set(profiles.flatMap((p) => p.categories.map((c) => c.id)));
   const unassigned = categories.filter((c) => !assignedCatIds.has(c.id));
 
-  async function handleSave(input: CreateProfileInput, categoryIds: string[]) {
-    if (editingProfile) {
-      await updateMut.mutateAsync({ id: editingProfile.id, input });
-      await assignMut.mutateAsync({ profileId: editingProfile.id, categoryIds });
-    } else {
-      const created = await createMut.mutateAsync(input);
-      if (categoryIds.length > 0) {
-        await assignMut.mutateAsync({ profileId: created.id, categoryIds });
+  async function handleSave(input: CreateProfileInput, categoryIds: string[]): Promise<boolean> {
+    setSaveError(null);
+    try {
+      if (editingProfile) {
+        await updateMut.mutateAsync({ id: editingProfile.id, input });
+        await assignMut.mutateAsync({ profileId: editingProfile.id, categoryIds });
+      } else {
+        const created = await createMut.mutateAsync(input);
+        if (categoryIds.length > 0) {
+          await assignMut.mutateAsync({ profileId: created.id, categoryIds });
+        }
       }
+      setPageView('list');
+      setEditingProfile(null);
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Save failed';
+      setSaveError(msg);
+      return false;
     }
-    setPageView('list');
-    setEditingProfile(null);
   }
 
   async function handleDelete(id: string) {
@@ -105,11 +114,17 @@ export function PrinterProfilesPage() {
         {/* Editor view */}
         {(pageView === 'create' || pageView === 'edit') && (
           <div style={editorWrap}>
+            {saveError && (
+              <div style={errorBanner}>
+                {saveError}
+                <button type="button" style={errorDismiss} onClick={() => setSaveError(null)}>×</button>
+              </div>
+            )}
             <PrinterProfileEditor
               profile={editingProfile}
               allProfiles={profiles}
               onSave={handleSave}
-              onCancel={() => { setPageView('list'); setEditingProfile(null); }}
+              onCancel={() => { setPageView('list'); setEditingProfile(null); setSaveError(null); }}
               saving={createMut.isPending || updateMut.isPending || assignMut.isPending}
             />
           </div>
@@ -222,7 +237,7 @@ const header: React.CSSProperties = {
   gap: 18,
   padding: '16px 28px',
   borderBottom: '1px solid var(--border)',
-  background: 'var(--bg2)',
+  background: 'var(--bg)',
   flexShrink: 0,
   minHeight: 72,
 };
@@ -359,5 +374,29 @@ const cancelBtn: React.CSSProperties = {
   fontWeight: 500,
   border: '1px solid var(--border)',
   cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const errorBanner: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '10px 14px',
+  marginBottom: 16,
+  borderRadius: 8,
+  background: 'rgba(196,80,64,0.10)',
+  border: '1px solid rgba(196,80,64,0.4)',
+  fontSize: 13,
+  color: 'var(--red)',
+  fontWeight: 500,
+};
+
+const errorDismiss: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: 'var(--red)',
+  fontSize: 16,
+  cursor: 'pointer',
+  padding: '0 4px',
   fontFamily: 'inherit',
 };

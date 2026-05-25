@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { ComandaTemplate, ReceiptTemplate } from '../types/printer-templates';
 
 export interface PrinterProfileCategory {
   id: string;
@@ -17,6 +18,8 @@ export interface PrinterProfile {
   character_set: string;
   prints_comandas: boolean;
   prints_receipts: boolean;
+  comanda_template: ComandaTemplate | null;
+  receipt_template: ReceiptTemplate | null;
   display_order: number;
   active: boolean;
   categories: PrinterProfileCategory[];
@@ -33,6 +36,8 @@ export interface CreateProfileInput {
   character_set?: string;
   prints_comandas?: boolean;
   prints_receipts?: boolean;
+  comanda_template?: ComandaTemplate | null;
+  receipt_template?: ReceiptTemplate | null;
   display_order?: number;
 }
 

@@ -1935,10 +1935,10 @@ export interface SendToKitchenResult {
  * Send the order's current state to the kitchen printer.
  *
  * Two flavors of comanda:
- *   • First print     — there is no prior comanda. Header reads "KITCHEN
- *                       ORDER", body lists only the newly-added items.
- *   • Correction      — a prior comanda exists. Header reads "KITCHEN
- *                       CORRECTION — Replaces previous ticket" and the body
+ *   • First print     — there is no prior comanda. Header reads "ORDER"
+ *                       (or custom text), body lists only the newly-added items.
+ *   • Correction      — a prior comanda exists. Header reads "CORRECTION"
+ *                       with "Replaces previous ticket" and the body
  *                       contains the FULL current snapshot: every active
  *                       item plus every voided tombstone. The cocina trashes
  *                       their old slip and replaces it with this one.

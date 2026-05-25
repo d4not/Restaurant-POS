@@ -62,6 +62,13 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
         {!profile.address && <span style={addrLabel}>{t('printers.noAddress')}</span>}
       </div>
 
+      {/* Template indicator */}
+      {(profile.comanda_template || profile.receipt_template) && (
+        <span style={templateBadge}>
+          {t('printers.templateCustomized')}
+        </span>
+      )}
+
       {/* Categories */}
       {profile.categories.length > 0 && (
         <div style={catRow}>
@@ -166,6 +173,20 @@ const catChip = (color: string | null): React.CSSProperties => ({
   background: color ? `${color}22` : 'rgba(168,152,136,0.12)',
   border: `1px solid ${color || 'var(--border)'}`,
 });
+
+const templateBadge: React.CSSProperties = {
+  display: 'inline-block',
+  marginTop: 6,
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  background: 'rgba(201,164,92,0.12)',
+  color: '#8a6d2a',
+  border: '1px solid rgba(201,164,92,0.35)',
+};
 
 const deleteBtn: React.CSSProperties = {
   width: 28,

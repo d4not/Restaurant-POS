@@ -171,7 +171,7 @@ describe('Print endpoints', () => {
     expect(res.body.data.is_correction).toBe(false);
     // The lines payload includes the comanda body — verifies the formatter ran.
     const lines: string[] = res.body.data.lines;
-    expect(lines.some((l) => l.includes('KITCHEN ORDER'))).toBe(true);
+    expect(lines.some((l) => l.includes('ORDER'))).toBe(true);
     expect(lines.some((l) => l.includes('2x Latte'))).toBe(true);
     expect(lines.some((l) => l.includes('NOTE: Extra hot'))).toBe(true);
 
@@ -181,7 +181,7 @@ describe('Print endpoints', () => {
     const payload = kitchen.received().toString('binary');
     // ESC/POS output contains the human-readable text we printed.
     expect(payload).toContain('Latte');
-    expect(payload).toContain('KITCHEN ORDER');
+    expect(payload).toContain('ORDER');
 
     // Items now flagged sent.
     const items = await prisma.orderItem.findMany({

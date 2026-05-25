@@ -1,6 +1,16 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { ConflictError, NotFoundError } from '../../lib/errors.js';
 import type { CreateProfileInput, UpdateProfileInput } from './schema.js';
+
+function toJsonData(input: CreateProfileInput | UpdateProfileInput): Prisma.PrinterProfileUncheckedCreateInput | Prisma.PrinterProfileUncheckedUpdateInput {
+  const { comanda_template, receipt_template, ...rest } = input;
+  return {
+    ...rest,
+    ...(comanda_template !== undefined && { comanda_template: comanda_template as Prisma.InputJsonValue }),
+    ...(receipt_template !== undefined && { receipt_template: receipt_template as Prisma.InputJsonValue }),
+  };
+}
 
 const INCLUDE_CATEGORIES = {
   categories: {
@@ -34,7 +44,7 @@ export async function createProfile(input: CreateProfileInput) {
   if (existing) throw new ConflictError('A profile with this name already exists');
 
   return prisma.printerProfile.create({
-    data: input,
+    data: toJsonData(input) as Prisma.PrinterProfileCreateInput,
     include: INCLUDE_CATEGORIES,
   });
 }
@@ -56,7 +66,7 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
 
   return prisma.printerProfile.update({
     where: { id },
-    data: input,
+    data: toJsonData(input) as Prisma.PrinterProfileUpdateInput,
     include: INCLUDE_CATEGORIES,
   });
 }

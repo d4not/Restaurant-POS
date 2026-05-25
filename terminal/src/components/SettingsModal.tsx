@@ -12,7 +12,6 @@ import {
   type Suggestion,
 } from '../api/suggestions';
 import { ApiError, getApiBase, getServerRoot, setApiBase } from '../api/client';
-import { PrintersSection } from './printer/PrintersSection';
 import {
   defaultServerUrlForPlatform,
   loadServerUrl,
@@ -29,7 +28,6 @@ import type { TranslationKey } from '../i18n/en';
 type Section =
   | 'general'
   | 'appearance'
-  | 'printers'
   | 'users'
   | 'register'
   | 'suggestions';
@@ -44,7 +42,6 @@ interface SectionDef {
 const SECTIONS: SectionDef[] = [
   { id: 'general', labelKey: 'settings.tabGeneral', ready: true },
   { id: 'appearance', labelKey: 'settings.tabAppearance', ready: true },
-  { id: 'printers', labelKey: 'settings.tabPrinters', ready: true },
   { id: 'suggestions', labelKey: 'settings.tabSuggestions', ready: true, adminOnly: true },
   { id: 'users', labelKey: 'settings.tabUsers', ready: false },
   { id: 'register', labelKey: 'settings.tabRegister', ready: false },
@@ -377,7 +374,6 @@ export function SettingsModal() {
           <div style={styles.bodyContent}>
             {section === 'general' && <GeneralSection />}
             {section === 'appearance' && <AppearanceSection />}
-            {section === 'printers' && <PrintersSection />}
             {section === 'suggestions' && isAdmin && <SuggestionsSection />}
             {section === 'users' && (
               <div style={styles.empty}>{t('settings.usersPlaceholder')}</div>

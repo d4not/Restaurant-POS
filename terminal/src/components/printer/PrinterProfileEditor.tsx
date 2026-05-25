@@ -4,13 +4,16 @@ import { useTranslation } from '../../i18n';
 import { fetchAllCategories } from '../../api/categories';
 import { Spinner } from '../Spinner';
 import { UnifiedScanPanel, type UnifiedScanResult } from './UnifiedScanPanel';
+import { TicketTemplateEditor } from './TicketTemplateEditor';
 import { ps, PRINTER_TYPES, CHARACTER_SETS } from './styles';
 import type { PrinterProfile, CreateProfileInput } from '../../api/printer-profiles';
+import type { ComandaTemplate, ReceiptTemplate } from '../../types/printer-templates';
+import { DEFAULT_COMANDA_TEMPLATE, DEFAULT_RECEIPT_TEMPLATE } from '../../types/printer-templates';
 
 interface Props {
   profile: PrinterProfile | null;
   allProfiles: PrinterProfile[];
-  onSave: (input: CreateProfileInput, categoryIds: string[]) => void;
+  onSave: (input: CreateProfileInput, categoryIds: string[]) => Promise<boolean>;
   onCancel: () => void;
   saving: boolean;
 }
@@ -29,6 +32,13 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
     new Set(profile?.categories.map((c) => c.id) ?? []),
   );
   const [scanOpen, setScanOpen] = useState(false);
+  const [editorTab, setEditorTab] = useState<'general' | 'template'>('general');
+  const [comandaTemplate, setComandaTemplate] = useState<ComandaTemplate>(
+    () => ({ ...DEFAULT_COMANDA_TEMPLATE, ...(profile?.comanda_template ?? {}) }),
+  );
+  const [receiptTemplate, setReceiptTemplate] = useState<ReceiptTemplate>(
+    () => ({ ...DEFAULT_RECEIPT_TEMPLATE, ...(profile?.receipt_template ?? {}) }),
+  );
 
   const categoriesQuery = useQuery({
     queryKey: ['categories-all'],
@@ -47,6 +57,8 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
       setPrintsComandas(profile.prints_comandas);
       setPrintsReceipts(profile.prints_receipts);
       setSelectedCats(new Set(profile.categories.map((c) => c.id)));
+      setComandaTemplate({ ...DEFAULT_COMANDA_TEMPLATE, ...(profile.comanda_template ?? {}) });
+      setReceiptTemplate({ ...DEFAULT_RECEIPT_TEMPLATE, ...(profile.receipt_template ?? {}) });
     }
   }, [profile]);
 
@@ -67,6 +79,8 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
         character_set: characterSet,
         prints_comandas: printsComandas,
         prints_receipts: printsReceipts,
+        comanda_template: printsComandas ? comandaTemplate : undefined,
+        receipt_template: printsReceipts ? receiptTemplate : undefined,
       },
       Array.from(selectedCats),
     );
@@ -93,12 +107,58 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
   const categories = categoriesQuery.data ?? [];
   const canSubmit = name.trim().length > 0 && !saving;
 
+  const showTemplateTabs = printsComandas || printsReceipts;
+
   return (
     <div style={editorRoot}>
       <h3 style={editorTitle}>
         {profile ? t('printers.editProfile') : t('printers.newProfile')}
       </h3>
 
+      {/* Tab navigation */}
+      {showTemplateTabs && (
+        <div style={tabRow}>
+          <button
+            type="button"
+            style={editorTab === 'general' ? tabActive : tabBtn}
+            onClick={() => setEditorTab('general')}
+          >
+            {t('printers.tabGeneral')}
+          </button>
+          <button
+            type="button"
+            style={editorTab === 'template' ? tabActive : tabBtn}
+            onClick={() => setEditorTab('template')}
+          >
+            {t('printers.tabTemplate')}
+          </button>
+        </div>
+      )}
+
+      {/* Template editor tab */}
+      {editorTab === 'template' && showTemplateTabs && (
+        <>
+          <TicketTemplateEditor
+            printsComandas={printsComandas}
+            printsReceipts={printsReceipts}
+            comandaTemplate={comandaTemplate}
+            receiptTemplate={receiptTemplate}
+            onComandaChange={setComandaTemplate}
+            onReceiptChange={setReceiptTemplate}
+          />
+          <div style={actionsRow}>
+            <button type="button" style={ps.primaryBtn} onClick={handleSubmit} disabled={!canSubmit}>
+              {saving ? <Spinner size={12} /> : null}
+              {profile ? t('settings.saveChanges') : t('printers.createProfile')}
+            </button>
+            <button type="button" style={ps.ghostBtn} onClick={onCancel}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        </>
+      )}
+
+      {editorTab !== 'template' && <>
       {/* Name */}
       <div style={ps.field}>
         <label style={ps.label}>{t('printers.profileName')}</label>
@@ -185,10 +245,7 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
         </button>
       </div>
       {scanOpen && (
-        <UnifiedScanPanel
-          role="kitchen"
-          onSelect={handleScanSelect}
-        />
+        <UnifiedScanPanel onSelect={handleScanSelect} />
       )}
 
       {/* Paper width + Character set */}
@@ -254,6 +311,7 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
           {t('common.cancel')}
         </button>
       </div>
+      </>}
     </div>
   );
 }
@@ -320,6 +378,38 @@ const ownerLabel: React.CSSProperties = {
   fontSize: 9,
   color: 'var(--text3)',
   marginLeft: 2,
+};
+
+const tabRow: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  marginBottom: 16,
+};
+
+const tabBtn: React.CSSProperties = {
+  padding: '10px 18px',
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--text2)',
+  background: 'var(--bg2)',
+  border: '1px solid var(--border)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 40,
+};
+
+const tabActive: React.CSSProperties = {
+  padding: '10px 18px',
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 600,
+  color: '#2c2420',
+  background: 'var(--gold)',
+  border: '1px solid rgba(44,36,32,0.08)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 40,
 };
 
 const actionsRow: React.CSSProperties = {
