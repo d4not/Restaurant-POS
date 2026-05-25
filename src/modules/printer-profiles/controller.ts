@@ -48,13 +48,15 @@ export async function getStatus(_req: Request, res: Response): Promise<void> {
   const result: Record<string, boolean> = {};
   await Promise.all(
     profiles.map(async (p) => {
-      if (!p.address) {
+      const addr = p.printer?.address || p.address;
+      if (!addr) {
         result[p.id] = false;
         return;
       }
-      const [ip, portStr] = p.address.split(':');
+      const [ip, portStr] = addr.split(':');
       const port = Number(portStr) || 9100;
-      const width = p.paper_width === 32 ? 58 : p.paper_width === 42 ? 76 : 80;
+      const pw = p.printer?.paper_width ?? p.paper_width;
+      const width = pw === 32 ? 58 : pw === 42 ? 76 : 80;
       result[p.id] = await probePrinter({ ip, port, width });
     }),
   );
@@ -63,13 +65,15 @@ export async function getStatus(_req: Request, res: Response): Promise<void> {
 
 export async function testPrint(req: Request, res: Response): Promise<void> {
   const profile = await service.getProfile(id(req));
-  if (!profile.address) {
+  const addr = profile.printer?.address || profile.address;
+  if (!addr) {
     res.json({ success: true, data: { ok: false, error: 'No address configured' } });
     return;
   }
-  const [ip, portStr] = profile.address.split(':');
+  const [ip, portStr] = addr.split(':');
   const port = Number(portStr) || 9100;
-  const width = profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80;
+  const pw = profile.printer?.paper_width ?? profile.paper_width;
+  const width = pw === 32 ? 58 : pw === 42 ? 76 : 80;
   const connected = await probePrinter({ ip, port, width });
   res.json({ success: true, data: { ok: connected, profile_name: profile.name } });
 }

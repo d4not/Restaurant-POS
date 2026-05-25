@@ -231,7 +231,7 @@ export function PrinterRoleCard(props: PrinterRoleCardProps) {
           style={scanOpen ? ps.primaryBtn : ps.ghostBtn}
           onClick={() => setScanOpen((o) => !o)}
         >
-          🔍 {scanOpen ? t('common.close') : t('printers.scanAll')}
+          {scanOpen ? t('common.close') : t('printers.scanAll')}
         </button>
       </div>
       {scanOpen && (
@@ -262,7 +262,7 @@ export function PrinterRoleCard(props: PrinterRoleCardProps) {
           onClick={runTest}
           disabled={testing || !config.enabled || !config.address}
         >
-          {testing ? <Spinner size={12} /> : '🖨'} {t('printers.testPrint')}
+          {testing ? <Spinner size={12} /> : null} {t('printers.testPrint')}
         </button>
       </div>
 

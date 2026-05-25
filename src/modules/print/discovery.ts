@@ -40,7 +40,7 @@ export interface ScanOptions {
 }
 
 const DEFAULT_PORT = 9100;
-const DEFAULT_TIMEOUT_MS = 300;
+const DEFAULT_TIMEOUT_MS = 200;
 const PARALLELISM = 64;
 
 function tcpProbe(ip: string, port: number, timeoutMs: number): Promise<number | null> {
@@ -127,7 +127,7 @@ export async function scanForPrinters(options: ScanOptions = {}): Promise<{
     ips.push(`${subnet}.${host}`);
   }
 
-  const found: DiscoveredPrinter[] = [];
+  const hits: { ip: string; latency_ms: number }[] = [];
   let cursor = 0;
 
   async function worker(): Promise<void> {
@@ -137,18 +137,23 @@ export async function scanForPrinters(options: ScanOptions = {}): Promise<{
       const ip = ips[idx];
       const latency = await tcpProbe(ip, port, timeoutMs);
       if (latency !== null) {
-        // Resolve hostname concurrently with subsequent probes — don't block
-        // the scan loop on a slow DNS server.
-        const hostname = await reverseLookup(ip);
-        found.push({ ip, port, hostname, latency_ms: latency });
+        hits.push({ ip, latency_ms: latency });
       }
     }
   }
 
   await Promise.all(Array.from({ length: PARALLELISM }, () => worker()));
 
-  // Sort by latency for stable UI rendering — the closest printer is almost
-  // always the one the operator wants to assign.
+  // Resolve hostnames in parallel AFTER all TCP probes — avoids blocking
+  // workers on slow DNS servers.
+  const hostnames = await Promise.all(hits.map((h) => reverseLookup(h.ip)));
+  const found: DiscoveredPrinter[] = hits.map((h, i) => ({
+    ip: h.ip,
+    port,
+    hostname: hostnames[i],
+    latency_ms: h.latency_ms,
+  }));
+
   found.sort((a, b) => a.latency_ms - b.latency_ms);
 
   return { subnet, port, scanned: ips.length, printers: found };

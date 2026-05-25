@@ -3,24 +3,27 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from '../../i18n';
 import { fetchAllCategories } from '../../api/categories';
 import { Spinner } from '../Spinner';
-import { UnifiedScanPanel, type UnifiedScanResult } from './UnifiedScanPanel';
 import { TicketTemplateEditor } from './TicketTemplateEditor';
 import { ps, PRINTER_TYPES, CHARACTER_SETS } from './styles';
 import type { PrinterProfile, CreateProfileInput } from '../../api/printer-profiles';
+import type { Printer } from '../../api/printers';
 import type { ComandaTemplate, ReceiptTemplate } from '../../types/printer-templates';
 import { DEFAULT_COMANDA_TEMPLATE, DEFAULT_RECEIPT_TEMPLATE } from '../../types/printer-templates';
 
 interface Props {
   profile: PrinterProfile | null;
   allProfiles: PrinterProfile[];
+  printers: Printer[];
   onSave: (input: CreateProfileInput, categoryIds: string[]) => Promise<boolean>;
   onCancel: () => void;
   saving: boolean;
 }
 
-export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, saving }: Props) {
+export function PrinterProfileEditor({ profile, allProfiles, printers, onSave, onCancel, saving }: Props) {
   const { t } = useTranslation();
   const [name, setName] = useState(profile?.name ?? '');
+  const [printerId, setPrinterId] = useState<string | null>(profile?.printer_id ?? null);
+  const [inlineMode, setInlineMode] = useState(!profile?.printer_id && Boolean(profile?.address));
   const [connectionType, setConnectionType] = useState<'NETWORK' | 'USB'>(profile?.connection_type ?? 'NETWORK');
   const [address, setAddress] = useState(profile?.address ?? '');
   const [paperWidth, setPaperWidth] = useState(profile?.paper_width ?? 48);
@@ -31,7 +34,6 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
   const [selectedCats, setSelectedCats] = useState<Set<string>>(
     new Set(profile?.categories.map((c) => c.id) ?? []),
   );
-  const [scanOpen, setScanOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'general' | 'template'>('general');
   const [comandaTemplate, setComandaTemplate] = useState<ComandaTemplate>(
     () => ({ ...DEFAULT_COMANDA_TEMPLATE, ...(profile?.comanda_template ?? {}) }),
@@ -49,6 +51,8 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
   useEffect(() => {
     if (profile) {
       setName(profile.name);
+      setPrinterId(profile.printer_id);
+      setInlineMode(!profile.printer_id && Boolean(profile.address));
       setConnectionType(profile.connection_type);
       setAddress(profile.address);
       setPaperWidth(profile.paper_width);
@@ -62,28 +66,27 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
     }
   }, [profile]);
 
-  function handleScanSelect(result: UnifiedScanResult) {
-    setAddress(result.address);
-    setConnectionType(result.connection as 'NETWORK' | 'USB');
-    setScanOpen(false);
-  }
-
   function handleSubmit() {
-    onSave(
-      {
-        name: name.trim(),
-        connection_type: connectionType,
-        address,
-        paper_width: paperWidth,
-        printer_model: printerModel,
-        character_set: characterSet,
-        prints_comandas: printsComandas,
-        prints_receipts: printsReceipts,
-        comanda_template: printsComandas ? comandaTemplate : undefined,
-        receipt_template: printsReceipts ? receiptTemplate : undefined,
-      },
-      Array.from(selectedCats),
-    );
+    const input: CreateProfileInput = {
+      name: name.trim(),
+      prints_comandas: printsComandas,
+      prints_receipts: printsReceipts,
+      comanda_template: printsComandas ? comandaTemplate : undefined,
+      receipt_template: printsReceipts ? receiptTemplate : undefined,
+    };
+
+    if (inlineMode) {
+      input.printer_id = null;
+      input.connection_type = connectionType;
+      input.address = address;
+      input.paper_width = paperWidth;
+      input.printer_model = printerModel;
+      input.character_set = characterSet;
+    } else if (printerId) {
+      input.printer_id = printerId;
+    }
+
+    onSave(input, Array.from(selectedCats));
   }
 
   function toggleCategory(catId: string) {
@@ -95,7 +98,6 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
     });
   }
 
-  // Build a map of which profile owns each category (for "currently on: X" labels)
   const catOwnerMap = new Map<string, string>();
   for (const p of allProfiles) {
     if (p.id === profile?.id) continue;
@@ -106,8 +108,8 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
 
   const categories = categoriesQuery.data ?? [];
   const canSubmit = name.trim().length > 0 && !saving;
-
   const showTemplateTabs = printsComandas || printsReceipts;
+  const selectedPrinter = printers.find((p) => p.id === printerId) ?? null;
 
   return (
     <div style={editorRoot}>
@@ -192,89 +194,124 @@ export function PrinterProfileEditor({ profile, allProfiles, onSave, onCancel, s
         </label>
       </div>
 
-      {/* Connection + Model */}
-      <div style={{ ...ps.fieldRow, marginTop: 14 }}>
-        <div style={ps.field}>
-          <label style={ps.label}>{t('settings.connection')}</label>
-          <select
-            style={ps.select}
-            value={connectionType}
-            onChange={(e) => setConnectionType(e.target.value as 'NETWORK' | 'USB')}
-          >
-            <option value="NETWORK">{t('settings.connectionNetwork')}</option>
-            <option value="USB">{t('settings.connectionUsb')}</option>
-          </select>
-        </div>
-        <div style={ps.field}>
-          <label style={ps.label}>{t('settings.printerModel')}</label>
-          <select
-            style={ps.select}
-            value={printerModel}
-            onChange={(e) => setPrinterModel(e.target.value)}
-          >
-            {PRINTER_TYPES.map((p) => (
-              <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      {/* Printer selector */}
+      <div style={{ marginTop: 16 }}>
+        <label style={ps.label}>{t('printers.linkedPrinter')}</label>
 
-      {/* Address */}
-      <div style={ps.field}>
-        <label style={ps.label}>
-          {connectionType === 'NETWORK' ? t('settings.ipLabel') : t('settings.deviceLabel')}
-        </label>
-        <div style={ps.addressRow}>
+        {!inlineMode && (
+          <div style={{ marginTop: 6 }}>
+            <select
+              style={ps.select}
+              value={printerId ?? ''}
+              onChange={(e) => setPrinterId(e.target.value || null)}
+            >
+              <option value="">{t('printers.selectPrinter')}</option>
+              {printers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.address || 'no address'})
+                </option>
+              ))}
+            </select>
+
+            {selectedPrinter && (
+              <div style={printerPreview}>
+                <span style={previewMeta}>{selectedPrinter.connection_type}</span>
+                <span style={previewSep}>&middot;</span>
+                <span style={previewAddr}>{selectedPrinter.address}</span>
+                <span style={previewSep}>&middot;</span>
+                <span style={previewMeta}>{selectedPrinter.printer_model}</span>
+                <span style={previewSep}>&middot;</span>
+                <span style={previewMeta}>
+                  {selectedPrinter.paper_width === 32 ? '58mm' : selectedPrinter.paper_width === 42 ? '76mm' : '80mm'}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <label style={inlineToggle}>
           <input
-            style={{ ...ps.input, flex: 1, minWidth: 0 }}
-            value={address}
-            placeholder={connectionType === 'NETWORK' ? '192.168.1.100:9100' : '/dev/usb/lp0'}
-            onChange={(e) => setAddress(e.target.value)}
+            type="checkbox"
+            checked={inlineMode}
+            onChange={(e) => {
+              setInlineMode(e.target.checked);
+              if (e.target.checked) setPrinterId(null);
+            }}
+            style={checkStyle}
           />
-        </div>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t('printers.inlineConfig')}</span>
+        </label>
       </div>
 
-      {/* Scan */}
-      <div style={{ marginTop: 8 }}>
-        <button
-          type="button"
-          style={scanOpen ? ps.primaryBtn : ps.ghostBtn}
-          onClick={() => setScanOpen((o) => !o)}
-        >
-          🔍 {scanOpen ? t('common.close') : t('printers.scanAll')}
-        </button>
-      </div>
-      {scanOpen && (
-        <UnifiedScanPanel onSelect={handleScanSelect} />
+      {/* Inline hardware fields (legacy mode) */}
+      {inlineMode && (
+        <div style={inlineFields}>
+          <div style={ps.fieldRow}>
+            <div style={ps.field}>
+              <label style={ps.label}>{t('settings.connection')}</label>
+              <select
+                style={ps.select}
+                value={connectionType}
+                onChange={(e) => setConnectionType(e.target.value as 'NETWORK' | 'USB')}
+              >
+                <option value="NETWORK">{t('settings.connectionNetwork')}</option>
+                <option value="USB">{t('settings.connectionUsb')}</option>
+              </select>
+            </div>
+            <div style={ps.field}>
+              <label style={ps.label}>{t('settings.printerModel')}</label>
+              <select
+                style={ps.select}
+                value={printerModel}
+                onChange={(e) => setPrinterModel(e.target.value)}
+              >
+                {PRINTER_TYPES.map((p) => (
+                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={ps.field}>
+            <label style={ps.label}>
+              {connectionType === 'NETWORK' ? t('settings.ipLabel') : t('settings.deviceLabel')}
+            </label>
+            <input
+              style={ps.input}
+              value={address}
+              placeholder={connectionType === 'NETWORK' ? '192.168.1.100:9100' : '/dev/usb/lp0'}
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </div>
+
+          <div style={ps.fieldRow}>
+            <div style={ps.field}>
+              <label style={ps.label}>{t('settings.paperWidthChars')}</label>
+              <select
+                style={ps.select}
+                value={paperWidth}
+                onChange={(e) => setPaperWidth(Number(e.target.value))}
+              >
+                <option value={32}>32 &mdash; 58mm</option>
+                <option value={42}>42 &mdash; 76mm</option>
+                <option value={48}>48 &mdash; 80mm</option>
+              </select>
+            </div>
+            <div style={ps.field}>
+              <label style={ps.label}>{t('settings.charset')}</label>
+              <select
+                style={ps.select}
+                value={characterSet}
+                onChange={(e) => setCharacterSet(e.target.value)}
+              >
+                {CHARACTER_SETS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
       )}
-
-      {/* Paper width + Character set */}
-      <div style={{ ...ps.fieldRow, marginTop: 14 }}>
-        <div style={ps.field}>
-          <label style={ps.label}>{t('settings.paperWidthChars')}</label>
-          <select
-            style={ps.select}
-            value={paperWidth}
-            onChange={(e) => setPaperWidth(Number(e.target.value))}
-          >
-            <option value={32}>32 — 58mm</option>
-            <option value={42}>42 — 76mm</option>
-            <option value={48}>48 — 80mm</option>
-          </select>
-        </div>
-        <div style={ps.field}>
-          <label style={ps.label}>{t('settings.charset')}</label>
-          <select
-            style={ps.select}
-            value={characterSet}
-            onChange={(e) => setCharacterSet(e.target.value)}
-          >
-            {CHARACTER_SETS.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </div>
-      </div>
 
       {/* Category assignment */}
       <div style={{ marginTop: 18 }}>
@@ -341,6 +378,49 @@ const checkStyle: React.CSSProperties = {
   width: 18,
   height: 18,
   cursor: 'pointer',
+};
+
+const printerPreview: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  marginTop: 6,
+  padding: '6px 10px',
+  borderRadius: 6,
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  fontSize: 11,
+};
+
+const previewMeta: React.CSSProperties = {
+  color: 'var(--text2)',
+  textTransform: 'capitalize',
+};
+
+const previewAddr: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  color: 'var(--text1)',
+  fontSize: 11,
+};
+
+const previewSep: React.CSSProperties = {
+  color: 'var(--text3)',
+};
+
+const inlineToggle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  marginTop: 10,
+  cursor: 'pointer',
+};
+
+const inlineFields: React.CSSProperties = {
+  marginTop: 10,
+  padding: '12px 14px',
+  borderRadius: 8,
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
 };
 
 const catGrid: React.CSSProperties = {

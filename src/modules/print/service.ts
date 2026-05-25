@@ -301,12 +301,19 @@ function splitByPrintMode(
   return [{ items, voided }];
 }
 
-function profileToTarget(profile: { address: string; paper_width: number }): PrinterTarget {
-  const [ip, portStr] = profile.address.split(':');
+function resolveHw(profile: { address: string; paper_width: number; printer?: { address: string; paper_width: number } | null }) {
+  const addr = profile.printer?.address || profile.address;
+  const pw = profile.printer?.paper_width ?? profile.paper_width;
+  return { address: addr, paper_width: pw };
+}
+
+function profileToTarget(profile: { address: string; paper_width: number; printer?: { address: string; paper_width: number } | null }): PrinterTarget {
+  const hw = resolveHw(profile);
+  const [ip, portStr] = hw.address.split(':');
   return {
     ip: ip || '',
     port: Number(portStr) || 9100,
-    width: profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80,
+    width: hw.paper_width === 32 ? 58 : hw.paper_width === 42 ? 76 : 80,
   };
 }
 
@@ -366,11 +373,12 @@ async function printKitchenMultiProfile(
 
   for (const [profileId, items] of grouped) {
     const profile = profileMap.get(profileId)!;
-    if (!profile.address) continue;
+    const hw = resolveHw(profile);
+    if (!hw.address) continue;
 
     const tpl = (profile.comanda_template ?? null) as ComandaTemplate | null;
     const printMode = tpl?.print_mode ?? DEFAULT_COMANDA_TEMPLATE.print_mode;
-    const width = paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80);
+    const width = paperWidthChars(hw.paper_width === 32 ? 58 : hw.paper_width === 42 ? 76 : 80);
     const target = profileToTarget(profile);
     const voidedItems = voidedGrouped.get(profileId) ?? [];
 
@@ -401,14 +409,15 @@ async function printKitchenMultiProfile(
   for (const [profileId, voidedItems] of voidedGrouped) {
     if (grouped.has(profileId)) continue;
     const profile = profileMap.get(profileId)!;
-    if (!profile.address) continue;
+    const voidHw = resolveHw(profile);
+    if (!voidHw.address) continue;
 
     const tpl = (profile.comanda_template ?? null) as ComandaTemplate | null;
     const profileInput: ComandaInput = {
       ...input,
       items: [],
       voided_items: voidedItems,
-      width: paperWidthChars(profile.paper_width === 32 ? 58 : profile.paper_width === 42 ? 76 : 80),
+      width: paperWidthChars(voidHw.paper_width === 32 ? 58 : voidHw.paper_width === 42 ? 76 : 80),
       template: tpl,
     };
     const lines = formatKitchenComanda(profileInput);
@@ -447,7 +456,8 @@ export async function printReceipt(orderId: string): Promise<PrintReceiptRespons
     const results: ProfilePrintResult[] = [];
     let firstLines: string[] = [];
     for (const profile of profiles) {
-      if (!profile.address) continue;
+      const rcptHw = resolveHw(profile);
+      if (!rcptHw.address) continue;
       const tpl = (profile.receipt_template ?? null) as import('./template-types.js').ReceiptTemplate | null;
       const lines = formatReceipt({ ...input, template: tpl });
       if (firstLines.length === 0) firstLines = lines;

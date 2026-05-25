@@ -37,6 +37,7 @@ const receiptTemplateSchema = z.object({
 
 export const createProfileSchema = z.object({
   name: z.string().min(1).max(100),
+  printer_id: z.string().uuid().nullable().optional(),
   connection_type: z.enum(['NETWORK', 'USB']).default('NETWORK'),
   address: z.string().max(200).default(''),
   paper_width: z.number().int().refine((v) => [32, 42, 48].includes(v)).default(48),

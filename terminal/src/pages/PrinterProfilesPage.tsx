@@ -13,11 +13,14 @@ import {
   useDeleteProfile,
   useAssignCategories,
 } from '../hooks/usePrinterProfiles';
+import { usePrinters, usePrintersStatus } from '../hooks/usePrinters';
 import { PrinterProfileCard } from '../components/printer/PrinterProfileCard';
 import { PrinterProfileEditor } from '../components/printer/PrinterProfileEditor';
+import { PrinterListTab } from '../components/printer/PrinterListTab';
 import type { PrinterProfile, CreateProfileInput } from '../api/printer-profiles';
 
-type View = 'list' | 'create' | 'edit';
+type PageTab = 'printers' | 'profiles';
+type ProfileView = 'list' | 'create' | 'edit';
 const MANAGER_ROLES = new Set(['MANAGER', 'ADMIN']);
 
 export function PrinterProfilesPage() {
@@ -26,8 +29,14 @@ export function PrinterProfilesPage() {
   const setView = useUi((s) => s.setView);
   const canEdit = MANAGER_ROLES.has(role);
 
+  const [tab, setTab] = useState<PageTab>('printers');
+  const [profileView, setProfileView] = useState<ProfileView>('list');
+  const [editingProfile, setEditingProfile] = useState<PrinterProfile | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const profilesQuery = usePrinterProfiles();
-  const statusQuery = useQuery({
+  const profileStatusQuery = useQuery({
     queryKey: ['printer-profiles-status'],
     queryFn: fetchProfilesStatus,
     refetchInterval: 30_000,
@@ -37,19 +46,17 @@ export function PrinterProfilesPage() {
     queryFn: fetchAllCategories,
     staleTime: 120_000,
   });
+  const printersQuery = usePrinters();
+  const printersStatusQuery = usePrintersStatus();
 
   const createMut = useCreateProfile();
   const updateMut = useUpdateProfile();
   const deleteMut = useDeleteProfile();
   const assignMut = useAssignCategories();
 
-  const [pageView, setPageView] = useState<View>('list');
-  const [editingProfile, setEditingProfile] = useState<PrinterProfile | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
   const profiles = profilesQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
+  const printers = printersQuery.data ?? [];
   const assignedCatIds = new Set(profiles.flatMap((p) => p.categories.map((c) => c.id)));
   const unassigned = categories.filter((c) => !assignedCatIds.has(c.id));
 
@@ -65,7 +72,7 @@ export function PrinterProfilesPage() {
           await assignMut.mutateAsync({ profileId: created.id, categoryIds });
         }
       }
-      setPageView('list');
+      setProfileView('list');
       setEditingProfile(null);
       return true;
     } catch (err: unknown) {
@@ -80,121 +87,175 @@ export function PrinterProfilesPage() {
     setConfirmDelete(null);
   }
 
+  const showAddProfileBtn = canEdit && tab === 'profiles' && profileView === 'list';
+
   return (
     <div style={shell}>
       {/* Header */}
       <header style={header}>
         <button type="button" style={backBtn} onClick={() => setView('orders')}>
-          ← {t('common.back')}
+          <span style={{ fontSize: 16 }}>&larr;</span> {t('common.back')}
         </button>
         <div style={titleBlock}>
           <h1 style={titleStyle}>{t('printers.pageTitle')}</h1>
           <span style={subtitle}>{t('printers.pageSubtitle')}</span>
         </div>
         <div style={{ flex: 1 }} />
-        {canEdit && pageView === 'list' && (
+        {showAddProfileBtn && (
           <button
             type="button"
             style={addBtn}
-            onClick={() => { setEditingProfile(null); setPageView('create'); }}
+            onClick={() => { setEditingProfile(null); setProfileView('create'); }}
           >
             + {t('printers.newProfile')}
           </button>
         )}
       </header>
 
+      {/* Tab pills */}
+      <div style={tabBar}>
+        <div style={tabWrap}>
+          <button
+            type="button"
+            style={tab === 'printers' ? tabPillActive : tabPill}
+            onClick={() => { setTab('printers'); setProfileView('list'); setEditingProfile(null); }}
+          >
+            {t('printers.tabPrinters')}
+            {printers.length > 0 && (
+              <span style={tabCount(tab === 'printers')}>{printers.length}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            style={tab === 'profiles' ? tabPillActive : tabPill}
+            onClick={() => setTab('profiles')}
+          >
+            {t('printers.tabProfiles')}
+            {profiles.length > 0 && (
+              <span style={tabCount(tab === 'profiles')}>{profiles.length}</span>
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* Content */}
       <div style={content}>
-        {profilesQuery.isLoading && (
-          <div style={loadingStyle}>
-            <Spinner size={20} /> {t('settings.loadingPrinterConfig')}
-          </div>
-        )}
+        <div style={contentInner}>
 
-        {/* Editor view */}
-        {(pageView === 'create' || pageView === 'edit') && (
-          <div style={editorWrap}>
-            {saveError && (
-              <div style={errorBanner}>
-                {saveError}
-                <button type="button" style={errorDismiss} onClick={() => setSaveError(null)}>×</button>
-              </div>
-            )}
-            <PrinterProfileEditor
-              profile={editingProfile}
-              allProfiles={profiles}
-              onSave={handleSave}
-              onCancel={() => { setPageView('list'); setEditingProfile(null); setSaveError(null); }}
-              saving={createMut.isPending || updateMut.isPending || assignMut.isPending}
+          {/* ── Printers Tab ── */}
+          {tab === 'printers' && (
+            <PrinterListTab
+              printers={printers}
+              printersStatus={printersStatusQuery.data ?? {}}
+              profiles={profiles}
+              canEdit={canEdit}
+              loading={printersQuery.isLoading}
             />
-          </div>
-        )}
+          )}
 
-        {/* List view */}
-        {pageView === 'list' && !profilesQuery.isLoading && (
-          <>
-            {profiles.length === 0 && (
-              <div style={emptyState}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>🖨</div>
-                <div style={{ fontSize: 15, fontWeight: 500 }}>{t('printers.emptyState')}</div>
-                {canEdit && (
-                  <button
-                    type="button"
-                    style={{ ...addBtn, marginTop: 16 }}
-                    onClick={() => { setEditingProfile(null); setPageView('create'); }}
-                  >
-                    + {t('printers.newProfile')}
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div style={grid}>
-              {profiles.map((profile) => (
-                <div key={profile.id}>
-                  <PrinterProfileCard
-                    profile={profile}
-                    connected={profile.address ? (statusQuery.data?.[profile.id] ?? null) : null}
-                    canEdit={canEdit}
-                    onEdit={() => { setEditingProfile(profile); setPageView('edit'); }}
-                    onDelete={() => setConfirmDelete(profile.id)}
-                  />
-                  {confirmDelete === profile.id && (
-                    <ConfirmDeleteBar
-                      name={profile.name}
-                      onConfirm={() => handleDelete(profile.id)}
-                      onCancel={() => setConfirmDelete(null)}
-                      deleting={deleteMut.isPending}
-                    />
-                  )}
+          {/* ── Profiles Tab ── */}
+          {tab === 'profiles' && (
+            <>
+              {profilesQuery.isLoading && (
+                <div style={loadingStyle}>
+                  <Spinner size={20} /> {t('settings.loadingPrinterConfig')}
                 </div>
-              ))}
-            </div>
+              )}
 
-            {/* Unassigned warning */}
-            {unassigned.length > 0 && profiles.length > 0 && (
-              <div style={unassignedBanner}>
-                <span style={{ fontWeight: 600 }}>{t('printers.unassignedTitle')}</span>{' '}
-                {unassigned.map((c) => c.name).join(', ')}
-              </div>
-            )}
-          </>
-        )}
+              {/* Editor */}
+              {(profileView === 'create' || profileView === 'edit') && (
+                <div style={editorWrap}>
+                  {saveError && (
+                    <div style={errorBanner}>
+                      {saveError}
+                      <button type="button" style={errorDismiss} onClick={() => setSaveError(null)}>
+                        &times;
+                      </button>
+                    </div>
+                  )}
+                  <PrinterProfileEditor
+                    profile={editingProfile}
+                    allProfiles={profiles}
+                    printers={printers}
+                    onSave={handleSave}
+                    onCancel={() => { setProfileView('list'); setEditingProfile(null); setSaveError(null); }}
+                    saving={createMut.isPending || updateMut.isPending || assignMut.isPending}
+                  />
+                </div>
+              )}
+
+              {/* List */}
+              {profileView === 'list' && !profilesQuery.isLoading && (
+                <>
+                  {profiles.length === 0 && (
+                    <div style={emptyState}>
+                      <div style={emptyIcon}>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                          <rect x="6" y="14" width="12" height="8" />
+                        </svg>
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--text2)' }}>
+                        {t('printers.emptyState')}
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          style={{ ...addBtnInline, marginTop: 16 }}
+                          onClick={() => { setEditingProfile(null); setProfileView('create'); }}
+                        >
+                          + {t('printers.newProfile')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={grid}>
+                    {profiles.map((profile) => (
+                      <div key={profile.id}>
+                        <PrinterProfileCard
+                          profile={profile}
+                          connected={
+                            (profile.printer?.address || profile.address)
+                              ? (profileStatusQuery.data?.[profile.id] ?? null)
+                              : null
+                          }
+                          canEdit={canEdit}
+                          onEdit={() => { setEditingProfile(profile); setProfileView('edit'); }}
+                          onDelete={() => setConfirmDelete(profile.id)}
+                        />
+                        {confirmDelete === profile.id && (
+                          <ConfirmDeleteBar
+                            name={profile.name}
+                            onConfirm={() => handleDelete(profile.id)}
+                            onCancel={() => setConfirmDelete(null)}
+                            deleting={deleteMut.isPending}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {unassigned.length > 0 && profiles.length > 0 && (
+                    <div style={unassignedBanner}>
+                      <span style={{ fontWeight: 600 }}>{t('printers.unassignedTitle')}</span>{' '}
+                      {unassigned.map((c) => c.name).join(', ')}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 function ConfirmDeleteBar({
-  name,
-  onConfirm,
-  onCancel,
-  deleting,
+  name, onConfirm, onCancel, deleting,
 }: {
-  name: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  deleting: boolean;
+  name: string; onConfirm: () => void; onCancel: () => void; deleting: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -283,6 +344,71 @@ const addBtn: React.CSSProperties = {
   gap: 8,
 };
 
+const addBtnInline: React.CSSProperties = {
+  padding: '10px 18px',
+  borderRadius: 8,
+  background: 'var(--gold)',
+  color: '#2c2420',
+  fontSize: 13,
+  fontWeight: 600,
+  border: '1px solid rgba(44,36,32,0.08)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 40,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const tabBar: React.CSSProperties = {
+  padding: '12px 24px',
+  borderBottom: '1px solid var(--border)',
+  flexShrink: 0,
+  display: 'flex',
+  justifyContent: 'center',
+};
+
+const tabWrap: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  background: 'rgba(44,36,32,0.04)',
+  padding: 3,
+  borderRadius: 10,
+};
+
+const tabPill: React.CSSProperties = {
+  padding: '10px 22px',
+  borderRadius: 8,
+  fontSize: 14,
+  fontWeight: 600,
+  color: 'var(--text2)',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  minHeight: 44,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  transition: 'all 0.15s',
+};
+
+const tabPillActive: React.CSSProperties = {
+  ...tabPill,
+  color: '#2c2420',
+  background: 'var(--bg2)',
+  boxShadow: '0 1px 3px rgba(44,36,32,0.08)',
+};
+
+const tabCount = (active: boolean): React.CSSProperties => ({
+  fontSize: 11,
+  fontWeight: 700,
+  padding: '1px 7px',
+  borderRadius: 999,
+  background: active ? 'rgba(44,36,32,0.08)' : 'rgba(44,36,32,0.04)',
+  color: active ? 'var(--text1)' : 'var(--text3)',
+});
+
 const content: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
@@ -290,14 +416,20 @@ const content: React.CSSProperties = {
   padding: '24px 28px',
 };
 
+const contentInner: React.CSSProperties = {
+  maxWidth: 1100,
+  margin: '0 auto',
+};
+
 const grid: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-  gap: 16,
+  gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+  gap: 14,
 };
 
 const editorWrap: React.CSSProperties = {
   maxWidth: 640,
+  margin: '0 auto',
 };
 
 const loadingStyle: React.CSSProperties = {
@@ -311,8 +443,13 @@ const loadingStyle: React.CSSProperties = {
 
 const emptyState: React.CSSProperties = {
   textAlign: 'center',
-  padding: '80px 24px',
+  padding: '60px 24px',
   color: 'var(--text3)',
+};
+
+const emptyIcon: React.CSSProperties = {
+  marginBottom: 16,
+  opacity: 0.5,
 };
 
 const unassignedBanner: React.CSSProperties = {
@@ -331,8 +468,8 @@ const confirmBar: React.CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '10px 14px',
-  marginTop: -12,
-  marginBottom: 16,
+  marginTop: -4,
+  marginBottom: 14,
   borderRadius: 8,
   background: 'rgba(196,80,64,0.08)',
   border: '1px solid rgba(196,80,64,0.3)',

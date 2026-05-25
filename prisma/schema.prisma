@@ -728,9 +728,27 @@ model DeductionRule {
   @@map("deduction_rules")
 }
 
+model Printer {
+  id              String                @id @default(uuid()) @db.Uuid
+  name            String
+  connection_type PrinterConnectionType @default(NETWORK)
+  address         String                @default("")
+  paper_width     Int                   @default(48)
+  printer_model   String                @default("epson")
+  character_set   String                @default("PC850_MULTILINGUAL")
+  active          Boolean               @default(true)
+  created_at      DateTime              @default(now())
+  updated_at      DateTime              @updatedAt
+
+  profiles PrinterProfile[]
+
+  @@map("printers")
+}
+
 model PrinterProfile {
   id              String                @id @default(uuid()) @db.Uuid
   name            String
+  printer_id      String?               @db.Uuid
   connection_type PrinterConnectionType @default(NETWORK)
   address         String                @default("")
   paper_width     Int                   @default(48)
@@ -745,8 +763,10 @@ model PrinterProfile {
   created_at        DateTime              @default(now())
   updated_at        DateTime              @updatedAt
 
+  printer    Printer?           @relation(fields: [printer_id], references: [id], onDelete: SetNull)
   categories ProductCategory[] @relation("PrinterProfileCategories")
 
+  @@index([printer_id])
   @@map("printer_profiles")
 }
 

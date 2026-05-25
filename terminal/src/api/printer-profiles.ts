@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { ComandaTemplate, ReceiptTemplate } from '../types/printer-templates';
+import type { Printer } from './printers';
 
 export interface PrinterProfileCategory {
   id: string;
@@ -11,6 +12,8 @@ export interface PrinterProfileCategory {
 export interface PrinterProfile {
   id: string;
   name: string;
+  printer_id: string | null;
+  printer: Printer | null;
   connection_type: 'NETWORK' | 'USB';
   address: string;
   paper_width: number;
@@ -29,6 +32,7 @@ export interface PrinterProfile {
 
 export interface CreateProfileInput {
   name: string;
+  printer_id?: string | null;
   connection_type?: 'NETWORK' | 'USB';
   address?: string;
   paper_width?: number;

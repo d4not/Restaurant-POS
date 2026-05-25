@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from '../../i18n';
 import { useTestProfile } from '../../hooks/usePrinterProfiles';
 import { Spinner } from '../Spinner';
@@ -18,12 +18,21 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
   const testMut = useTestProfile();
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
+  useEffect(() => {
+    if (testResult) {
+      const timer = setTimeout(() => setTestResult(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [testResult]);
+
   const roles: string[] = [];
   if (profile.prints_comandas) roles.push(t('printers.comandas'));
   if (profile.prints_receipts) roles.push(t('printers.receipts'));
 
-  const connLabel = profile.connection_type === 'USB' ? 'USB' : 'Network';
-  const widthLabel = profile.paper_width === 32 ? '58mm' : profile.paper_width === 42 ? '76mm' : '80mm';
+  const printerName = profile.printer?.name;
+  const addr = profile.printer?.address || profile.address;
+  const widthVal = profile.printer?.paper_width ?? profile.paper_width;
+  const widthLabel = widthVal === 32 ? '58mm' : widthVal === 42 ? '76mm' : '80mm';
 
   async function handleTest() {
     setTestResult(null);
@@ -35,17 +44,24 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
     <div style={cardStyle}>
       {/* Header */}
       <div style={cardHead}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={statusDotStyle(profile.address ? connected : null)} />
-          <h3 style={cardName}>{profile.name}</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+          <span style={statusDotStyle(addr ? connected : null)} />
+          <div style={{ minWidth: 0 }}>
+            <h3 style={cardName}>{profile.name}</h3>
+            {printerName && (
+              <div style={printerLink}>
+                <span style={linkArrow}>&rarr;</span> {printerName}
+              </div>
+            )}
+          </div>
         </div>
         {canEdit && (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
             <button type="button" style={ps.ghostBtn} onClick={onEdit}>
               {t('common.edit')}
             </button>
             <button type="button" style={deleteBtn} onClick={onDelete}>
-              ×
+              &times;
             </button>
           </div>
         )}
@@ -54,12 +70,10 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
       {/* Roles + hardware */}
       <div style={metaRow}>
         <span style={roleChip}>{roles.join(' · ') || '—'}</span>
-        {profile.address && (
-          <span style={addrLabel}>
-            {connLabel} · {profile.address} · {widthLabel}
-          </span>
+        {addr && (
+          <span style={addrLabel}>{addr} &middot; {widthLabel}</span>
         )}
-        {!profile.address && <span style={addrLabel}>{t('printers.noAddress')}</span>}
+        {!addr && <span style={addrLabel}>{t('printers.noAddress')}</span>}
       </div>
 
       {/* Template indicator */}
@@ -91,12 +105,12 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
           type="button"
           style={ps.goldBtn}
           onClick={handleTest}
-          disabled={testMut.isPending || !profile.address}
+          disabled={testMut.isPending || !addr}
         >
-          {testMut.isPending ? <Spinner size={11} /> : '🖨'} {t('printers.testPrint')}
+          {testMut.isPending ? <Spinner size={11} /> : null} {t('printers.testPrint')}
         </button>
         {testResult && (
-          <span style={{ fontSize: 11, color: testResult.ok ? 'var(--green)' : 'var(--red)' }}>
+          <span style={{ fontSize: 11, color: testResult.ok ? 'var(--green)' : 'var(--red)', transition: 'opacity 0.2s' }}>
             {testResult.ok ? t('printers.testSent') : testResult.error || t('printers.testFailed')}
           </span>
         )}
@@ -108,18 +122,19 @@ export function PrinterProfileCard({ profile, connected, canEdit, onEdit, onDele
 // ─── Styles ──────────────────────────────────────────────────────────────
 
 const cardStyle: React.CSSProperties = {
-  background: 'var(--bg)',
+  background: 'var(--bg2)',
   border: '1px solid var(--border)',
-  borderRadius: 12,
+  borderRadius: 10,
   padding: '16px 18px',
-  marginBottom: 12,
+  transition: 'transform 0.12s, box-shadow 0.12s',
 };
 
 const cardHead: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'flex-start',
   justifyContent: 'space-between',
   marginBottom: 8,
+  gap: 10,
 };
 
 const cardName: React.CSSProperties = {
@@ -128,6 +143,20 @@ const cardName: React.CSSProperties = {
   fontWeight: 600,
   color: 'var(--text1)',
   margin: 0,
+};
+
+const printerLink: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text2)',
+  marginTop: 2,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+};
+
+const linkArrow: React.CSSProperties = {
+  fontSize: 10,
+  color: 'var(--text3)',
 };
 
 const metaRow: React.CSSProperties = {

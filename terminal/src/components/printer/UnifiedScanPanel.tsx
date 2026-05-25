@@ -254,14 +254,9 @@ function ScanRow({
 
   return (
     <div style={ps.row}>
-      {item.kind !== 'network' && (
-        <div style={scanRowIconStyle(item.kind as DetectedPrinterKind, item.isUsb)}>
-          {item.kind === 'device' ? '⎘' : item.isUsb ? '⎌' : '⎘'}
-        </div>
-      )}
-      {item.kind === 'network' && (
-        <div style={scanRowIconStyle('system', false)}>📡</div>
-      )}
+      <div style={scanRowIconStyle(item.kind === 'network' ? 'system' : item.kind as DetectedPrinterKind, item.isUsb)}>
+        {item.kind === 'network' ? '◉' : item.kind === 'device' ? '▣' : '▤'}
+      </div>
       <div style={ps.rowMain}>
         <div style={ps.rowLabel}>
           {item.label}

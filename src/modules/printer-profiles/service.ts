@@ -12,17 +12,18 @@ function toJsonData(input: CreateProfileInput | UpdateProfileInput): Prisma.Prin
   };
 }
 
-const INCLUDE_CATEGORIES = {
+const INCLUDE_RELATIONS = {
   categories: {
     select: { id: true, name: true, color: true, display_order: true },
     orderBy: { display_order: 'asc' as const },
   },
+  printer: true,
 };
 
 export async function listProfiles() {
   return prisma.printerProfile.findMany({
     where: { active: true },
-    include: INCLUDE_CATEGORIES,
+    include: INCLUDE_RELATIONS,
     orderBy: { display_order: 'asc' },
   });
 }
@@ -30,7 +31,7 @@ export async function listProfiles() {
 export async function getProfile(id: string) {
   const profile = await prisma.printerProfile.findUnique({
     where: { id },
-    include: INCLUDE_CATEGORIES,
+    include: INCLUDE_RELATIONS,
   });
   if (!profile || !profile.active) throw new NotFoundError('Printer profile not found');
   return profile;
@@ -45,7 +46,7 @@ export async function createProfile(input: CreateProfileInput) {
 
   return prisma.printerProfile.create({
     data: toJsonData(input) as Prisma.PrinterProfileCreateInput,
-    include: INCLUDE_CATEGORIES,
+    include: INCLUDE_RELATIONS,
   });
 }
 
@@ -67,7 +68,7 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
   return prisma.printerProfile.update({
     where: { id },
     data: toJsonData(input) as Prisma.PrinterProfileUpdateInput,
-    include: INCLUDE_CATEGORIES,
+    include: INCLUDE_RELATIONS,
   });
 }
 
@@ -135,6 +136,6 @@ export async function getProfilesForPrinting(mode: 'comandas' | 'receipts') {
       active: true,
       ...(mode === 'comandas' ? { prints_comandas: true } : { prints_receipts: true }),
     },
-    include: INCLUDE_CATEGORIES,
+    include: INCLUDE_RELATIONS,
   });
 }
