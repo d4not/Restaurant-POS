@@ -43,6 +43,24 @@ export async function routingMap(_req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: map });
 }
 
+export async function getStatus(_req: Request, res: Response): Promise<void> {
+  const profiles = await service.listProfiles();
+  const result: Record<string, boolean> = {};
+  await Promise.all(
+    profiles.map(async (p) => {
+      if (!p.address) {
+        result[p.id] = false;
+        return;
+      }
+      const [ip, portStr] = p.address.split(':');
+      const port = Number(portStr) || 9100;
+      const width = p.paper_width === 32 ? 58 : p.paper_width === 42 ? 76 : 80;
+      result[p.id] = await probePrinter({ ip, port, width });
+    }),
+  );
+  res.json({ success: true, data: result });
+}
+
 export async function testPrint(req: Request, res: Response): Promise<void> {
   const profile = await service.getProfile(id(req));
   if (!profile.address) {

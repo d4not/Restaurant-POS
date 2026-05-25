@@ -74,3 +74,7 @@ export async function testProfile(id: string): Promise<{ ok: boolean; error?: st
 export async function fetchRoutingMap(): Promise<Record<string, string>> {
   return api.get<Record<string, string>>('/printer-profiles/routing-map');
 }
+
+export async function fetchProfilesStatus(): Promise<Record<string, boolean>> {
+  return api.get<Record<string, boolean>>('/printer-profiles/status');
+}

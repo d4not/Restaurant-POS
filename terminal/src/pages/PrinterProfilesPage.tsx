@@ -5,7 +5,7 @@ import { useTranslation } from '../i18n';
 import { useSession } from '../store/session';
 import { useUi } from '../store/ui';
 import { fetchAllCategories } from '../api/categories';
-import { getPrinterStatus } from '../api/print';
+import { fetchProfilesStatus } from '../api/printer-profiles';
 import {
   usePrinterProfiles,
   useCreateProfile,
@@ -28,8 +28,8 @@ export function PrinterProfilesPage() {
 
   const profilesQuery = usePrinterProfiles();
   const statusQuery = useQuery({
-    queryKey: ['printer-status', 'remote'],
-    queryFn: getPrinterStatus,
+    queryKey: ['printer-profiles-status'],
+    queryFn: fetchProfilesStatus,
     refetchInterval: 30_000,
   });
   const categoriesQuery = useQuery({
@@ -154,7 +154,7 @@ export function PrinterProfilesPage() {
                 <div key={profile.id}>
                   <PrinterProfileCard
                     profile={profile}
-                    connected={getProfileConnected(profile, statusQuery.data)}
+                    connected={profile.address ? (statusQuery.data?.[profile.id] ?? null) : null}
                     canEdit={canEdit}
                     onEdit={() => { setEditingProfile(profile); setPageView('edit'); }}
                     onDelete={() => setConfirmDelete(profile.id)}
@@ -183,17 +183,6 @@ export function PrinterProfilesPage() {
       </div>
     </div>
   );
-}
-
-function getProfileConnected(
-  profile: PrinterProfile,
-  status: { kitchen: { ip: string; connected: boolean }; receipt: { ip: string; connected: boolean } } | undefined,
-): boolean | null {
-  if (!status || !profile.address) return null;
-  const [ip] = profile.address.split(':');
-  if (status.kitchen.ip === ip) return status.kitchen.connected;
-  if (status.receipt.ip === ip) return status.receipt.connected;
-  return null;
 }
 
 function ConfirmDeleteBar({
@@ -234,23 +223,24 @@ const shell: React.CSSProperties = {
 const header: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 18,
-  padding: '16px 28px',
-  borderBottom: '1px solid var(--border)',
-  background: 'var(--bg)',
+  gap: 14,
+  padding: '10px 16px',
+  borderBottom: '1px solid rgba(0,0,0,0.2)',
+  background: 'var(--sidebar)',
+  color: '#e8ddd0',
   flexShrink: 0,
-  minHeight: 72,
+  minHeight: 56,
 };
 
 const backBtn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '10px 14px 10px 10px',
-  borderRadius: 8,
-  border: '1px solid var(--border)',
-  background: 'var(--bg)',
-  color: 'var(--text1)',
+  gap: 5,
+  padding: '7px 12px 7px 9px',
+  borderRadius: 7,
+  border: '1px solid rgba(232,221,208,0.18)',
+  background: 'rgba(232,221,208,0.08)',
+  color: '#e8ddd0',
   fontSize: 13,
   fontWeight: 500,
   cursor: 'pointer',
@@ -268,12 +258,12 @@ const titleStyle: React.CSSProperties = {
   fontSize: 22,
   fontWeight: 600,
   margin: 0,
-  color: 'var(--text1)',
+  color: '#fff',
 };
 
 const subtitle: React.CSSProperties = {
   fontSize: 12,
-  color: 'var(--text2)',
+  color: 'rgba(232,221,208,0.55)',
   marginTop: 2,
 };
 

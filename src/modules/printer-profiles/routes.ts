@@ -17,6 +17,8 @@ printerProfileRouter.get('/', asyncHandler(controller.list));
 
 printerProfileRouter.get('/routing-map', asyncHandler(controller.routingMap));
 
+printerProfileRouter.get('/status', asyncHandler(controller.getStatus));
+
 printerProfileRouter.get('/:id', asyncHandler(controller.getById));
 
 printerProfileRouter.post(
